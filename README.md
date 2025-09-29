@@ -60,6 +60,30 @@ Async-first, TOML-backed configuration hub with an ergonomic derive macro for ma
 
 3. Run your application as usual; the derive macro keeps the TOML store and module state in sync.
 
+## Derive attributes
+
+The `#[derive(ConferModule)]` macro understands a small set of field/struct attributes that control how data is mapped to TOML.
+
+- `#[confer(section = "Name")]` on the struct sets the TOML section name. If omitted, it defaults to the struct name with an optional `Confer` prefix stripped (e.g., `ConferApp` → `App`).
+
+- `#[confer(rename = "key")]` on a field overrides the TOML key name.
+
+- `#[confer(default = <expr>)]` provides a default when the key is missing.
+    - Supported scalar defaults: strings (in quotes), integers, floats, booleans, and RFC 3339 datetimes as strings.
+    - Vector defaults use array syntax: `#[confer(default = [1, 2, 3])]` or `#[confer(default = ["a", "b"]) ]`.
+    - Works with `Option<T>` and `Option<Vec<T>>` as well; when no default is given, missing keys become `None`.
+
+- `#[confer(init = "<expr>")]` initializes a field before the first load (useful for preallocations or derived values). The expression is evaluated as-is; you can also pass it as a string literal if that’s clearer.
+
+- `#[confer(ignore)]` excludes a field from both load and save.
+
+### Supported field types
+
+- Scalars: `String`, `bool`, signed/unsigned integers (`i8..i64`, `isize`, `u8..u64`, `usize`), floats (`f32`, `f64`), and `toml::value::Datetime`.
+- Containers: plain `T`, `Vec<T>`, `Option<T>`, `Option<Vec<T>>`.
+
+If a type falls outside this set, the derive emits a compile error with a friendly message.
+
 ## Examples
 
 The crate includes runnable examples:

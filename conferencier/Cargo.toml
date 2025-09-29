@@ -6,7 +6,7 @@ description = "Tokio-backed asynchronous shared configuration hub with TOML pers
 authors = ["Komix42 <komix@ignore.cz>"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Komix42/conferencier"
-readme = "../README.md"
+readme = "README.md"
 
 [features]
 default = ["with-derive"]
