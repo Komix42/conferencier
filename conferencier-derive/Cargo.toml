@@ -5,7 +5,8 @@ edition = "2024"
 description = "Procedural macro derive for ConferModule"
 authors = ["Komix42 <komix@ignore.cz>"]
 license = "MIT OR Apache-2.0"
-repository = "https://example.com/placeholder"
+repository = "https://github.com/Komix42/conferencier"
+readme = "../README.md"
 
 [lib]
 proc-macro = true
