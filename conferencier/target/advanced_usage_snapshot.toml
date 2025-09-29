@@ -1,0 +1,9 @@
+[Features]
+realtime_metrics = true
+rollout = 2025-01-01T00:00:00Z
+
+[Server]
+addr = "0.0.0.0"
+allow_ips = ["10.0.0.0/24", "192.168.1.0/24"]
+port = 8443
+roles = ["api", "admin"]

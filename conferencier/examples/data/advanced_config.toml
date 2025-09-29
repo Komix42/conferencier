@@ -1,0 +1,10 @@
+[Server]
+addr = "0.0.0.0"
+port = 8443
+roles = ["api"]
+allow_ips = ["10.0.0.0/24"]
+
+[Features]
+realtime_metrics = true
+beta = ["new-dashboard"]
+rollout = 2025-01-01T00:00:00Z
