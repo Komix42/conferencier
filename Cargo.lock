@@ -73,7 +73,6 @@ dependencies = [
 name = "conferencier-derive"
 version = "0.0.1"
 dependencies = [
- "conferencier",
  "proc-macro-crate",
  "proc-macro2",
  "quote",

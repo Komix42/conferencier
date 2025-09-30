@@ -1,7 +1,7 @@
 # RFC-0001: conferencier and conferencier-derive — initial state
 
 Date: 2025-09-20
-Status: WIP
+Status: Implemented
 Author: Komix42 <komix[at]ignore.cz>
 
 ## Document Scope

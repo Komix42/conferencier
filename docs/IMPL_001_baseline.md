@@ -1,6 +1,8 @@
 # IMPL-001: Baseline Implementation Report
 
-_Last updated: 2025-09-29_
+Date: 2025-09-21
+Status: Closed
+Author: Komix42 <komix[at]ignore.cz>
 
 ## 1. Executive Summary
 

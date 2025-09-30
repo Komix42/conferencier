@@ -1,7 +1,7 @@
 # RFC-0002: Baseline Examples for conferencier
 
 Date: 2025-09-29  
-Status: Accepted  
+Status: Implemented
 Author: Komix42 <komix@ignore.cz>
 
 ## Document Scope
