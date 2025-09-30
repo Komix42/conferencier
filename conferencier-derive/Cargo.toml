@@ -1,6 +1,6 @@
 [package]
 name = "conferencier-derive"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2024"
 description = "Procedural macro derive for ConferModule"
 authors = ["Komix42 <komix@ignore.cz>"]

@@ -1,6 +1,6 @@
 [package]
 name = "conferencier"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2024"
 description = "Tokio-backed asynchronous shared configuration hub with TOML persistence"
 authors = ["Komix42 <komix@ignore.cz>"]
@@ -20,7 +20,7 @@ tokio = { version = "1.39", features = ["sync", "rt", "rt-multi-thread", "macros
 toml = "0.9"
 thiserror = "1.0"
 serde = { version = "1.0", features = ["derive"] }
-conferencier-derive = { version = "0.0.1", path = "../conferencier-derive", optional = true }
+conferencier-derive = { version = "0.0.2", path = "../conferencier-derive", optional = true }
 
 [dev-dependencies]
 once_cell = "1.19"
