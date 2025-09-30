@@ -1,0 +1,11 @@
+error: duplicate TOML key `one` detected (previously declared here)
+ --> tests/trybuild/fail_duplicate_keys.rs:4:5
+  |
+4 |     #[confer(rename = "one")]
+  |     ^
+
+error: see previous definition
+ --> tests/trybuild/fail_duplicate_keys.rs:3:5
+  |
+3 |     one: i32,
+  |     ^^^

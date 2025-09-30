@@ -409,7 +409,7 @@ fn integer_from_store(
         match <#ty as ::core::convert::TryFrom<i64>>::try_from(value) {
             Ok(v) => v,
             Err(_) => {
-                return Err(#err::value_parse(#section, #key, format!("value out of range for {}", stringify!(#ty))));
+                return Err(#err::value_parse_owned(#section, #key, format!("value out of range for {}", stringify!(#ty))));
             }
         }
     }
@@ -430,10 +430,10 @@ fn float_from_store(
                 {
                     let raw = value;
                     if !raw.is_finite() {
-                        return Err(#err::value_parse(#section, #key, "non-finite float".into()));
+                        return Err(#err::value_parse_owned(#section, #key, String::from("non-finite float")));
                     }
                     if raw < f32::MIN as f64 || raw > f32::MAX as f64 {
-                        return Err(#err::value_parse(#section, #key, "value out of range for f32".into()));
+                        return Err(#err::value_parse_owned(#section, #key, String::from("value out of range for f32")));
                     }
                     raw as f32
                 }
@@ -458,7 +458,7 @@ fn integer_vec_from_store(
                 match <#scalar as ::core::convert::TryFrom<i64>>::try_from(raw) {
                     Ok(v) => out.push(v),
                     Err(_) => {
-                        return Err(#err::value_parse(#section, #key, format!("value out of range for {}", stringify!(#scalar))));
+                        return Err(#err::value_parse_owned(#section, #key, format!("value out of range for {}", stringify!(#scalar))));
                     }
                 }
             }
@@ -483,10 +483,10 @@ fn float_vec_from_store(
                     let mut out = Vec::with_capacity(value.len());
                     for raw in value.into_iter() {
                         if !raw.is_finite() {
-                            return Err(#err::value_parse(#section, #key, "non-finite float".into()));
+                            return Err(#err::value_parse_owned(#section, #key, String::from("non-finite float")));
                         }
                         if raw < f32::MIN as f64 || raw > f32::MAX as f64 {
-                            return Err(#err::value_parse(#section, #key, "value out of range for f32".into()));
+                            return Err(#err::value_parse_owned(#section, #key, String::from("value out of range for f32")));
                         }
                         out.push(raw as f32);
                     }
@@ -515,7 +515,7 @@ fn integer_to_store(
                 {
                     let raw = #value as u64;
                     if raw > i64::MAX as u64 {
-                        return Err(#err::value_parse(#section, #key, format!("value `{}` out of range for TOML integer", raw)));
+                        return Err(#err::value_parse_owned(#section, #key, format!("value `{}` out of range for TOML integer", raw)));
                     }
                     raw as i64
                 }
@@ -553,7 +553,7 @@ fn integer_vec_to_store(
                     for item in value.into_iter() {
                         let as_u64 = item as u64;
                         if as_u64 > i64::MAX as u64 {
-                            return Err(#err::value_parse(#section, #key, format!("value `{}` out of range for TOML integer", as_u64)));
+                            return Err(#err::value_parse_owned(#section, #key, format!("value `{}` out of range for TOML integer", as_u64)));
                         }
                         out.push(as_u64 as i64);
                     }

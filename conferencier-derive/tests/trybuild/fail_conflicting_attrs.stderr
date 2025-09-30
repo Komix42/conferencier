@@ -1,0 +1,5 @@
+error: #[confer(default = ...)] and #[confer(init = ...)] cannot be combined
+ --> tests/trybuild/fail_conflicting_attrs.rs:3:5
+  |
+3 |     #[confer(default = 5, init = "Default::default()")]
+  |     ^

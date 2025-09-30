@@ -69,10 +69,19 @@ impl ConferError {
         key: impl Into<String>,
         message: impl Into<String>,
     ) -> Self {
+        Self::value_parse_owned(section, key, message.into())
+    }
+
+    /// Variant of [`ConferError::value_parse`] that accepts an owned [`String`].
+    pub fn value_parse_owned(
+        section: impl Into<String>,
+        key: impl Into<String>,
+        message: String,
+    ) -> Self {
         Self::ValueParse {
             section: section.into(),
             key: key.into(),
-            message: message.into(),
+            message,
         }
     }
 }
