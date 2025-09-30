@@ -7,6 +7,8 @@ authors = ["Komix42 <komix@ignore.cz>"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Komix42/conferencier"
 readme = "README.md"
+keywords = ["proc-macro", "derive", "configuration", "toml"]
+categories = ["development-tools::procedural-macro-helpers", "config"]
 
 [lib]
 proc-macro = true

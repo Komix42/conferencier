@@ -7,6 +7,8 @@ authors = ["Komix42 <komix@ignore.cz>"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Komix42/conferencier"
 readme = "README.md"
+keywords = ["configuration", "toml", "async", "tokio", "derive"]
+categories = ["config", "asynchronous", "data-structures"]
 
 [features]
 default = ["with-derive"]
