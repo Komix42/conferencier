@@ -18,7 +18,7 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-conferencier = { version = "0.0.1", features = ["with-derive"] }
+conferencier = { version = "0.0.3", features = ["with-derive"] }
 ```
 
 Define a module struct and derive `ConferModule`:

@@ -26,7 +26,7 @@ Async-first, TOML-backed configuration hub with an ergonomic derive macro for ma
 
    ```toml
    [dependencies]
-   conferencier = { version = "0.0.1", features = ["with-derive"] }
+   conferencier = { version = "0.0.3", features = ["with-derive"] }
    ```
 
 2. Define a module struct and derive `ConferModule`:

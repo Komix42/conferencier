@@ -8,14 +8,14 @@ Add to `Cargo.toml` (end users typically depend on `conferencier` and enable `wi
 
 ```toml
 [dependencies]
-conferencier = { version = "0.0.1", features = ["with-derive"] }
+conferencier = { version = "0.0.3", features = ["with-derive"] }
 ```
 
 Direct use is possible if you prefer to import the macro explicitly:
 
 ```toml
 [dependencies]
-conferencier-derive = "0.0.1"
+conferencier-derive = "0.0.3"
 ```
 
 ```rust
