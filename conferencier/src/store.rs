@@ -90,13 +90,14 @@ impl Confer {
     pub async fn get_value(&self, section: &str, key: &str) -> Option<Value> {
         let guard = self.table.read().await;
         section_table(&guard, section)
-            .and_then(|table| table.get(key).cloned())
+            .and_then(|table| table.get(key))
+            .cloned()
     }
 
     /// Returns a cloned snapshot of the table stored at `section`, if it exists.
     pub async fn get_section_table(&self, section: &str) -> Option<Table> {
         let guard = self.table.read().await;
-        section_table(&guard, section).map(|table| table.clone())
+        section_table(&guard, section).cloned()
     }
 
     /// Inserts `value` at `section.key`, creating the section if necessary.
@@ -235,11 +236,7 @@ impl Confer {
     }
 
     /// Retrieves a [`Datetime`] value stored at `section.key`, parsing strings when necessary.
-    pub async fn get_datetime(
-        &self,
-        section: &str,
-        key: &str,
-    ) -> Result<Datetime> {
+    pub async fn get_datetime(&self, section: &str, key: &str) -> Result<Datetime> {
         let value = self.fetch_value(section, key).await?;
         value_conversion::datetime(section, key, value)
     }
@@ -269,11 +266,7 @@ impl Confer {
     }
 
     /// Retrieves a [`Datetime`] array stored at `section.key`, parsing string values when necessary.
-    pub async fn get_datetime_vec(
-        &self,
-        section: &str,
-        key: &str,
-    ) -> Result<Vec<Datetime>> {
+    pub async fn get_datetime_vec(&self, section: &str, key: &str) -> Result<Vec<Datetime>> {
         let value = self.fetch_value(section, key).await?;
         value_conversion::datetime_vec(section, key, value)
     }
@@ -299,55 +292,30 @@ impl Confer {
     }
 
     /// Stores a TOML [`Datetime`] at `section.key`, creating the section if needed.
-    pub async fn set_datetime(
-        &self,
-        section: &str,
-        key: &str,
-        value: Datetime,
-    ) -> Result<()> {
+    pub async fn set_datetime(&self, section: &str, key: &str, value: Datetime) -> Result<()> {
         self.set_value(section, key, Value::Datetime(value)).await
     }
 
     /// Stores a string array at `section.key`, creating the section if needed.
-    pub async fn set_string_vec(
-        &self,
-        section: &str,
-        key: &str,
-        value: Vec<String>,
-    ) -> Result<()> {
+    pub async fn set_string_vec(&self, section: &str, key: &str, value: Vec<String>) -> Result<()> {
         let array = value.into_iter().map(Value::String).collect();
         self.set_value(section, key, Value::Array(array)).await
     }
 
     /// Stores an integer array at `section.key`, creating the section if needed.
-    pub async fn set_integer_vec(
-        &self,
-        section: &str,
-        key: &str,
-        value: Vec<i64>,
-    ) -> Result<()> {
+    pub async fn set_integer_vec(&self, section: &str, key: &str, value: Vec<i64>) -> Result<()> {
         let array = value.into_iter().map(Value::Integer).collect();
         self.set_value(section, key, Value::Array(array)).await
     }
 
     /// Stores a floating-point array at `section.key`, creating the section if needed.
-    pub async fn set_float_vec(
-        &self,
-        section: &str,
-        key: &str,
-        value: Vec<f64>,
-    ) -> Result<()> {
+    pub async fn set_float_vec(&self, section: &str, key: &str, value: Vec<f64>) -> Result<()> {
         let array = value.into_iter().map(Value::Float).collect();
         self.set_value(section, key, Value::Array(array)).await
     }
 
     /// Stores a boolean array at `section.key`, creating the section if needed.
-    pub async fn set_boolean_vec(
-        &self,
-        section: &str,
-        key: &str,
-        value: Vec<bool>,
-    ) -> Result<()> {
+    pub async fn set_boolean_vec(&self, section: &str, key: &str, value: Vec<bool>) -> Result<()> {
         let array = value.into_iter().map(Value::Boolean).collect();
         self.set_value(section, key, Value::Array(array)).await
     }
@@ -404,9 +372,9 @@ async fn write_atomic(path: &Path, contents: &[u8]) -> Result<()> {
     match fs::rename(&tmp_path, path).await {
         Ok(()) => Ok(()),
         Err(err) if err.kind() == ErrorKind::AlreadyExists => {
-            fs::remove_file(path)
-                .await
-                .map_err(|remove_err| ConferError::io_error(Some(path.to_path_buf()), remove_err))?;
+            fs::remove_file(path).await.map_err(|remove_err| {
+                ConferError::io_error(Some(path.to_path_buf()), remove_err)
+            })?;
             fs::rename(&tmp_path, path)
                 .await
                 .map_err(|err| ConferError::io_error(Some(path.to_path_buf()), err))

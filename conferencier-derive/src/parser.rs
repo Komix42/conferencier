@@ -26,7 +26,7 @@ pub fn parse_module(input: DeriveInput) -> Result<Module> {
             return Err(syn::Error::new(
                 ident.span(),
                 "#[derive(ConferModule)] can only be applied to structs",
-            ))
+            ));
         }
     };
 
@@ -36,7 +36,7 @@ pub fn parse_module(input: DeriveInput) -> Result<Module> {
             return Err(syn::Error::new(
                 ident.span(),
                 "#[derive(ConferModule)] requires named fields",
-            ))
+            ));
         }
     };
 
@@ -162,12 +162,10 @@ fn parse_field(field: &SynField, seen_keys: &mut HashMap<String, Span>) -> Resul
         Some(classify_type(&field.ty)?)
     };
 
-    let default_tokens = if let (Some(expr), Some(kind)) = (&default_expr, &kind) {
-        Some(transform_default(expr.clone(), kind)?)
-    } else if let Some(expr) = &default_expr {
-        Some(quote! { #expr })
-    } else {
-        None
+    let default_tokens = match (&default_expr, &kind) {
+        (Some(expr), Some(kind)) => Some(transform_default(expr.clone(), kind)?),
+        (Some(expr), None) => Some(quote! { #expr }),
+        (None, _) => None,
     };
 
     let init_tokens = init_expr.map(|expr| quote! { #expr });
@@ -188,11 +186,7 @@ fn default_section_name(ident: &syn::Ident) -> String {
     let name = ident.to_string();
     if name.starts_with("Confer") {
         let trimmed = name.trim_start_matches("Confer").to_string();
-        if trimmed.is_empty() {
-            name
-        } else {
-            trimmed
-        }
+        if trimmed.is_empty() { name } else { trimmed }
     } else {
         name
     }
@@ -206,10 +200,10 @@ fn is_confer_attr(attr: &Attribute) -> bool {
 /// Parses the `init` attribute, allowing either raw expressions or string literals.
 fn parse_init_expr(meta: &ParseNestedMeta) -> Result<Expr> {
     let expr: Expr = meta.value()?.parse()?;
-    if let Expr::Lit(expr_lit) = &expr {
-        if let Lit::Str(lit) = &expr_lit.lit {
-            return syn::parse_str::<Expr>(&lit.value());
-        }
+    if let Expr::Lit(expr_lit) = &expr
+        && let Lit::Str(lit) = &expr_lit.lit
+    {
+        return syn::parse_str::<Expr>(&lit.value());
     }
     Ok(expr)
 }
@@ -296,14 +290,12 @@ fn match_outer_type<'a>(ty: &'a Type, expected: &str) -> Option<&'a Type> {
     };
 
     let last = path.path.segments.last()?;
-    if last.ident == expected {
-        if let syn::PathArguments::AngleBracketed(generic) = &last.arguments {
-            if generic.args.len() == 1 {
-                if let syn::GenericArgument::Type(inner) = generic.args.first().unwrap() {
-                    return Some(inner);
-                }
-            }
-        }
+    if last.ident == expected
+        && let syn::PathArguments::AngleBracketed(generic) = &last.arguments
+        && generic.args.len() == 1
+        && let Some(syn::GenericArgument::Type(inner)) = generic.args.first()
+    {
+        return Some(inner);
     }
 
     None
@@ -362,10 +354,7 @@ fn validate_literal(expr: &Expr, scalar: &ScalarKind) -> Result<()> {
         ScalarKind::String | ScalarKind::Datetime => match expr {
             Expr::Lit(expr_lit) => match &expr_lit.lit {
                 Lit::Str(_) => Ok(()),
-                _ => Err(syn::Error::new(
-                    expr.span(),
-                    "expected string literal",
-                )),
+                _ => Err(syn::Error::new(expr.span(), "expected string literal")),
             },
             _ => Err(syn::Error::new(expr.span(), "expected string literal")),
         },

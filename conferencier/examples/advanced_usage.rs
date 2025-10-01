@@ -8,8 +8,8 @@
 
 use std::{fs, path::PathBuf};
 
-use conferencier::{Confer, ConferModule, Result};
 use conferencier::confer_module::ConferModule as _;
+use conferencier::{Confer, ConferModule, Result};
 use tokio::try_join;
 
 /// Server runtime configuration.
@@ -89,23 +89,26 @@ async fn main() -> Result<()> {
         fs::create_dir_all(parent).map_err(conferencier::ConferError::from)?;
     }
     store.save_file(&snapshot_path).await?;
-    println!(
-        "Snapshot also written to {}",
-        snapshot_path.display()
-    );
+    println!("Snapshot also written to {}", snapshot_path.display());
 
     Ok(())
 }
 
 /// Helper that prints the current state with some lightweight formatting.
-async fn print_configuration(server: &conferencier::confer_module::SharedConferModule<ServerProfile>, toggles: &conferencier::confer_module::SharedConferModule<FeatureToggles>) {
+async fn print_configuration(
+    server: &conferencier::confer_module::SharedConferModule<ServerProfile>,
+    toggles: &conferencier::confer_module::SharedConferModule<FeatureToggles>,
+) {
     use tokio::join;
 
     let (server_guard, toggles_guard) = join!(server.read(), toggles.read());
     let server = server_guard;
     let toggles = toggles_guard;
 
-    println!("Server listening on {}:{}", server.bind_address, server.port);
+    println!(
+        "Server listening on {}:{}",
+        server.bind_address, server.port
+    );
     println!("Roles: {:?}", server.roles);
     println!("Allowed IPs: {:?}", server.allowed_ips);
     println!("Realtime metrics enabled: {}", toggles.realtime_metrics);
@@ -114,15 +117,21 @@ async fn print_configuration(server: &conferencier::confer_module::SharedConferM
 }
 
 /// Add a new deployment role and track an audit message in the ignored cache.
-async fn update_server_roles(server: &conferencier::confer_module::SharedConferModule<ServerProfile>) {
+async fn update_server_roles(
+    server: &conferencier::confer_module::SharedConferModule<ServerProfile>,
+) {
     let mut guard = server.write().await;
     guard.roles.push("admin".into());
-    guard.connection_log.push("Roles updated to include 'admin'".into());
+    guard
+        .connection_log
+        .push("Roles updated to include 'admin'".into());
     guard.allowed_ips = Some(vec!["10.0.0.0/24".into(), "192.168.1.0/24".into()]);
 }
 
 /// Drop beta features once they have been fully rolled out.
-async fn retire_beta_features(toggles: &conferencier::confer_module::SharedConferModule<FeatureToggles>) {
+async fn retire_beta_features(
+    toggles: &conferencier::confer_module::SharedConferModule<FeatureToggles>,
+) {
     let mut guard = toggles.write().await;
     guard.beta_features = None;
 }

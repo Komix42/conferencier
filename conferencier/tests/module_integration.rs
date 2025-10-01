@@ -1,4 +1,4 @@
-use conferencier::{confer_module::ConferModule, Confer, Result};
+use conferencier::{Confer, Result, confer_module::ConferModule};
 use toml::value::Datetime;
 
 #[derive(conferencier::ConferModule)]
@@ -38,11 +38,16 @@ notes = "temp"
         assert_eq!(guard.port, 8080);
         assert_eq!(guard.host, "0.0.0.0");
         assert_eq!(guard.retries, 3);
-        assert_eq!(guard.features, vec!["alpha".to_string(), "beta".to_string()]);
-        assert!(guard
-            .started_at
-            .to_string()
-            .starts_with("2024-01-01T00:00:00Z"));
+        assert_eq!(
+            guard.features,
+            vec!["alpha".to_string(), "beta".to_string()]
+        );
+        assert!(
+            guard
+                .started_at
+                .to_string()
+                .starts_with("2024-01-01T00:00:00Z")
+        );
         assert_eq!(guard.endpoint.as_deref(), Some("example.com"));
         assert_eq!(guard.notes.as_deref(), Some("temp"));
         assert!(guard.cache.is_empty());

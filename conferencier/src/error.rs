@@ -89,9 +89,6 @@ impl ConferError {
 impl From<std::io::Error> for ConferError {
     /// Converts a plain [`std::io::Error`] into [`ConferError::Io`] without path context.
     fn from(source: std::io::Error) -> Self {
-        Self::Io {
-            path: None,
-            source,
-        }
+        Self::Io { path: None, source }
     }
 }

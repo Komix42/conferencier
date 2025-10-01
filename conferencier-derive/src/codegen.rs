@@ -150,7 +150,9 @@ fn generate_load(field: &Field, section: &LitStr, crate_path: &syn::Path) -> Res
 
 /// Generates the save logic for a single field, respecting optionality and vectors.
 fn generate_save(field: &Field, section: &LitStr, crate_path: &syn::Path) -> Result<TokenStream> {
-    let Field { ident, key, kind, .. } = field;
+    let Field {
+        ident, key, kind, ..
+    } = field;
 
     let kind = kind
         .as_ref()
@@ -171,11 +173,17 @@ fn generate_save(field: &Field, section: &LitStr, crate_path: &syn::Path) -> Res
 /// Selects the appropriate async getter call for a field based on its kind.
 fn fetch_expression(kind: &FieldType, section: &LitStr, key: &LitStr) -> TokenStream {
     let method = match (kind.container, &kind.scalar) {
-        (ContainerKind::Vec, ScalarKind::String) | (ContainerKind::OptionVec, ScalarKind::String) => "get_string_vec",
-        (ContainerKind::Vec, ScalarKind::Bool) | (ContainerKind::OptionVec, ScalarKind::Bool) => "get_boolean_vec",
-        (ContainerKind::Vec, ScalarKind::Integer(_)) | (ContainerKind::OptionVec, ScalarKind::Integer(_)) => "get_integer_vec",
-        (ContainerKind::Vec, ScalarKind::Float(_)) | (ContainerKind::OptionVec, ScalarKind::Float(_)) => "get_float_vec",
-        (ContainerKind::Vec, ScalarKind::Datetime) | (ContainerKind::OptionVec, ScalarKind::Datetime) => "get_datetime_vec",
+        (ContainerKind::Vec, ScalarKind::String)
+        | (ContainerKind::OptionVec, ScalarKind::String) => "get_string_vec",
+        (ContainerKind::Vec, ScalarKind::Bool) | (ContainerKind::OptionVec, ScalarKind::Bool) => {
+            "get_boolean_vec"
+        }
+        (ContainerKind::Vec, ScalarKind::Integer(_))
+        | (ContainerKind::OptionVec, ScalarKind::Integer(_)) => "get_integer_vec",
+        (ContainerKind::Vec, ScalarKind::Float(_))
+        | (ContainerKind::OptionVec, ScalarKind::Float(_)) => "get_float_vec",
+        (ContainerKind::Vec, ScalarKind::Datetime)
+        | (ContainerKind::OptionVec, ScalarKind::Datetime) => "get_datetime_vec",
         (_, ScalarKind::String) => "get_string",
         (_, ScalarKind::Bool) => "get_boolean",
         (_, ScalarKind::Integer(_)) => "get_integer",
@@ -195,8 +203,12 @@ fn convert_from_store(
     crate_path: &syn::Path,
 ) -> TokenStream {
     match kind.container {
-        ContainerKind::Plain | ContainerKind::Option => scalar_from_store(&kind.scalar, section, key, crate_path),
-        ContainerKind::Vec | ContainerKind::OptionVec => vec_from_store(&kind.scalar, section, key, crate_path),
+        ContainerKind::Plain | ContainerKind::Option => {
+            scalar_from_store(&kind.scalar, section, key, crate_path)
+        }
+        ContainerKind::Vec | ContainerKind::OptionVec => {
+            vec_from_store(&kind.scalar, section, key, crate_path)
+        }
     }
 }
 
@@ -204,7 +216,9 @@ fn convert_from_store(
 fn assign_converted(kind: &FieldType, ident: &Ident) -> TokenStream {
     match kind.container {
         ContainerKind::Plain | ContainerKind::Vec => quote! { guard.#ident = converted; },
-        ContainerKind::Option | ContainerKind::OptionVec => quote! { guard.#ident = ::core::option::Option::Some(converted); },
+        ContainerKind::Option | ContainerKind::OptionVec => {
+            quote! { guard.#ident = ::core::option::Option::Some(converted); }
+        }
     }
 }
 
@@ -286,7 +300,13 @@ fn save_option(
 ) -> TokenStream {
     let setter = setter_name(kind, false);
     let setter_ident = Ident::new(setter, Span::call_site());
-    let value = scalar_to_store(&kind.scalar, quote! { value.clone() }, section, key, crate_path);
+    let value = scalar_to_store(
+        &kind.scalar,
+        quote! { value.clone() },
+        section,
+        key,
+        crate_path,
+    );
     quote! {
         match #ident {
             ::core::option::Option::Some(value) => {
@@ -309,7 +329,13 @@ fn save_option_vec(
 ) -> TokenStream {
     let setter = setter_name(kind, true);
     let setter_ident = Ident::new(setter, Span::call_site());
-    let value = vec_to_store(&kind.scalar, quote! { value.clone() }, section, key, crate_path);
+    let value = vec_to_store(
+        &kind.scalar,
+        quote! { value.clone() },
+        section,
+        key,
+        crate_path,
+    );
     quote! {
         match #ident {
             ::core::option::Option::Some(value) => {
@@ -542,9 +568,15 @@ fn integer_vec_to_store(
 ) -> TokenStream {
     let err = quote! { #crate_path::ConferError };
     match kind {
-        IntegerKind::I8 | IntegerKind::I16 | IntegerKind::I32 => quote! { #value.into_iter().map(|v| i64::from(v)).collect::<Vec<_>>() },
-        IntegerKind::I64 | IntegerKind::Isize => quote! { #value.into_iter().map(|v| v as i64).collect::<Vec<_>>() },
-        IntegerKind::U8 | IntegerKind::U16 | IntegerKind::U32 => quote! { #value.into_iter().map(|v| v as i64).collect::<Vec<_>>() },
+        IntegerKind::I8 | IntegerKind::I16 | IntegerKind::I32 => {
+            quote! { #value.into_iter().map(|v| i64::from(v)).collect::<Vec<_>>() }
+        }
+        IntegerKind::I64 | IntegerKind::Isize => {
+            quote! { #value.into_iter().map(|v| v as i64).collect::<Vec<_>>() }
+        }
+        IntegerKind::U8 | IntegerKind::U16 | IntegerKind::U32 => {
+            quote! { #value.into_iter().map(|v| v as i64).collect::<Vec<_>>() }
+        }
         IntegerKind::U64 | IntegerKind::Usize => {
             quote! {
                 {
