@@ -96,3 +96,5 @@ jobs:
           toolchain: stable
       - name: Cargo audit
         uses: rustsec/audit-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
