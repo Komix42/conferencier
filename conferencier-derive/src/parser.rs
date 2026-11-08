@@ -186,13 +186,14 @@ fn parse_field(field: &SynField, seen_keys: &mut HashMap<String, Span>) -> Resul
 }
 
 /// Derives the default section name from the type identifier.
+///
+/// A leading `Confer` is stripped only when it is a separate CamelCase word
+/// (`ConferApp` -> `App`), so names like `ConferenceSettings` stay intact.
 fn default_section_name(ident: &syn::Ident) -> String {
     let name = ident.unraw().to_string();
-    if name.starts_with("Confer") {
-        let trimmed = name.trim_start_matches("Confer").to_string();
-        if trimmed.is_empty() { name } else { trimmed }
-    } else {
-        name
+    match name.strip_prefix("Confer") {
+        Some(rest) if rest.starts_with(char::is_uppercase) => rest.to_string(),
+        _ => name,
     }
 }
 
@@ -460,5 +461,36 @@ impl ErrorWithSpan for syn::Error {
     fn with_span(mut self, span: Span) -> Self {
         self.combine(syn::Error::new(span, "see previous definition"));
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::default_section_name;
+    use proc_macro2::Span;
+    use syn::Ident;
+
+    fn section(name: &str) -> String {
+        default_section_name(&Ident::new(name, Span::call_site()))
+    }
+
+    #[test]
+    fn strips_confer_prefix_at_word_boundary() {
+        assert_eq!(section("ConferApp"), "App");
+        assert_eq!(section("ConferConferApp"), "ConferApp");
+    }
+
+    #[test]
+    fn keeps_names_without_confer_word() {
+        assert_eq!(section("ConferenceSettings"), "ConferenceSettings");
+        assert_eq!(section("Confer"), "Confer");
+        assert_eq!(section("Confer_App"), "Confer_App");
+        assert_eq!(section("Settings"), "Settings");
+    }
+
+    #[test]
+    fn ignores_raw_identifier_prefix() {
+        let ident = Ident::new_raw("ConferApp", Span::call_site());
+        assert_eq!(default_section_name(&ident), "App");
     }
 }

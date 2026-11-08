@@ -65,7 +65,7 @@ cargo run --example advanced_usage --features with-derive
 
 The `#[derive(ConferModule)]` macro supports a few attributes to control how your struct maps to TOML.
 
-- `#[confer(section = "Name")]` on the struct sets the TOML section. If omitted, it defaults to the struct name (with an optional `Confer` prefix stripped, e.g. `ConferApp` → `App`).
+- `#[confer(section = "Name")]` on the struct sets the TOML section. If omitted, it defaults to the struct name, with a leading `Confer` word stripped (e.g. `ConferApp` → `App`, while `ConferenceSettings` stays `ConferenceSettings`).
 
 - `#[confer(rename = "key")]` on a field overrides the TOML key name.
 

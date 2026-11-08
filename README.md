@@ -59,7 +59,7 @@ Async-first, TOML-backed configuration hub with an ergonomic derive macro for ma
 
 The `#[derive(ConferModule)]` macro understands a small set of field/struct attributes that control how data is mapped to TOML.
 
-- `#[confer(section = "Name")]` on the struct sets the TOML section name. If omitted, it defaults to the struct name with an optional `Confer` prefix stripped (e.g., `ConferApp` → `App`).
+- `#[confer(section = "Name")]` on the struct sets the TOML section name. If omitted, it defaults to the struct name with a leading `Confer` word stripped (e.g., `ConferApp` → `App`, while `ConferenceSettings` stays `ConferenceSettings`).
 
 - `#[confer(rename = "key")]` on a field overrides the TOML key name.
 

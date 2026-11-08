@@ -253,3 +253,34 @@ async fn negative_numeric_defaults() -> Result<()> {
 
     Ok(())
 }
+
+/// Default section names strip a leading `Confer` word only.
+#[derive(ConferModule)]
+struct ConferenceSettings {
+    room: String,
+}
+
+#[derive(ConferModule)]
+struct ConferServer {
+    port: u16,
+}
+
+#[tokio::test]
+async fn default_section_name_strips_confer_word_only() -> Result<()> {
+    let store = Confer::from_string(
+        r#"[ConferenceSettings]
+room = "A1"
+
+[Server]
+port = 8080
+"#,
+    )?;
+
+    let settings = ConferenceSettings::from_confer(store.clone()).await?;
+    let server = ConferServer::from_confer(store.clone()).await?;
+
+    assert_eq!(settings.read().await.room, "A1");
+    assert_eq!(server.read().await.port, 8080);
+
+    Ok(())
+}
