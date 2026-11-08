@@ -11,10 +11,11 @@ Add to `Cargo.toml` (end users typically depend on `conferencier` and enable `wi
 conferencier = { version = "0.0.3", features = ["with-derive"] }
 ```
 
-Direct use is possible if you prefer to import the macro explicitly:
+Direct use is possible if you prefer to import the macro explicitly. The generated code always calls into `conferencier`, so that crate stays a dependency (here without its default `with-derive` feature):
 
 ```toml
 [dependencies]
+conferencier = { version = "0.0.3", default-features = false }
 conferencier-derive = "0.0.3"
 ```
 

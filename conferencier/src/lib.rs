@@ -1,4 +1,8 @@
-//! Async, TOML-backed configuration hub with an ergonomic derive macro.
+#![cfg_attr(feature = "with-derive", doc = include_str!("../README.md"))]
+#![cfg_attr(
+    not(feature = "with-derive"),
+    doc = "Async, TOML-backed configuration hub with an ergonomic derive macro."
+)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod confer_module;
