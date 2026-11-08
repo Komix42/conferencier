@@ -2,9 +2,13 @@ use std::collections::HashMap;
 
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
+use syn::ext::IdentExt;
 use syn::meta::ParseNestedMeta;
 use syn::spanned::Spanned;
-use syn::{Attribute, DeriveInput, Expr, Field as SynField, Fields, Lit, LitStr, Result, Type};
+use syn::{
+    Attribute, DeriveInput, Expr, ExprLit, ExprUnary, Field as SynField, Fields, Lit, LitStr,
+    Result, Type, UnOp,
+};
 
 use crate::model::{ContainerKind, Field, FieldType, FloatKind, IntegerKind, Module, ScalarKind};
 
@@ -26,7 +30,7 @@ pub fn parse_module(input: DeriveInput) -> Result<Module> {
             return Err(syn::Error::new(
                 ident.span(),
                 "#[derive(ConferModule)] can only be applied to structs",
-            ))
+            ));
         }
     };
 
@@ -36,7 +40,7 @@ pub fn parse_module(input: DeriveInput) -> Result<Module> {
             return Err(syn::Error::new(
                 ident.span(),
                 "#[derive(ConferModule)] requires named fields",
-            ))
+            ));
         }
     };
 
@@ -143,7 +147,7 @@ fn parse_field(field: &SynField, seen_keys: &mut HashMap<String, Span>) -> Resul
         ));
     }
 
-    let key = rename.unwrap_or_else(|| ident.to_string());
+    let key = rename.unwrap_or_else(|| ident.unraw().to_string());
 
     if let Some(prev_span) = seen_keys.insert(key.clone(), field.span()) {
         return Err(syn::Error::new(
@@ -162,12 +166,10 @@ fn parse_field(field: &SynField, seen_keys: &mut HashMap<String, Span>) -> Resul
         Some(classify_type(&field.ty)?)
     };
 
-    let default_tokens = if let (Some(expr), Some(kind)) = (&default_expr, &kind) {
-        Some(transform_default(expr.clone(), kind)?)
-    } else if let Some(expr) = &default_expr {
-        Some(quote! { #expr })
-    } else {
-        None
+    let default_tokens = match (&default_expr, &kind) {
+        (Some(expr), Some(kind)) => Some(transform_default(expr.clone(), kind)?),
+        (Some(expr), None) => Some(quote! { #expr }),
+        (None, _) => None,
     };
 
     let init_tokens = init_expr.map(|expr| quote! { #expr });
@@ -184,17 +186,14 @@ fn parse_field(field: &SynField, seen_keys: &mut HashMap<String, Span>) -> Resul
 }
 
 /// Derives the default section name from the type identifier.
+///
+/// A leading `Confer` is stripped only when it is a separate CamelCase word
+/// (`ConferApp` -> `App`), so names like `ConferenceSettings` stay intact.
 fn default_section_name(ident: &syn::Ident) -> String {
-    let name = ident.to_string();
-    if name.starts_with("Confer") {
-        let trimmed = name.trim_start_matches("Confer").to_string();
-        if trimmed.is_empty() {
-            name
-        } else {
-            trimmed
-        }
-    } else {
-        name
+    let name = ident.unraw().to_string();
+    match name.strip_prefix("Confer") {
+        Some(rest) if rest.starts_with(char::is_uppercase) => rest.to_string(),
+        _ => name,
     }
 }
 
@@ -206,10 +205,10 @@ fn is_confer_attr(attr: &Attribute) -> bool {
 /// Parses the `init` attribute, allowing either raw expressions or string literals.
 fn parse_init_expr(meta: &ParseNestedMeta) -> Result<Expr> {
     let expr: Expr = meta.value()?.parse()?;
-    if let Expr::Lit(expr_lit) = &expr {
-        if let Lit::Str(lit) = &expr_lit.lit {
-            return syn::parse_str::<Expr>(&lit.value());
-        }
+    if let Expr::Lit(expr_lit) = &expr
+        && let Lit::Str(lit) = &expr_lit.lit
+    {
+        return syn::parse_str::<Expr>(&lit.value());
     }
     Ok(expr)
 }
@@ -296,14 +295,12 @@ fn match_outer_type<'a>(ty: &'a Type, expected: &str) -> Option<&'a Type> {
     };
 
     let last = path.path.segments.last()?;
-    if last.ident == expected {
-        if let syn::PathArguments::AngleBracketed(generic) = &last.arguments {
-            if generic.args.len() == 1 {
-                if let syn::GenericArgument::Type(inner) = generic.args.first().unwrap() {
-                    return Some(inner);
-                }
-            }
-        }
+    if last.ident == expected
+        && let syn::PathArguments::AngleBracketed(generic) = &last.arguments
+        && generic.args.len() == 1
+        && let Some(syn::GenericArgument::Type(inner)) = generic.args.first()
+    {
+        return Some(inner);
     }
 
     None
@@ -359,13 +356,26 @@ fn transform_vec_default(
 /// Ensures the provided literal matches the scalar kind expected by the field.
 fn validate_literal(expr: &Expr, scalar: &ScalarKind) -> Result<()> {
     match scalar {
-        ScalarKind::String | ScalarKind::Datetime => match expr {
+        ScalarKind::String => match expr {
             Expr::Lit(expr_lit) => match &expr_lit.lit {
                 Lit::Str(_) => Ok(()),
-                _ => Err(syn::Error::new(
-                    expr.span(),
-                    "expected string literal",
-                )),
+                _ => Err(syn::Error::new(expr.span(), "expected string literal")),
+            },
+            _ => Err(syn::Error::new(expr.span(), "expected string literal")),
+        },
+        ScalarKind::Datetime => match expr {
+            Expr::Lit(expr_lit) => match &expr_lit.lit {
+                Lit::Str(lit) => lit
+                    .value()
+                    .parse::<toml::value::Datetime>()
+                    .map(|_| ())
+                    .map_err(|err| {
+                        syn::Error::new(
+                            lit.span(),
+                            format!("invalid TOML datetime `{}`: {err}", lit.value()),
+                        )
+                    }),
+                _ => Err(syn::Error::new(expr.span(), "expected string literal")),
             },
             _ => Err(syn::Error::new(expr.span(), "expected string literal")),
         },
@@ -376,20 +386,49 @@ fn validate_literal(expr: &Expr, scalar: &ScalarKind) -> Result<()> {
             },
             _ => Err(syn::Error::new(expr.span(), "expected boolean literal")),
         },
-        ScalarKind::Integer(_) => match expr {
-            Expr::Lit(expr_lit) => match expr_lit.lit {
-                Lit::Int(_) => Ok(()),
-                _ => Err(syn::Error::new(expr.span(), "expected integer literal")),
-            },
+        ScalarKind::Integer(kind) => match strip_negation(expr) {
+            (
+                negative,
+                Expr::Lit(ExprLit {
+                    lit: Lit::Int(_), ..
+                }),
+            ) => {
+                if negative && kind.is_unsigned() {
+                    Err(syn::Error::new_spanned(
+                        expr,
+                        format!(
+                            "negative default for unsigned integer type `{}`",
+                            kind.type_tokens()
+                        ),
+                    ))
+                } else {
+                    Ok(())
+                }
+            }
             _ => Err(syn::Error::new(expr.span(), "expected integer literal")),
         },
-        ScalarKind::Float(_) => match expr {
-            Expr::Lit(expr_lit) => match expr_lit.lit {
-                Lit::Float(_) | Lit::Int(_) => Ok(()),
-                _ => Err(syn::Error::new(expr.span(), "expected float literal")),
-            },
+        ScalarKind::Float(_) => match strip_negation(expr) {
+            (
+                _,
+                Expr::Lit(ExprLit {
+                    lit: Lit::Float(_) | Lit::Int(_),
+                    ..
+                }),
+            ) => Ok(()),
             _ => Err(syn::Error::new(expr.span(), "expected float literal")),
         },
+    }
+}
+
+/// Splits a leading unary minus off `expr`, reporting whether one was present.
+fn strip_negation(expr: &Expr) -> (bool, &Expr) {
+    match expr {
+        Expr::Unary(ExprUnary {
+            op: UnOp::Neg(_),
+            expr: inner,
+            ..
+        }) => (true, inner),
+        _ => (false, expr),
     }
 }
 
@@ -405,7 +444,9 @@ fn literal_tokens(expr: Expr, scalar: &ScalarKind) -> Result<TokenStream> {
             quote! { (#expr) as #ty }
         }
         ScalarKind::Datetime => {
-            quote! { <toml::value::Datetime as std::str::FromStr>::from_str(#expr).expect("invalid datetime literal") }
+            // Validated above, so parsing cannot fail. The target type is inferred from the
+            // field, which keeps the generated code free of `toml` paths.
+            quote! { (#expr).parse().expect("datetime default validated at compile time") }
         }
     })
 }
@@ -420,5 +461,36 @@ impl ErrorWithSpan for syn::Error {
     fn with_span(mut self, span: Span) -> Self {
         self.combine(syn::Error::new(span, "see previous definition"));
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::default_section_name;
+    use proc_macro2::Span;
+    use syn::Ident;
+
+    fn section(name: &str) -> String {
+        default_section_name(&Ident::new(name, Span::call_site()))
+    }
+
+    #[test]
+    fn strips_confer_prefix_at_word_boundary() {
+        assert_eq!(section("ConferApp"), "App");
+        assert_eq!(section("ConferConferApp"), "ConferApp");
+    }
+
+    #[test]
+    fn keeps_names_without_confer_word() {
+        assert_eq!(section("ConferenceSettings"), "ConferenceSettings");
+        assert_eq!(section("Confer"), "Confer");
+        assert_eq!(section("Confer_App"), "Confer_App");
+        assert_eq!(section("Settings"), "Settings");
+    }
+
+    #[test]
+    fn ignores_raw_identifier_prefix() {
+        let ident = Ident::new_raw("ConferApp", Span::call_site());
+        assert_eq!(default_section_name(&ident), "App");
     }
 }

@@ -2,8 +2,8 @@
 
 use std::str::FromStr;
 
-use toml::value::Datetime;
 use toml::Value;
+use toml::value::Datetime;
 
 use crate::error::{ConferError, Result};
 
@@ -24,7 +24,12 @@ pub fn describe(value: &Value) -> &'static str {
 pub fn string(section: &str, key: &str, value: Value) -> Result<String> {
     match value {
         Value::String(s) => Ok(s),
-        other => Err(ConferError::type_mismatch(section, key, "string", describe(&other))),
+        other => Err(ConferError::type_mismatch(
+            section,
+            key,
+            "string",
+            describe(&other),
+        )),
     }
 }
 
@@ -32,7 +37,12 @@ pub fn string(section: &str, key: &str, value: Value) -> Result<String> {
 pub fn integer(section: &str, key: &str, value: Value) -> Result<i64> {
     match value {
         Value::Integer(v) => Ok(v),
-        other => Err(ConferError::type_mismatch(section, key, "integer", describe(&other))),
+        other => Err(ConferError::type_mismatch(
+            section,
+            key,
+            "integer",
+            describe(&other),
+        )),
     }
 }
 
@@ -41,7 +51,12 @@ pub fn float(section: &str, key: &str, value: Value) -> Result<f64> {
     match value {
         Value::Float(v) => Ok(v),
         Value::Integer(v) => Ok(v as f64),
-        other => Err(ConferError::type_mismatch(section, key, "float", describe(&other))),
+        other => Err(ConferError::type_mismatch(
+            section,
+            key,
+            "float",
+            describe(&other),
+        )),
     }
 }
 
@@ -49,7 +64,12 @@ pub fn float(section: &str, key: &str, value: Value) -> Result<f64> {
 pub fn boolean(section: &str, key: &str, value: Value) -> Result<bool> {
     match value {
         Value::Boolean(v) => Ok(v),
-        other => Err(ConferError::type_mismatch(section, key, "boolean", describe(&other))),
+        other => Err(ConferError::type_mismatch(
+            section,
+            key,
+            "boolean",
+            describe(&other),
+        )),
     }
 }
 
@@ -58,7 +78,12 @@ pub fn datetime(section: &str, key: &str, value: Value) -> Result<Datetime> {
     match value {
         Value::Datetime(dt) => Ok(dt),
         Value::String(s) => parse_datetime(section, key, &s),
-        other => Err(ConferError::type_mismatch(section, key, "datetime", describe(&other))),
+        other => Err(ConferError::type_mismatch(
+            section,
+            key,
+            "datetime",
+            describe(&other),
+        )),
     }
 }
 
@@ -134,12 +159,22 @@ where
             }
             Ok(out)
         }
-        other => Err(ConferError::type_mismatch(section, key, "array", describe(&other))),
+        other => Err(ConferError::type_mismatch(
+            section,
+            key,
+            "array",
+            describe(&other),
+        )),
     }
 }
 
 /// Builds a [`ConferError::ValueParse`] describing an invalid array element type.
-fn element_mismatch(section: &str, key: &str, expected: &'static str, value: &Value) -> ConferError {
+fn element_mismatch(
+    section: &str,
+    key: &str,
+    expected: &'static str,
+    value: &Value,
+) -> ConferError {
     ConferError::value_parse(
         section,
         key,
@@ -153,12 +188,21 @@ fn element_mismatch(section: &str, key: &str, expected: &'static str, value: &Va
 /// Adds index context to element-related errors to aid debugging.
 fn annotate_with_index(error: ConferError, index: usize) -> ConferError {
     match error {
-        ConferError::ValueParse { section, key, message } => ConferError::ValueParse {
+        ConferError::ValueParse {
+            section,
+            key,
+            message,
+        } => ConferError::ValueParse {
             section,
             key,
             message: format!("{message} (at index {index})"),
         },
-        ConferError::TypeMismatch { section, key, expected, found } => ConferError::TypeMismatch {
+        ConferError::TypeMismatch {
+            section,
+            key,
+            expected,
+            found,
+        } => ConferError::TypeMismatch {
             section,
             key,
             expected,

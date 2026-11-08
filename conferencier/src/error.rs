@@ -89,9 +89,82 @@ impl ConferError {
 impl From<std::io::Error> for ConferError {
     /// Converts a plain [`std::io::Error`] into [`ConferError::Io`] without path context.
     fn from(source: std::io::Error) -> Self {
-        Self::Io {
-            path: None,
-            source,
+        Self::Io { path: None, source }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error as _;
+    use std::io::{Error, ErrorKind};
+
+    use super::*;
+
+    #[test]
+    fn value_errors_preserve_messages_and_have_no_source() {
+        let cases = [
+            (
+                ConferError::missing_key("App", "port"),
+                "missing key App.port",
+            ),
+            (
+                ConferError::type_mismatch("App", "port", "integer", "string"),
+                "expected integer at App.port but found string",
+            ),
+            (
+                ConferError::value_parse("App", "port", "out of range"),
+                "invalid value at App.port: out of range",
+            ),
+        ];
+
+        for (error, expected) in cases {
+            assert_eq!(error.to_string(), expected);
+            assert!(error.source().is_none());
         }
+    }
+
+    #[test]
+    fn io_errors_preserve_path_and_source() {
+        for path in [None, Some(PathBuf::from("config.toml"))] {
+            let source = Error::new(ErrorKind::NotFound, "missing config");
+            let expected = format!("I/O error (path: {path:?}): missing config");
+            let error = match path {
+                Some(path) => ConferError::io_error(Some(path), source),
+                None => ConferError::from(source),
+            };
+
+            assert_eq!(error.to_string(), expected);
+            let source = error.source().unwrap().downcast_ref::<Error>().unwrap();
+            assert_eq!(source.kind(), ErrorKind::NotFound);
+            assert_eq!(source.to_string(), "missing config");
+        }
+    }
+
+    #[test]
+    fn parse_error_conversion_preserves_source() {
+        let source = toml::from_str::<toml::Table>("[broken").unwrap_err();
+        let message = source.to_string();
+        let error = ConferError::from(source);
+
+        assert!(matches!(error, ConferError::Parse(_)));
+        assert_eq!(
+            error.to_string(),
+            format!("failed to parse TOML: {message}")
+        );
+        assert_eq!(error.source().unwrap().to_string(), message);
+    }
+
+    #[test]
+    fn serialize_error_conversion_preserves_source() {
+        let source = toml::to_string(&"not a table").unwrap_err();
+        let message = source.to_string();
+        let error = ConferError::from(source);
+
+        assert!(matches!(error, ConferError::Serialize(_)));
+        assert_eq!(
+            error.to_string(),
+            format!("failed to serialize TOML: {message}")
+        );
+        assert_eq!(error.source().unwrap().to_string(), message);
     }
 }

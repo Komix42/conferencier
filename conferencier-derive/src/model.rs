@@ -86,6 +86,14 @@ impl IntegerKind {
             Self::Usize => quote::quote!(usize),
         }
     }
+
+    /// Returns `true` for unsigned integer types.
+    pub fn is_unsigned(&self) -> bool {
+        matches!(
+            self,
+            Self::U8 | Self::U16 | Self::U32 | Self::U64 | Self::Usize
+        )
+    }
 }
 
 impl FloatKind {

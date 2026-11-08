@@ -6,7 +6,6 @@
 //! ```
 
 use conferencier::{Confer, ConferModule, Result};
-use conferencier::confer_module::ConferModule as _;
 
 /// Minimal application settings stored in the `[App]` section of a TOML document.
 #[derive(ConferModule)]

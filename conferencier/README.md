@@ -14,11 +14,12 @@ Async-first, TOML-backed configuration hub with an ergonomic derive macro for ma
 
 ## Quick start
 
-Add to `Cargo.toml`:
+Add to `Cargo.toml` (the `with-derive` feature providing `#[derive(ConferModule)]` is enabled by default):
 
 ```toml
 [dependencies]
-conferencier = { version = "0.0.1", features = ["with-derive"] }
+conferencier = "0.0.3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
 Define a module struct and derive `ConferModule`:
@@ -26,12 +27,13 @@ Define a module struct and derive `ConferModule`:
 ```rust
 use conferencier::{Confer, ConferModule, SharedConferModule};
 
-#[derive(Default, ConferModule)]
+#[derive(ConferModule)]
 #[confer(section = "App")]
 struct AppConfig {
     name: String,
     #[confer(default = 8080)]
     port: i64,
+    #[confer(default = ["stable"])]
     features: Vec<String>,
 }
 
@@ -45,7 +47,8 @@ async fn main() -> conferencier::Result<()> {
         guard.features.push("beta-channel".into());
     }
 
-    AppConfig::save(&module, store).await?;
+    AppConfig::save(&module, store.clone()).await?;
+    println!("{}", store.save_str().await?);
     Ok(())
 }
 ```
@@ -62,12 +65,12 @@ cargo run --example advanced_usage --features with-derive
 
 The `#[derive(ConferModule)]` macro supports a few attributes to control how your struct maps to TOML.
 
-- `#[confer(section = "Name")]` on the struct sets the TOML section. If omitted, it defaults to the struct name (with an optional `Confer` prefix stripped, e.g. `ConferApp` → `App`).
+- `#[confer(section = "Name")]` on the struct sets the TOML section. If omitted, it defaults to the struct name, with a leading `Confer` word stripped (e.g. `ConferApp` → `App`, while `ConferenceSettings` stays `ConferenceSettings`).
 
 - `#[confer(rename = "key")]` on a field overrides the TOML key name.
 
 - `#[confer(default = <expr>)]` provides a value when the key is missing.
-    - Scalars: strings (quoted), integers, floats, booleans, RFC 3339 datetimes as strings.
+    - Scalars: strings (quoted), integers and floats (including negative values such as `-1` or `-0.5`), booleans, RFC 3339 datetimes as strings.
     - Vectors: use array syntax, e.g. `#[confer(default = [1, 2, 3])]`, `#[confer(default = ["a", "b"]) ]`.
     - Works with `Option<T>` and `Option<Vec<T>>`; if no default is given, missing keys become `None`.
 
@@ -79,10 +82,18 @@ Note: `default` and `init` cannot be combined on the same field.
 
 ### Supported field types
 
-- Scalars: `String`, `bool`, signed/unsigned integers (`i8`..`i64`, `isize`, `u8`..`u64`, `usize`), floats (`f32`, `f64`), and `toml::value::Datetime`.
+- Scalars: `String`, `bool`, signed/unsigned integers (`i8`..`i64`, `isize`, `u8`..`u64`, `usize`), floats (`f32`, `f64`), and `Datetime` (`conferencier::Datetime`, a re-export of `toml::value::Datetime`).
 - Containers: plain `T`, `Vec<T>`, `Option<T>`, `Option<Vec<T>>`.
 
 Types outside this set produce a friendly compile error.
+
+Known limitation: a required `Datetime` field (plain type without `default`) does not compile yet, because `Datetime` has no `Default` value to start from. Give it a `#[confer(default = "...")]` or use `Option<Datetime>`.
+
+### TOML compatibility
+
+Conferencier uses `toml` 1.2 with TOML 1.1 support. Prefer `conferencier::toml::{Table, Value}` and `conferencier::Datetime` for types shared with the store; types from `toml` 0.9 are not interchangeable with them.
+
+TOML 1.1 times may omit seconds (for example `07:30`, also accepted as a datetime default). In the new datetime API, `Time::second` and `Time::nanosecond` are optional: `None` means the component was omitted, not explicitly set to zero.
 
 ### Troubleshooting
 
