@@ -284,3 +284,41 @@ port = 8080
 
     Ok(())
 }
+
+#[derive(ConferModule)]
+#[confer(section = "Schedule")]
+struct ScheduleDefaults {
+    #[confer(default = "07:30")]
+    alarm: Datetime,
+    #[confer(default = ["07:30", "08:45:00.125"])]
+    reminders: Vec<Datetime>,
+}
+
+#[tokio::test]
+async fn datetime_defaults_preserve_omitted_seconds() -> Result<()> {
+    let store = Confer::new();
+    let module = ScheduleDefaults::from_confer(store.clone()).await?;
+
+    {
+        let guard = module.read().await;
+        assert_eq!(guard.alarm.to_string(), "07:30");
+        assert_eq!(guard.alarm.time.as_ref().unwrap().second, None);
+        assert_eq!(
+            guard
+                .reminders
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            vec!["07:30", "08:45:00.125"]
+        );
+    }
+
+    ScheduleDefaults::save(&module, store.clone()).await?;
+    let restored = Confer::from_string(&store.save_str().await?)?;
+    let reloaded = ScheduleDefaults::from_confer(restored).await?;
+    let original = module.read().await;
+    let reloaded = reloaded.read().await;
+    assert_eq!(reloaded.alarm, original.alarm);
+    assert_eq!(reloaded.reminders, original.reminders);
+    Ok(())
+}

@@ -89,6 +89,12 @@ Types outside this set produce a friendly compile error.
 
 Known limitation: a required `Datetime` field (plain type without `default`) does not compile yet, because `Datetime` has no `Default` value to start from. Give it a `#[confer(default = "...")]` or use `Option<Datetime>`.
 
+### TOML compatibility
+
+Conferencier uses `toml` 1.2 with TOML 1.1 support. Prefer `conferencier::toml::{Table, Value}` and `conferencier::Datetime` for types shared with the store; types from `toml` 0.9 are not interchangeable with them.
+
+TOML 1.1 times may omit seconds (for example `07:30`, also accepted as a datetime default). In the new datetime API, `Time::second` and `Time::nanosecond` are optional: `None` means the component was omitted, not explicitly set to zero.
+
 ### Troubleshooting
 
 - "unsupported field type" → use one of the supported scalar/container combinations above.

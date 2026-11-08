@@ -16,6 +16,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Updated error derivation to `thiserror` 2 without changing public error variants, messages or source chaining.
 - Updated macro crate-name resolution to `proc-macro-crate` 3, fixing derives for renamed, workspace-inherited dependencies.
 - Updated procedural-macro parsing to `syn` 3.
+- **Breaking:** both crates now use `toml` 1.2 (TOML 1.1). Public TOML values, tables, datetimes and errors are no longer interchangeable with types from `toml` 0.9. Prefer the `conferencier::toml` and `conferencier::Datetime` re-exports, or update your direct TOML dependency.
+- In the new datetime API, `Time::second` and `Time::nanosecond` are optional, preserving omitted components instead of replacing them with zero.
 
 ### Fixed
 - Both crates can be published together with `cargo publish --workspace`; the versioned dev-dependency of `conferencier-derive` on `conferencier` that formed a publish cycle is now path-only.

@@ -14,3 +14,4 @@ repository = "https://github.com/Komix42/conferencier"
 [workspace.dependencies]
 # Keep the version in sync with `workspace.package.version`.
 conferencier-derive = { version = "0.0.3", path = "conferencier-derive" }
+toml = "1.2"

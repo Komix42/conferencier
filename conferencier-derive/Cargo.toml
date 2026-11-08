@@ -19,7 +19,7 @@ proc-macro2 = "1"
 quote = "1"
 syn = { version = "3", features = ["full", "extra-traits"] }
 proc-macro-crate = "3"
-toml = "0.9"
+toml.workspace = true
 
 [dev-dependencies]
 trybuild = "1.0"
