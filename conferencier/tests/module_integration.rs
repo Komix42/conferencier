@@ -128,3 +128,49 @@ counters = [10, 20]
 
     Ok(())
 }
+
+/// Field names matching identifiers used inside the generated code.
+#[derive(ConferModule)]
+#[confer(section = "Hygiene")]
+struct Hygiene {
+    store: String,
+    module: String,
+    guard: i64,
+    value: Option<String>,
+    key: Vec<String>,
+}
+
+#[tokio::test]
+async fn field_names_do_not_collide_with_generated_locals() -> Result<()> {
+    let store = Confer::from_string(
+        r#"[Hygiene]
+store = "s"
+module = "m"
+guard = 1
+value = "v"
+key = ["k"]
+"#,
+    )?;
+
+    let module = Hygiene::from_confer(store.clone()).await?;
+
+    {
+        let mut guard = module.write().await;
+        guard.store = "s2".into();
+        guard.guard = 2;
+        guard.value = None;
+    }
+
+    Hygiene::save(&module, store.clone()).await?;
+
+    assert_eq!(store.get_string("Hygiene", "store").await?, "s2");
+    assert_eq!(store.get_string("Hygiene", "module").await?, "m");
+    assert_eq!(store.get_integer("Hygiene", "guard").await?, 2);
+    assert!(store.get_value("Hygiene", "value").await.is_none());
+    assert_eq!(
+        store.get_string_vec("Hygiene", "key").await?,
+        vec!["k".to_string()]
+    );
+
+    Ok(())
+}

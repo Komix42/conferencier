@@ -1,5 +1,5 @@
 use proc_macro2::{Span, TokenStream};
-use quote::quote;
+use quote::{format_ident, quote};
 use syn::{Ident, LitStr, Result};
 
 use crate::model::{ContainerKind, Field, FieldType, FloatKind, IntegerKind, Module, ScalarKind};
@@ -90,25 +90,35 @@ pub fn generate(module: Module, crate_path: syn::Path) -> Result<TokenStream> {
     })
 }
 
+/// Name of the local holding a field's cloned value inside `save()`.
+///
+/// The prefix keeps user field names (e.g. `store`, `module`) from shadowing
+/// the identifiers used by the generated code.
+fn save_local(ident: &Ident) -> Ident {
+    format_ident!("__confer_{}", ident)
+}
+
 /// Produces the `let (...) = { ... }` block cloning mutable fields for persistence.
 fn generate_clone_block(fields: &[Field]) -> TokenStream {
-    let locals: Vec<_> = fields
+    let idents: Vec<_> = fields
         .iter()
         .filter(|field| !field.ignore)
-        .map(|field| field.ident.clone())
+        .map(|field| &field.ident)
         .collect();
 
-    if locals.is_empty() {
+    if idents.is_empty() {
         return quote! {
             let guard = module.read().await;
             drop(guard);
         };
     }
 
+    let locals: Vec<_> = idents.iter().map(|ident| save_local(ident)).collect();
+
     quote! {
         let (#(#locals),*) = {
             let guard = module.read().await;
-            ( #(guard.#locals.clone()),* )
+            ( #(guard.#idents.clone()),* )
         };
     }
 }
@@ -159,12 +169,13 @@ fn generate_save(field: &Field, section: &LitStr, crate_path: &syn::Path) -> Res
         .ok_or_else(|| syn::Error::new(field.span, "internal error: missing field kind"))?;
 
     let key_lit = LitStr::new(key, field.span);
+    let local = save_local(ident);
 
     let block = match kind.container {
-        ContainerKind::Plain => save_plain(kind, ident, section, &key_lit, crate_path),
-        ContainerKind::Vec => save_vec(kind, ident, section, &key_lit, crate_path),
-        ContainerKind::Option => save_option(kind, ident, section, &key_lit, crate_path),
-        ContainerKind::OptionVec => save_option_vec(kind, ident, section, &key_lit, crate_path),
+        ContainerKind::Plain => save_plain(kind, &local, section, &key_lit, crate_path),
+        ContainerKind::Vec => save_vec(kind, &local, section, &key_lit, crate_path),
+        ContainerKind::Option => save_option(kind, &local, section, &key_lit, crate_path),
+        ContainerKind::OptionVec => save_option_vec(kind, &local, section, &key_lit, crate_path),
     };
 
     Ok(block)
@@ -261,14 +272,14 @@ fn missing_behavior(
 /// Saves scalar fields back into the store.
 fn save_plain(
     kind: &FieldType,
-    ident: &Ident,
+    local: &Ident,
     section: &LitStr,
     key: &LitStr,
     crate_path: &syn::Path,
 ) -> TokenStream {
     let setter = setter_name(kind, false);
     let setter_ident = Ident::new(setter, Span::call_site());
-    let value = scalar_to_store(&kind.scalar, quote! { #ident }, section, key, crate_path);
+    let value = scalar_to_store(&kind.scalar, quote! { #local }, section, key, crate_path);
     quote! {
         store.#setter_ident(#section, #key, #value).await?;
     }
@@ -277,14 +288,14 @@ fn save_plain(
 /// Persists vector fields into the store.
 fn save_vec(
     kind: &FieldType,
-    ident: &Ident,
+    local: &Ident,
     section: &LitStr,
     key: &LitStr,
     crate_path: &syn::Path,
 ) -> TokenStream {
     let setter = setter_name(kind, true);
     let setter_ident = Ident::new(setter, Span::call_site());
-    let value = vec_to_store(&kind.scalar, quote! { #ident }, section, key, crate_path);
+    let value = vec_to_store(&kind.scalar, quote! { #local }, section, key, crate_path);
     quote! {
         store.#setter_ident(#section, #key, #value).await?;
     }
@@ -293,7 +304,7 @@ fn save_vec(
 /// Persists `Option<T>` fields, removing keys when the value is `None`.
 fn save_option(
     kind: &FieldType,
-    ident: &Ident,
+    local: &Ident,
     section: &LitStr,
     key: &LitStr,
     crate_path: &syn::Path,
@@ -308,7 +319,7 @@ fn save_option(
         crate_path,
     );
     quote! {
-        match #ident {
+        match #local {
             ::core::option::Option::Some(value) => {
                 store.#setter_ident(#section, #key, #value).await?;
             }
@@ -322,7 +333,7 @@ fn save_option(
 /// Persists `Option<Vec<T>>` fields with appropriate key cleanup.
 fn save_option_vec(
     kind: &FieldType,
-    ident: &Ident,
+    local: &Ident,
     section: &LitStr,
     key: &LitStr,
     crate_path: &syn::Path,
@@ -337,7 +348,7 @@ fn save_option_vec(
         crate_path,
     );
     quote! {
-        match #ident {
+        match #local {
             ::core::option::Option::Some(value) => {
                 store.#setter_ident(#section, #key, #value).await?;
             }

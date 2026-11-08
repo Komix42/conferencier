@@ -21,6 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - The `conferencier-derive` README no longer suggests that the derive works without depending on `conferencier`.
 - Invalid `Datetime` defaults such as `#[confer(default = "tomorrow")]` are rejected at compile time with a clear error instead of panicking at runtime.
 - Code generated for `Datetime` defaults no longer requires `toml` as a direct dependency of the user's crate.
+- Fields named like locals of the generated `save()` (for example `store` or `module`) no longer break compilation of the derived code.
 
 ## [0.0.2] - 2025-09-30
 
