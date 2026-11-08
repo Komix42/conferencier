@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - The minimum supported Rust version is now 1.88 and is declared via `rust-version`, so older toolchains get a clear error instead of a compile failure.
 - **Breaking:** the default section name strips a leading `Confer` only once and only as a separate CamelCase word, as documented. `ConferenceSettings` now maps to `[ConferenceSettings]` (previously `[enceSettings]`) and `ConferConferApp` to `[ConferApp]` (previously `[App]`). `ConferApp` still maps to `[App]`. If your config files rely on the old names, add `#[confer(section = "...")]`.
 - Updated error derivation to `thiserror` 2 without changing public error variants, messages or source chaining.
+- Updated macro crate-name resolution to `proc-macro-crate` 3, fixing derives for renamed, workspace-inherited dependencies.
 
 ### Fixed
 - Both crates can be published together with `cargo publish --workspace`; the versioned dev-dependency of `conferencier-derive` on `conferencier` that formed a publish cycle is now path-only.
