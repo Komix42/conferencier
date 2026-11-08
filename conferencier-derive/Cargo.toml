@@ -1,11 +1,12 @@
 [package]
 name = "conferencier-derive"
-version = "0.0.3"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 description = "Procedural macro derive for ConferModule"
-authors = ["Komix42 <komix@ignore.cz>"]
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/Komix42/conferencier"
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
 readme = "README.md"
 keywords = ["proc-macro", "derive", "configuration", "toml"]
 categories = ["development-tools::procedural-macro-helpers", "config"]

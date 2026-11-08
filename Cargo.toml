@@ -1,4 +1,16 @@
 [workspace]
 members = ["conferencier", "conferencier-derive"]
 default-members = ["conferencier"]
-resolver = "2"
+resolver = "3"
+
+[workspace.package]
+version = "0.0.3"
+edition = "2024"
+rust-version = "1.88"
+authors = ["Komix42 <komix@ignore.cz>"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Komix42/conferencier"
+
+[workspace.dependencies]
+# Keep the version in sync with `workspace.package.version`.
+conferencier-derive = { version = "0.0.3", path = "conferencier-derive" }
