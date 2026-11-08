@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- Both crates can be published together with `cargo publish --workspace`; the versioned dev-dependency of `conferencier-derive` on `conferencier` that formed a publish cycle is now path-only.
+
+## [0.0.2] - 2025-09-30
+
+### Added
+- `ConferError::value_parse_owned` constructor accepting an owned `String`.
+- crates.io keywords and categories for both crates.
+
+### Fixed
+- Derived modules with `f32` fields failed to compile because the generated range checks used an ambiguous `.into()`.
+
 ## [0.0.1] - 2025-09-29
 
 ### Added
