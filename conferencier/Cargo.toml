@@ -19,7 +19,7 @@ with-derive = ["conferencier-derive"]
 async-trait = "0.1"
 tokio = { version = "1.39", features = ["sync", "rt", "rt-multi-thread", "macros", "fs"] }
 toml = "0.9"
-thiserror = "1.0"
+thiserror = "2"
 serde = { version = "1.0", features = ["derive"] }
 conferencier-derive = { workspace = true, optional = true }
 
