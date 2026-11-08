@@ -52,7 +52,7 @@ jobs:
           - test: workspace-all
             command: cargo test --workspace --all-features --locked
           - test: core-no-defaults
-            command: cargo test -p conferencier --no-default-features --lib --locked
+            command: cargo test -p conferencier --no-default-features --locked
           - test: derive
             command: cargo test -p conferencier-derive --locked
     steps:
