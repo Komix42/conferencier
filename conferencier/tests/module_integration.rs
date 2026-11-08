@@ -174,3 +174,37 @@ key = ["k"]
 
     Ok(())
 }
+
+/// Raw identifiers map to TOML keys without the `r#` prefix.
+#[derive(ConferModule)]
+#[confer(section = "Raw")]
+struct RawIdents {
+    r#type: String,
+    #[confer(default = 3)]
+    r#loop: u32,
+}
+
+#[tokio::test]
+async fn raw_identifier_fields_use_unprefixed_keys() -> Result<()> {
+    let store = Confer::from_string(
+        r#"[Raw]
+type = "t"
+"#,
+    )?;
+
+    let module = RawIdents::from_confer(store.clone()).await?;
+
+    {
+        let guard = module.read().await;
+        assert_eq!(guard.r#type, "t");
+        assert_eq!(guard.r#loop, 3);
+    }
+
+    RawIdents::save(&module, store.clone()).await?;
+
+    assert_eq!(store.get_string("Raw", "type").await?, "t");
+    assert_eq!(store.get_integer("Raw", "loop").await?, 3);
+    assert!(store.get_value("Raw", "r#type").await.is_none());
+
+    Ok(())
+}

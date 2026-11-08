@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
+use syn::ext::IdentExt;
 use syn::meta::ParseNestedMeta;
 use syn::spanned::Spanned;
 use syn::{Attribute, DeriveInput, Expr, Field as SynField, Fields, Lit, LitStr, Result, Type};
@@ -143,7 +144,7 @@ fn parse_field(field: &SynField, seen_keys: &mut HashMap<String, Span>) -> Resul
         ));
     }
 
-    let key = rename.unwrap_or_else(|| ident.to_string());
+    let key = rename.unwrap_or_else(|| ident.unraw().to_string());
 
     if let Some(prev_span) = seen_keys.insert(key.clone(), field.span()) {
         return Err(syn::Error::new(
@@ -183,7 +184,7 @@ fn parse_field(field: &SynField, seen_keys: &mut HashMap<String, Span>) -> Resul
 
 /// Derives the default section name from the type identifier.
 fn default_section_name(ident: &syn::Ident) -> String {
-    let name = ident.to_string();
+    let name = ident.unraw().to_string();
     if name.starts_with("Confer") {
         let trimmed = name.trim_start_matches("Confer").to_string();
         if trimmed.is_empty() { name } else { trimmed }
