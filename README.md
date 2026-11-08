@@ -18,7 +18,7 @@ Async-first, TOML-backed configuration hub with an ergonomic derive macro for ma
 
    ```toml
    [dependencies]
-   conferencier = "0.0.3"
+   conferencier = "0.0.4"
    tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
    ```
 

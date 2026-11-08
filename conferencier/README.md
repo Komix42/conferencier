@@ -18,7 +18,7 @@ Add to `Cargo.toml` (the `with-derive` feature providing `#[derive(ConferModule)
 
 ```toml
 [dependencies]
-conferencier = "0.0.3"
+conferencier = "0.0.4"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
