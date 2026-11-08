@@ -7,11 +7,19 @@ mod section_guard;
 mod store;
 mod value_conversion;
 
+pub use crate::confer_module::ConferModule;
 /// Shared [`tokio::sync::RwLock`] wrapper used by derived modules.
 pub use crate::confer_module::SharedConferModule;
 pub use crate::error::{ConferError, Result};
 pub use crate::store::{Confer, SharedConfer};
 
+/// The [`toml`] crate used by this library; its types appear in the public API.
+pub use toml;
+/// TOML datetime type, usable directly as a field type in derived modules.
+pub use toml::value::Datetime;
+
+// The derive macro shares the trait's name but lives in the macro namespace, so
+// `use conferencier::ConferModule;` imports both.
 #[cfg(feature = "with-derive")]
 pub use conferencier_derive::ConferModule;
 

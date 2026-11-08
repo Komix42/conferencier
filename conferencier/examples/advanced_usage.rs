@@ -8,8 +8,7 @@
 
 use std::{fs, path::PathBuf};
 
-use conferencier::confer_module::ConferModule as _;
-use conferencier::{Confer, ConferModule, Result};
+use conferencier::{Confer, ConferModule, Datetime, Result};
 use tokio::try_join;
 
 /// Server runtime configuration.
@@ -52,7 +51,7 @@ struct FeatureToggles {
     /// Example of nested defaults and renames.
     #[confer(rename = "rollout")]
     #[confer(default = "2025-01-01T00:00:00Z")]
-    rollout_start: toml::value::Datetime,
+    rollout_start: Datetime,
 }
 
 #[tokio::main]

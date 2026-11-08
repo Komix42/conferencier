@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+- The `ConferModule` trait is re-exported at the crate root next to the derive macro of the same name, so `use conferencier::ConferModule;` is enough to both derive the trait and call `from_confer`/`load`/`save`.
+- Re-exported the `toml` crate (`conferencier::toml`) and its datetime type (`conferencier::Datetime`), so applications can use the TOML types from the public API without matching `toml` versions themselves.
+
 ### Changed
 - The minimum supported Rust version is now 1.88 and is declared via `rust-version`, so older toolchains get a clear error instead of a compile failure.
 

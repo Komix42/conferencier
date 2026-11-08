@@ -1,7 +1,6 @@
-use conferencier::{Confer, Result, confer_module::ConferModule};
-use toml::value::Datetime;
+use conferencier::{Confer, ConferModule, Datetime, Result};
 
-#[derive(conferencier::ConferModule)]
+#[derive(ConferModule)]
 #[confer(section = "Srv")]
 struct Server {
     #[confer(rename = "p")]
@@ -76,7 +75,7 @@ notes = "temp"
     Ok(())
 }
 
-#[derive(conferencier::ConferModule)]
+#[derive(ConferModule)]
 #[confer(section = "Nested")]
 struct NestedModule {
     #[confer(default = [1, 2, 3])]
