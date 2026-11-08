@@ -102,11 +102,13 @@ cargo run --example advanced_usage --features with-derive
 
 ## Testing
 
-Execute the full test suite (unit + integration) with:
+Execute the full test suite of both crates (unit, integration, doc and compile-fail tests) with:
 
 ```powershell
-cargo test --all-features
+cargo test --workspace --all-features
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the remaining checks run in CI.
 
 ## Documentation
 
