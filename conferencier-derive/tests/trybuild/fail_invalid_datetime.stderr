@@ -1,0 +1,5 @@
+error: invalid TOML datetime `tomorrow`: invalid datetime, expected year or hour
+ --> tests/trybuild/fail_invalid_datetime.rs:3:24
+  |
+3 |     #[confer(default = "tomorrow")]
+  |                        ^^^^^^^^^^

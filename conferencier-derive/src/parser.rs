@@ -351,9 +351,25 @@ fn transform_vec_default(
 /// Ensures the provided literal matches the scalar kind expected by the field.
 fn validate_literal(expr: &Expr, scalar: &ScalarKind) -> Result<()> {
     match scalar {
-        ScalarKind::String | ScalarKind::Datetime => match expr {
+        ScalarKind::String => match expr {
             Expr::Lit(expr_lit) => match &expr_lit.lit {
                 Lit::Str(_) => Ok(()),
+                _ => Err(syn::Error::new(expr.span(), "expected string literal")),
+            },
+            _ => Err(syn::Error::new(expr.span(), "expected string literal")),
+        },
+        ScalarKind::Datetime => match expr {
+            Expr::Lit(expr_lit) => match &expr_lit.lit {
+                Lit::Str(lit) => lit
+                    .value()
+                    .parse::<toml::value::Datetime>()
+                    .map(|_| ())
+                    .map_err(|err| {
+                        syn::Error::new(
+                            lit.span(),
+                            format!("invalid TOML datetime `{}`: {err}", lit.value()),
+                        )
+                    }),
                 _ => Err(syn::Error::new(expr.span(), "expected string literal")),
             },
             _ => Err(syn::Error::new(expr.span(), "expected string literal")),
@@ -394,7 +410,9 @@ fn literal_tokens(expr: Expr, scalar: &ScalarKind) -> Result<TokenStream> {
             quote! { (#expr) as #ty }
         }
         ScalarKind::Datetime => {
-            quote! { <toml::value::Datetime as std::str::FromStr>::from_str(#expr).expect("invalid datetime literal") }
+            // Validated above, so parsing cannot fail. The target type is inferred from the
+            // field, which keeps the generated code free of `toml` paths.
+            quote! { (#expr).parse().expect("datetime default validated at compile time") }
         }
     })
 }

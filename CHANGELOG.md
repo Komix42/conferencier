@@ -19,6 +19,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Both published crates now include the `LICENSE-MIT` and `LICENSE-APACHE` texts required by their licenses.
 - The README quick start now compiles and runs (it lacked the trait import, a default for `features` and the `tokio` dependency). The crate README is now the crate-level documentation and runs as a doctest, so it stays correct.
 - The `conferencier-derive` README no longer suggests that the derive works without depending on `conferencier`.
+- Invalid `Datetime` defaults such as `#[confer(default = "tomorrow")]` are rejected at compile time with a clear error instead of panicking at runtime.
+- Code generated for `Datetime` defaults no longer requires `toml` as a direct dependency of the user's crate.
 
 ## [0.0.2] - 2025-09-30
 
