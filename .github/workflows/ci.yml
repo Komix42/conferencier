@@ -39,7 +39,7 @@ jobs:
         run: cargo fmt --all --check
 
       - name: Clippy lints
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
   test:
     runs-on: ${{ matrix.os }}
@@ -86,6 +86,46 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --workspace --no-deps --locked
+
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (MSRV)
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          # Keep in sync with `workspace.package.rust-version` in Cargo.toml.
+          toolchain: "1.88"
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check workspace (all features)
+        run: cargo check --workspace --all-targets --all-features --locked
+
+      - name: Check core (no default features)
+        run: cargo check -p conferencier --no-default-features --locked
+
+      # trybuild tests are skipped here: their .stderr snapshots track stable diagnostics.
+      - name: Run core tests
+        run: cargo test -p conferencier --all-features --locked
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Publish dry-run (both crates)
+        run: cargo publish --workspace --dry-run --locked
 
   audit:
     runs-on: ubuntu-latest
