@@ -64,7 +64,7 @@ The `#[derive(ConferModule)]` macro understands a small set of field/struct attr
 - `#[confer(rename = "key")]` on a field overrides the TOML key name.
 
 - `#[confer(default = <expr>)]` provides a default when the key is missing.
-    - Supported scalar defaults: strings (in quotes), integers, floats, booleans, and RFC 3339 datetimes as strings.
+    - Supported scalar defaults: strings (in quotes), integers and floats (including negative values such as `-1` or `-0.5`), booleans, and RFC 3339 datetimes as strings.
     - Vector defaults use array syntax: `#[confer(default = [1, 2, 3])]` or `#[confer(default = ["a", "b"]) ]`.
     - Works with `Option<T>` and `Option<Vec<T>>` as well; when no default is given, missing keys become `None`.
 

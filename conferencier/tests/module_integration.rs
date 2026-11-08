@@ -208,3 +208,48 @@ type = "t"
 
     Ok(())
 }
+
+/// Negative numeric literals are accepted as defaults.
+#[derive(ConferModule)]
+#[confer(section = "Negative")]
+struct NegativeDefaults {
+    #[confer(default = -1)]
+    offset: i32,
+    #[confer(default = -2.5)]
+    ratio: f64,
+    #[confer(default = -3)]
+    bias: f32,
+    #[confer(default = [-1, 2])]
+    deltas: Vec<i64>,
+    #[confer(default = -7)]
+    floor: Option<i64>,
+}
+
+#[tokio::test]
+async fn negative_numeric_defaults() -> Result<()> {
+    let store = Confer::from_string("[Negative]\n")?;
+
+    let module = NegativeDefaults::from_confer(store.clone()).await?;
+
+    {
+        let guard = module.read().await;
+        assert_eq!(guard.offset, -1);
+        assert_eq!(guard.ratio, -2.5);
+        assert_eq!(guard.bias, -3.0);
+        assert_eq!(guard.deltas, vec![-1, 2]);
+        assert_eq!(guard.floor, Some(-7));
+    }
+
+    NegativeDefaults::save(&module, store.clone()).await?;
+
+    assert_eq!(store.get_integer("Negative", "offset").await?, -1);
+    assert_eq!(store.get_float("Negative", "ratio").await?, -2.5);
+    assert_eq!(store.get_float("Negative", "bias").await?, -3.0);
+    assert_eq!(
+        store.get_integer_vec("Negative", "deltas").await?,
+        vec![-1, 2]
+    );
+    assert_eq!(store.get_integer("Negative", "floor").await?, -7);
+
+    Ok(())
+}

@@ -5,7 +5,10 @@ use quote::quote;
 use syn::ext::IdentExt;
 use syn::meta::ParseNestedMeta;
 use syn::spanned::Spanned;
-use syn::{Attribute, DeriveInput, Expr, Field as SynField, Fields, Lit, LitStr, Result, Type};
+use syn::{
+    Attribute, DeriveInput, Expr, ExprLit, ExprUnary, Field as SynField, Fields, Lit, LitStr,
+    Result, Type, UnOp,
+};
 
 use crate::model::{ContainerKind, Field, FieldType, FloatKind, IntegerKind, Module, ScalarKind};
 
@@ -382,20 +385,49 @@ fn validate_literal(expr: &Expr, scalar: &ScalarKind) -> Result<()> {
             },
             _ => Err(syn::Error::new(expr.span(), "expected boolean literal")),
         },
-        ScalarKind::Integer(_) => match expr {
-            Expr::Lit(expr_lit) => match expr_lit.lit {
-                Lit::Int(_) => Ok(()),
-                _ => Err(syn::Error::new(expr.span(), "expected integer literal")),
-            },
+        ScalarKind::Integer(kind) => match strip_negation(expr) {
+            (
+                negative,
+                Expr::Lit(ExprLit {
+                    lit: Lit::Int(_), ..
+                }),
+            ) => {
+                if negative && kind.is_unsigned() {
+                    Err(syn::Error::new_spanned(
+                        expr,
+                        format!(
+                            "negative default for unsigned integer type `{}`",
+                            kind.type_tokens()
+                        ),
+                    ))
+                } else {
+                    Ok(())
+                }
+            }
             _ => Err(syn::Error::new(expr.span(), "expected integer literal")),
         },
-        ScalarKind::Float(_) => match expr {
-            Expr::Lit(expr_lit) => match expr_lit.lit {
-                Lit::Float(_) | Lit::Int(_) => Ok(()),
-                _ => Err(syn::Error::new(expr.span(), "expected float literal")),
-            },
+        ScalarKind::Float(_) => match strip_negation(expr) {
+            (
+                _,
+                Expr::Lit(ExprLit {
+                    lit: Lit::Float(_) | Lit::Int(_),
+                    ..
+                }),
+            ) => Ok(()),
             _ => Err(syn::Error::new(expr.span(), "expected float literal")),
         },
+    }
+}
+
+/// Splits a leading unary minus off `expr`, reporting whether one was present.
+fn strip_negation(expr: &Expr) -> (bool, &Expr) {
+    match expr {
+        Expr::Unary(ExprUnary {
+            op: UnOp::Neg(_),
+            expr: inner,
+            ..
+        }) => (true, inner),
+        _ => (false, expr),
     }
 }
 

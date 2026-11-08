@@ -70,7 +70,7 @@ The `#[derive(ConferModule)]` macro supports a few attributes to control how you
 - `#[confer(rename = "key")]` on a field overrides the TOML key name.
 
 - `#[confer(default = <expr>)]` provides a value when the key is missing.
-    - Scalars: strings (quoted), integers, floats, booleans, RFC 3339 datetimes as strings.
+    - Scalars: strings (quoted), integers and floats (including negative values such as `-1` or `-0.5`), booleans, RFC 3339 datetimes as strings.
     - Vectors: use array syntax, e.g. `#[confer(default = [1, 2, 3])]`, `#[confer(default = ["a", "b"]) ]`.
     - Works with `Option<T>` and `Option<Vec<T>>`; if no default is given, missing keys become `None`.
 

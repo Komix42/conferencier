@@ -7,4 +7,5 @@ fn trybuild_suite() {
     t.compile_fail("tests/trybuild/fail_unsupported_type.rs");
     t.compile_fail("tests/trybuild/fail_conflicting_attrs.rs");
     t.compile_fail("tests/trybuild/fail_invalid_datetime.rs");
+    t.compile_fail("tests/trybuild/fail_negative_unsigned.rs");
 }

@@ -1,0 +1,5 @@
+error: negative default for unsigned integer type `u32`
+ --> tests/trybuild/fail_negative_unsigned.rs:3:24
+  |
+3 |     #[confer(default = -1)]
+  |                        ^^

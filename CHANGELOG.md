@@ -23,6 +23,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Code generated for `Datetime` defaults no longer requires `toml` as a direct dependency of the user's crate.
 - Fields named like locals of the generated `save()` (for example `store` or `module`) no longer break compilation of the derived code.
 - Fields declared with raw identifiers (for example `r#type`) map to the TOML key `type` instead of `r#type`.
+- Negative numeric defaults such as `#[confer(default = -1)]` or `[-1, 2]` are accepted for signed integer and float fields; on unsigned fields they produce a clear compile error.
 
 ## [0.0.2] - 2025-09-30
 
