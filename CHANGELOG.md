@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+- The README explains what saving does to a hand-written configuration file: comments, key order and value notation are not preserved, and a module's `save` removes unknown keys and sub-tables from its section, including misspelled ones. Saving is recommended mainly for generating an initial configuration file.
+
 ### Changed
 - **Breaking:** `ConferError` is now `#[non_exhaustive]`, so future releases can add error variants without a breaking change. A `match` on `ConferError` outside this crate needs a wildcard arm (`_ => ...`); constructing variants and matching individual variants work as before.
 

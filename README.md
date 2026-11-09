@@ -87,6 +87,15 @@ Conferencier uses `toml` 1.2 with TOML 1.1 support. Prefer `conferencier::toml::
 
 TOML 1.1 times may omit seconds (for example `07:30`, also accepted as a datetime default). In the new datetime API, `Time::second` and `Time::nanosecond` are optional: `None` means the component was omitted, not explicitly set to zero.
 
+## Saving configuration
+
+Conferencier is primarily meant for reading configuration. Saving works, but it rewrites the configuration rather than editing it:
+
+- `Confer::save_str` and `Confer::save_file` regenerate the whole document from the stored values. Comments are lost, keys may be reordered, inline tables become `[section.table]` headers, and values are written in canonical notation (for example `0x1F90` becomes `8080` and `'text'` becomes `"text"`).
+- A module's `save` owns its section: it removes every key and sub-table in the section that is not mapped to a non-ignored field. A misspelled key such as `prot = 9090` is therefore ignored on load (`port` falls back to its default) and deleted by the next save. Other sections are not changed; keep data that no module owns in a separate section.
+
+If people edit the configuration file by hand, prefer to only load it, and use saving mainly to generate an initial configuration file.
+
 ## Examples
 
 The crate includes runnable examples:

@@ -102,6 +102,15 @@ TOML 1.1 times may omit seconds (for example `07:30`, also accepted as a datetim
 - "cannot combine default and init" → pick one of the attributes per field.
 - Defaults must have the right literal form (e.g., `"string"`, `[1, 2]`, or RFC 3339 for datetimes).
 
+## Saving configuration
+
+Conferencier is primarily meant for reading configuration. Saving works, but it rewrites the configuration rather than editing it:
+
+- `Confer::save_str` and `Confer::save_file` regenerate the whole document from the stored values. Comments are lost, keys may be reordered, inline tables become `[section.table]` headers, and values are written in canonical notation (for example `0x1F90` becomes `8080` and `'text'` becomes `"text"`).
+- A module's `save` owns its section: it removes every key and sub-table in the section that is not mapped to a non-ignored field. A misspelled key such as `prot = 9090` is therefore ignored on load (`port` falls back to its default) and deleted by the next save. Other sections are not changed; keep data that no module owns in a separate section.
+
+If people edit the configuration file by hand, prefer to only load it, and use saving mainly to generate an initial configuration file.
+
 ## License
 
 MIT OR Apache-2.0
