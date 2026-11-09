@@ -6,6 +6,7 @@ pub type Result<T> = std::result::Result<T, ConferError>;
 
 /// Errors that can be raised while interacting with a [`Confer`](crate::store::Confer) store.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum ConferError {
     #[error("I/O error (path: {path:?}): {source}")]
     Io {

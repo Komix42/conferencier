@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+- **Breaking:** `ConferError` is now `#[non_exhaustive]`, so future releases can add error variants without a breaking change. A `match` on `ConferError` outside this crate needs a wildcard arm (`_ => ...`); constructing variants and matching individual variants work as before.
+
 ## [0.0.3] - 2026-11-08
 
 ### Added
