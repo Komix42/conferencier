@@ -16,9 +16,30 @@ pub fn generate(module: Module, crate_path: syn::Path) -> Result<TokenStream> {
     let section_lit = LitStr::new(&section, Span::call_site());
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
-    let init_fields = fields.iter().map(|field| {
+    let load_values: Vec<_> = fields
+        .iter()
+        .filter(|field| !field.ignore)
+        .map(|field| generate_load_value(field, &section_lit, &crate_path))
+        .collect::<Result<_>>()?;
+
+    // Loaded fields are converted into locals first, so that ignored fields are only
+    // initialized once every conversion has succeeded.
+    let from_confer_locals: Vec<_> = fields
+        .iter()
+        .filter(|field| !field.ignore)
+        .zip(&load_values)
+        .map(|(field, value)| {
+            let local = field_local(&field.ident);
+            quote! { let #local = #value; }
+        })
+        .collect();
+
+    let struct_fields = fields.iter().map(|field| {
         let ident = &field.ident;
-        if let Some(init) = &field.init {
+        if !field.ignore {
+            let local = field_local(ident);
+            quote! { #ident: #local }
+        } else if let Some(init) = &field.init {
             quote! { #ident: #init }
         } else if let Some(default) = &field.default {
             quote! { #ident: #default }
@@ -30,8 +51,19 @@ pub fn generate(module: Module, crate_path: syn::Path) -> Result<TokenStream> {
     let load_blocks: Vec<_> = fields
         .iter()
         .filter(|field| !field.ignore)
-        .map(|field| generate_load(field, &section_lit, &crate_path))
-        .collect::<Result<_>>()?;
+        .zip(&load_values)
+        .map(|(field, value)| {
+            let ident = &field.ident;
+            let local = field_local(ident);
+            quote! {
+                let #local = #value;
+                {
+                    let mut guard = module.write().await;
+                    guard.#ident = #local;
+                }
+            }
+        })
+        .collect();
 
     let save_blocks: Vec<_> = fields
         .iter()
@@ -62,10 +94,9 @@ pub fn generate(module: Module, crate_path: syn::Path) -> Result<TokenStream> {
         #[#crate_private::async_trait]
         impl #impl_generics #crate_path::confer_module::ConferModule for #ident #ty_generics #where_clause {
             async fn from_confer(store: #shared_confer) -> #result_type<#shared_module> {
-                let value = Self { #(#init_fields),* };
-                let module = #crate_private::new_shared_module(value);
-                Self::load(&module, store).await?;
-                Ok(module)
+                #( #from_confer_locals )*
+                let value = Self { #(#struct_fields),* };
+                Ok(#crate_private::new_shared_module(value))
             }
 
             async fn load(module: &#shared_module, store: #shared_confer) -> #result_type<()> {
@@ -90,11 +121,11 @@ pub fn generate(module: Module, crate_path: syn::Path) -> Result<TokenStream> {
     })
 }
 
-/// Name of the local holding a field's cloned value inside `save()`.
+/// Name of the local holding a field's value inside the generated functions.
 ///
 /// The prefix keeps user field names (e.g. `store`, `module`) from shadowing
 /// the identifiers used by the generated code.
-fn save_local(ident: &Ident) -> Ident {
+fn field_local(ident: &Ident) -> Ident {
     format_ident!("__confer_{}", ident)
 }
 
@@ -113,7 +144,7 @@ fn generate_clone_block(fields: &[Field]) -> TokenStream {
         };
     }
 
-    let locals: Vec<_> = idents.iter().map(|ident| save_local(ident)).collect();
+    let locals: Vec<_> = idents.iter().map(|ident| field_local(ident)).collect();
 
     quote! {
         let (#(#locals),*) = {
@@ -123,14 +154,17 @@ fn generate_clone_block(fields: &[Field]) -> TokenStream {
     }
 }
 
-/// Generates the load logic for a single field, including defaults and conversions.
-fn generate_load(field: &Field, section: &LitStr, crate_path: &syn::Path) -> Result<TokenStream> {
+/// Generates an expression yielding the value of a loaded field.
+///
+/// The expression performs the typed store lookup, converts the result and applies the
+/// default, `None` or `MissingKey` behavior. Errors are returned from the enclosing function.
+fn generate_load_value(
+    field: &Field,
+    section: &LitStr,
+    crate_path: &syn::Path,
+) -> Result<TokenStream> {
     let Field {
-        ident,
-        key,
-        kind,
-        default,
-        ..
+        key, kind, default, ..
     } = field;
 
     let kind = kind
@@ -140,18 +174,14 @@ fn generate_load(field: &Field, section: &LitStr, crate_path: &syn::Path) -> Res
     let key_lit = LitStr::new(key, field.span);
     let fetch = fetch_expression(kind, section, &key_lit);
     let converted = convert_from_store(kind, section, &key_lit, crate_path);
-    let assign = assign_converted(kind, ident);
-    let on_missing = missing_behavior(kind, ident, default.as_ref(), section, &key_lit, crate_path);
+    let present = present_value(kind, converted);
+    let absent = absent_value(kind, default.as_ref(), section, &key_lit, crate_path);
 
     Ok(quote! {
         match #fetch {
-            Ok(value) => {
-                let converted = { #converted };
-                let mut guard = module.write().await;
-                #assign
-            }
+            Ok(value) => #present,
             Err(err) => match err {
-                #crate_path::ConferError::MissingKey { .. } => { #on_missing }
+                #crate_path::ConferError::MissingKey { .. } => #absent,
                 other => return Err(other),
             },
         }
@@ -169,7 +199,7 @@ fn generate_save(field: &Field, section: &LitStr, crate_path: &syn::Path) -> Res
         .ok_or_else(|| syn::Error::new(field.span, "internal error: missing field kind"))?;
 
     let key_lit = LitStr::new(key, field.span);
-    let local = save_local(ident);
+    let local = field_local(ident);
 
     let block = match kind.container {
         ContainerKind::Plain => save_plain(kind, &local, section, &key_lit, crate_path),
@@ -223,48 +253,31 @@ fn convert_from_store(
     }
 }
 
-/// Emits the assignment into the guard, taking optional containers into account.
-fn assign_converted(kind: &FieldType, ident: &Ident) -> TokenStream {
+/// Wraps a converted value in `Some(...)` for optional containers.
+fn present_value(kind: &FieldType, converted: TokenStream) -> TokenStream {
     match kind.container {
-        ContainerKind::Plain | ContainerKind::Vec => quote! { guard.#ident = converted; },
+        ContainerKind::Plain | ContainerKind::Vec => converted,
         ContainerKind::Option | ContainerKind::OptionVec => {
-            quote! { guard.#ident = ::core::option::Option::Some(converted); }
+            quote! { ::core::option::Option::Some(#converted) }
         }
     }
 }
 
-/// Handles missing keys by applying defaults or converting to `None`.
-fn missing_behavior(
+/// Handles missing keys by applying defaults, converting to `None` or returning `MissingKey`.
+fn absent_value(
     kind: &FieldType,
-    ident: &Ident,
     default: Option<&TokenStream>,
     section: &LitStr,
     key: &LitStr,
     crate_path: &syn::Path,
 ) -> TokenStream {
-    match kind.container {
-        ContainerKind::Plain | ContainerKind::Vec => {
-            if let Some(default) = default {
-                quote! {
-                    let mut guard = module.write().await;
-                    guard.#ident = #default;
-                }
-            } else {
-                quote! { return Err(#crate_path::ConferError::missing_key(#section, #key)); }
-            }
+    match (kind.container, default) {
+        (_, Some(default)) => quote! { #default },
+        (ContainerKind::Plain | ContainerKind::Vec, None) => {
+            quote! { return Err(#crate_path::ConferError::missing_key(#section, #key)) }
         }
-        ContainerKind::Option | ContainerKind::OptionVec => {
-            if let Some(default) = default {
-                quote! {
-                    let mut guard = module.write().await;
-                    guard.#ident = #default;
-                }
-            } else {
-                quote! {
-                    let mut guard = module.write().await;
-                    guard.#ident = ::core::option::Option::None;
-                }
-            }
+        (ContainerKind::Option | ContainerKind::OptionVec, None) => {
+            quote! { ::core::option::Option::None }
         }
     }
 }

@@ -1,4 +1,6 @@
-use conferencier::{Confer, ConferModule, Datetime, Result};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use conferencier::{Confer, ConferError, ConferModule, Datetime, Result};
 
 #[derive(ConferModule)]
 #[confer(section = "Srv")]
@@ -320,5 +322,158 @@ async fn datetime_defaults_preserve_omitted_seconds() -> Result<()> {
     let reloaded = reloaded.read().await;
     assert_eq!(reloaded.alarm, original.alarm);
     assert_eq!(reloaded.reminders, original.reminders);
+    Ok(())
+}
+
+/// `Datetime` has no `Default` value; a required field of that type is built directly.
+#[derive(ConferModule)]
+#[confer(section = "Clock")]
+struct Clock {
+    started_at: Datetime,
+    stopped_at: Option<Datetime>,
+    laps: Vec<Datetime>,
+}
+
+#[tokio::test]
+async fn required_datetime_without_default_loads_and_saves() -> Result<()> {
+    let store = Confer::from_string(
+        r#"[Clock]
+started_at = 2024-05-01T10:30:00Z
+laps = [2024-05-01T10:31:00Z]
+"#,
+    )?;
+
+    let module = Clock::from_confer(store.clone()).await?;
+
+    {
+        let guard = module.read().await;
+        assert_eq!(guard.started_at.to_string(), "2024-05-01T10:30:00Z");
+        assert!(guard.stopped_at.is_none());
+        assert_eq!(guard.laps.len(), 1);
+    }
+
+    Clock::save(&module, store.clone()).await?;
+    let restored = Confer::from_string(&store.save_str().await?)?;
+    let reloaded = Clock::from_confer(restored).await?;
+    assert_eq!(
+        reloaded.read().await.started_at,
+        module.read().await.started_at
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn required_datetime_without_default_reports_missing_key() -> Result<()> {
+    let store = Confer::from_string("[Clock]\n")?;
+
+    let err = Clock::from_confer(store)
+        .await
+        .err()
+        .expect("a missing required key must fail");
+
+    assert!(
+        matches!(&err, ConferError::MissingKey { section, key } if section == "Clock" && key == "started_at"),
+        "unexpected error: {err}"
+    );
+
+    Ok(())
+}
+
+static TRACKED_DEFAULTS: AtomicUsize = AtomicUsize::new(0);
+
+/// Counts how often its `Default` implementation runs.
+struct Tracked(u32);
+
+impl Default for Tracked {
+    fn default() -> Self {
+        TRACKED_DEFAULTS.fetch_add(1, Ordering::SeqCst);
+        Tracked(7)
+    }
+}
+
+#[derive(ConferModule)]
+#[confer(section = "Tracked")]
+struct TrackedModule {
+    port: u16,
+    retries: u8,
+    #[confer(ignore)]
+    state: Tracked,
+}
+
+/// One test owns the counter, because tests in this file run in parallel.
+#[tokio::test]
+async fn ignored_fields_are_initialized_once_after_conversion_succeeds() -> Result<()> {
+    // A required key is missing.
+    let store = Confer::from_string("[Tracked]\nretries = 1\n")?;
+    let err = TrackedModule::from_confer(store)
+        .await
+        .err()
+        .expect("a missing required key must fail");
+    assert!(matches!(&err, ConferError::MissingKey { key, .. } if key == "port"));
+    assert_eq!(TRACKED_DEFAULTS.load(Ordering::SeqCst), 0);
+
+    // A later field is out of range, and the first error wins in declaration order.
+    let store = Confer::from_string("[Tracked]\nport = 80\nretries = 300\n")?;
+    let err = TrackedModule::from_confer(store)
+        .await
+        .err()
+        .expect("an out-of-range value must fail");
+    assert!(matches!(&err, ConferError::ValueParse { key, .. } if key == "retries"));
+    let store = Confer::from_string("[Tracked]\nretries = 300\n")?;
+    let err = TrackedModule::from_confer(store)
+        .await
+        .err()
+        .expect("a missing required key must fail");
+    assert!(matches!(&err, ConferError::MissingKey { key, .. } if key == "port"));
+    assert_eq!(TRACKED_DEFAULTS.load(Ordering::SeqCst), 0);
+
+    // Success initializes the ignored field exactly once; load and save leave it alone.
+    let store = Confer::from_string("[Tracked]\nport = 80\nretries = 3\n")?;
+    let module = TrackedModule::from_confer(store.clone()).await?;
+    assert_eq!(TRACKED_DEFAULTS.load(Ordering::SeqCst), 1);
+    assert_eq!(module.read().await.state.0, 7);
+
+    module.write().await.state = Tracked(42);
+    TrackedModule::load(&module, store.clone()).await?;
+    TrackedModule::save(&module, store.clone()).await?;
+    assert_eq!(TRACKED_DEFAULTS.load(Ordering::SeqCst), 1);
+    assert_eq!(module.read().await.state.0, 42);
+
+    let mut keys = store.list_keys("Tracked").await?;
+    keys.sort();
+    assert_eq!(keys, ["port", "retries"]);
+
+    Ok(())
+}
+
+/// A module without loaded fields needs nothing from the store.
+#[derive(ConferModule)]
+#[confer(section = "Runtime")]
+struct RuntimeOnly {
+    #[confer(ignore)]
+    counter: u64,
+    #[confer(ignore)]
+    names: Vec<String>,
+}
+
+#[tokio::test]
+async fn module_without_loaded_fields_is_constructed_directly() -> Result<()> {
+    let store = Confer::new();
+    let module = RuntimeOnly::from_confer(store.clone()).await?;
+
+    {
+        let guard = module.read().await;
+        assert_eq!(guard.counter, 0);
+        assert!(guard.names.is_empty());
+    }
+
+    module.write().await.counter = 5;
+    RuntimeOnly::load(&module, store.clone()).await?;
+    assert_eq!(module.read().await.counter, 5);
+
+    RuntimeOnly::save(&module, store.clone()).await?;
+    assert!(store.list_keys("Runtime").await?.is_empty());
+
     Ok(())
 }

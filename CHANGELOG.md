@@ -11,6 +11,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 - **Breaking:** `ConferError` is now `#[non_exhaustive]`, so future releases can add error variants without a breaking change. A `match` on `ConferError` outside this crate needs a wildcard arm (`_ => ...`); constructing variants and matching individual variants work as before.
+- The derived `from_confer` builds the module directly from the values read from the store instead of creating a default instance and loading into it. Initializers of `ignore`d fields (`init`, `default` or `Default::default()`) therefore run once, after every loaded field has converted successfully, and an `init` on a loaded field is no longer evaluated. `load` and `save` are unchanged.
+
+### Fixed
+- A required `Datetime` field (plain type without `default`) now compiles and loads; a missing key fails with `MissingKey`.
 
 ## [0.0.3] - 2026-11-08
 

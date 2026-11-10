@@ -67,6 +67,7 @@ The `#[derive(ConferModule)]` macro understands a small set of field/struct attr
     - Supported scalar defaults: strings (in quotes), integers and floats (including negative values such as `-1` or `-0.5`), booleans, and RFC 3339 datetimes as strings.
     - Vector defaults use array syntax: `#[confer(default = [1, 2, 3])]` or `#[confer(default = ["a", "b"]) ]`.
     - Works with `Option<T>` and `Option<Vec<T>>` as well; when no default is given, missing keys become `None`.
+    - Without a default, a missing key is an error for plain `T` and `Vec<T>` fields (`ConferError::MissingKey`), including `Datetime`.
 
 - `#[confer(init = "<expr>")]` initializes a field before the first load (useful for preallocations or derived values). The expression is evaluated as-is; you can also pass it as a string literal if that’s clearer.
 
@@ -78,8 +79,6 @@ The `#[derive(ConferModule)]` macro understands a small set of field/struct attr
 - Containers: plain `T`, `Vec<T>`, `Option<T>`, `Option<Vec<T>>`.
 
 If a type falls outside this set, the derive emits a compile error with a friendly message.
-
-Known limitation: a required `Datetime` field (plain type without `default`) does not compile yet, because `Datetime` has no `Default` value to start from. Give it a `#[confer(default = "...")]` or use `Option<Datetime>`.
 
 ### TOML compatibility
 
