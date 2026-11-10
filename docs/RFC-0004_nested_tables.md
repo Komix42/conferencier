@@ -1,7 +1,7 @@
 # RFC-0004: Nested tables via `ConferTable`
 
 Date: 2026-11-09
-Status: Draft
+Status: Approved
 Author: Komix42 <komix[at]ignore.cz>
 Target release: 0.0.4
 Requires: [RFC-0003](./RFC-0003_field_attributes.md)
@@ -347,11 +347,13 @@ Preserving runtime state inside nested values would require matching old and new
 
 - **R1 — Snapshot load.** `load` and `from_confer` read the whole section once under a single store read lock and convert all loaded fields without holding any lock. `load` then assigns them under a single module write lock; `from_confer` constructs the module directly from the converted values, following RFC-0003 A5.
 - **R2 — All-or-nothing load.** If any field fails, `load` returns the error and the module, including all nested values and ignored fields, keeps its previous state. Before this RFC, fields preceding the failing one were already updated. Initializers for temporary nested values may already have run before a later field fails; their external side effects are not rolled back (I1).
-- **R3 — Atomic save.** `save` first converts the module into a complete section table under the module read lock, releases it, then replaces the section with `set_section_table`. Concurrent readers never observe a half-saved module, and a conversion error leaves the store unchanged. Conversion errors therefore take precedence over a non-table section error if both conditions are present. Before this RFC, keys were written one by one and earlier fields were persisted before a failing one.
+- **R3 — Atomic save.** `save` first converts the module into a complete section table under the module read lock, releases it, then replaces the section with `set_section_table`. Concurrent readers of a whole-section snapshot never observe a half-saved module, and a conversion error leaves the store unchanged. Conversion errors therefore take precedence over a non-table section error if both conditions are present. Before this RFC, keys were written one by one and earlier fields were persisted before a failing one.
 - **R4 — Lock discipline.** Generated code never holds a module lock and a store lock at the same time.
 - **R5 — Non-table section.** `load` and `from_confer` check the section before conversion and return `TypeMismatch { section, key: "<section>", expected: "table", found }` if it exists but is not a table. This check also applies to modules with no loaded fields; before this RFC, their generated `load` was a no-op and did not inspect the section. `save` returns the same mismatch if conversion succeeds and the existing section is not a table; a conversion error takes precedence as specified in R3.
 - **R6 — Unchanged behavior.** Section naming, key naming, defaults, `Option` handling, numeric range checks, datetime fallbacks, removal of unknown keys on save, and error variants and message formats for existing field types remain as specified in RFC-0001 as amended by RFC-0003. Error precedence may change as specified in R3 and R5. The test suite as updated by RFC-0003, including its new tests, must pass without further modification, except the `fail_unsupported_type` `trybuild` snapshot, which is updated for the extended message (see [Compile-time diagnostics](#compile-time-diagnostics)).
 - **R7 — Field bounds.** Fields no longer need to be cloned on save; values are converted under the read lock.
+
+These atomicity guarantees apply to individual snapshots and writes, not to a transaction spanning the module and the store. Multiple independent getter calls do not share a snapshot and may observe different versions.
 
 ## Compile-time diagnostics
 
@@ -380,7 +382,7 @@ When both derives are applied to one struct, each derive invocation validates th
 - **Parser.** `parse_module` becomes parameterised by the derive kind (for error messages and the `section` attribute). `FieldType` gains a table variant holding the inner type and its container (`Plain`, `Option`, `Vec`).
 - **Paths are allocated** for every nested table during load and save. This is negligible for configuration data and keeps manual implementations simple.
 - **Generics.** No trait bounds are added automatically. A generic table field (`#[confer(table)] inner: T`) needs a user-written `where T: ConferTable` bound.
-- **Recursion.** Recursive types work through `Vec<Self>` (e.g. a tree of nodes); depth is bounded by the TOML parser's nesting limit.
+- **Recursion.** Recursive types work through `Vec<Self>` (e.g. a tree of nodes). Parsed input is subject to the TOML parser's nesting limit. This RFC introduces no separate depth limit for programmatically constructed tables passed to `from_table` or for values converted by `to_table` during saving; these need not have passed through the parser.
 
 ## Compatibility
 
@@ -433,6 +435,8 @@ When both derives are applied to one struct, each derive invocation validates th
   - A `Vec<T>` whose first table has a missing required field and whose next element is not a table returns the first element's nested `MissingKey`, proving depth-first error order (L5).
   - Ignored fields inside table types are re-initialized on load (I1); module-level ignored fields are preserved (I2).
   - R2: a failing `load` leaves the module, including nested ignored state, unchanged. R3: a `u64` range error during `save` leaves the store unchanged.
+  - R1/R2 concurrency: a store writer atomically alternates two whole-section versions with two correlated fields while generated `from_confer` and `load` read them. Every constructed module must contain one complete version, and a concurrent module reader holding one read lock must never observe mixed fields.
+  - R3 concurrency: a writer alternates both correlated module fields under one write lock and persists them through generated `save`. A concurrent reader using `get_section_table` must observe one complete section version, never a mixture. These concurrency tests exercise the generated operations, not just `set_section_table`, and use coordinated tasks rather than timing-based sleeps.
   - R3/R5: test that a conversion error during save takes precedence over a non-table section; after successful conversion, the non-table section yields `TypeMismatch`.
   - R5: a derived module whose section holds a non-table value fails `load` and `save` with `TypeMismatch`, including a module with no loaded fields.
   - A recursive table type through `Vec<Self>` (e.g. a tree of nodes) roundtrips.
