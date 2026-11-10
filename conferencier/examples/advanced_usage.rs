@@ -31,8 +31,9 @@ struct ServerProfile {
     #[confer(rename = "allow_ips")]
     allowed_ips: Option<Vec<String>>,
 
-    /// Runtime cache that is never serialised back into TOML.
-    #[confer(ignore, init = "Vec::new()")]
+    /// Runtime state that the configuration file cannot affect and that is never saved;
+    /// `ignore = <expr>` chooses its initial value (a bare `ignore` uses `Default`).
+    #[confer(ignore = Vec::with_capacity(16))]
     connection_log: Vec<String>,
 }
 

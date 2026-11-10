@@ -11,10 +11,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 - **Breaking:** `ConferError` is now `#[non_exhaustive]`, so future releases can add error variants without a breaking change. A `match` on `ConferError` outside this crate needs a wildcard arm (`_ => ...`); constructing variants and matching individual variants work as before.
-- The derived `from_confer` builds the module directly from the values read from the store instead of creating a default instance and loading into it. Initializers of `ignore`d fields (`init`, `default` or `Default::default()`) therefore run once, after every loaded field has converted successfully, and an `init` on a loaded field is no longer evaluated. `load` and `save` are unchanged.
+- **Breaking:** `#[confer(init = ...)]` was removed and `#[confer(ignore)]` takes an optional initializer: `#[confer(ignore = <expr>)]`. The expression is written directly in the attribute (a plain Rust expression, not a string), so compiler errors point at it. It is evaluated in a closure of its own, so it cannot use `store`, other fields or `.await`; `return` and `?` end the expression, not `from_confer`. A bare `#[confer(ignore)]` still uses `Default::default()`. Ignored fields, bare ones included, are now initialized once, in `from_confer`, after every loaded field has converted successfully, and not at all when `from_confer` fails; side effects of an initializer or of a `Default` implementation can therefore occur later than before, or not at all. Any use of `init`, and `ignore` combined with `default` or `rename`, fails to compile with a migration hint. Migrate as follows:
+    - `#[confer(ignore, init = "Vec::new()")]` → `#[confer(ignore = Vec::new())]` (or plain `#[confer(ignore)]` when the value equals `Default::default()`)
+    - `#[confer(ignore, default = 5)]` → `#[confer(ignore = 5)]`
+    - `#[confer(ignore, rename = "...")]` → `#[confer(ignore)]` (`rename` had no effect on an ignored field)
+    - `#[confer(init = ...)]` on a loaded field → remove it; add `#[confer(default = ...)]` only if a missing key should fall back to a value
+- The derived `from_confer` builds the module directly from the values read from the store instead of creating a default instance and loading into it, so loaded fields no longer need to implement `Default`. `load` and `save` are unchanged.
 
 ### Fixed
 - A required `Datetime` field (plain type without `default`) now compiles and loads; a missing key fails with `MissingKey`.
+- Ignored fields have no TOML key and no longer take part in duplicate key detection, so a struct that was rejected only because an ignored field was named like the key of another field now compiles.
 
 ## [0.0.3] - 2026-11-08
 

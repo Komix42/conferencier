@@ -3,14 +3,16 @@ use std::collections::HashMap;
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
 use syn::ext::IdentExt;
-use syn::meta::ParseNestedMeta;
 use syn::spanned::Spanned;
 use syn::{
     Attribute, DeriveInput, Expr, ExprLit, ExprUnary, Field as SynField, Fields, Lit, LitStr,
-    Result, Type, UnOp,
+    Result, Token, Type, UnOp,
 };
 
 use crate::model::{ContainerKind, Field, FieldType, FloatKind, IntegerKind, Module, ScalarKind};
+
+/// Error reported for any use of the removed `#[confer(init)]` attribute.
+const INIT_REMOVED: &str = "#[confer(init)] was removed in 0.0.4; use #[confer(ignore = <expr>)] for ignored fields; remove it from loaded fields and add #[confer(default = ...)] only if a missing-key fallback is intended";
 
 /// Parses the derive input into the intermediate `Module` representation.
 pub fn parse_module(input: DeriveInput) -> Result<Module> {
@@ -96,9 +98,9 @@ fn parse_field(field: &SynField, seen_keys: &mut HashMap<String, Span>) -> Resul
         .clone()
         .ok_or_else(|| syn::Error::new(field.span(), "expected named field"))?;
 
-    let mut rename: Option<String> = None;
-    let mut default_expr: Option<Expr> = None;
-    let mut init_expr: Option<Expr> = None;
+    let mut rename: Option<(String, Span)> = None;
+    let mut default_expr: Option<(Expr, Span)> = None;
+    let mut initializer: Option<Expr> = None;
     let mut ignore = false;
 
     for attr in &field.attrs {
@@ -111,28 +113,28 @@ fn parse_field(field: &SynField, seen_keys: &mut HashMap<String, Span>) -> Resul
                 if rename.is_some() {
                     return Err(meta.error("duplicate #[confer(rename = ...)] attribute"));
                 }
+                let span = meta.path.span();
                 let value: LitStr = meta.value()?.parse()?;
-                rename = Some(value.value());
+                rename = Some((value.value(), span));
                 Ok(())
             } else if meta.path.is_ident("default") {
                 if default_expr.is_some() {
                     return Err(meta.error("duplicate #[confer(default = ...)] attribute"));
                 }
+                let span = meta.path.span();
                 let expr: Expr = meta.value()?.parse()?;
-                default_expr = Some(expr);
+                default_expr = Some((expr, span));
                 Ok(())
             } else if meta.path.is_ident("init") {
-                if init_expr.is_some() {
-                    return Err(meta.error("duplicate #[confer(init = ...)] attribute"));
-                }
-                let expr: Expr = parse_init_expr(&meta)?;
-                init_expr = Some(expr);
-                Ok(())
+                Err(meta.error(INIT_REMOVED))
             } else if meta.path.is_ident("ignore") {
                 if ignore {
                     return Err(meta.error("duplicate #[confer(ignore)] attribute"));
                 }
                 ignore = true;
+                if meta.input.peek(Token![=]) {
+                    initializer = Some(meta.value()?.parse()?);
+                }
                 Ok(())
             } else {
                 Err(meta.error("unsupported attribute for #[derive(ConferModule)]"))
@@ -140,16 +142,25 @@ fn parse_field(field: &SynField, seen_keys: &mut HashMap<String, Span>) -> Resul
         })?;
     }
 
-    if default_expr.is_some() && init_expr.is_some() {
-        return Err(syn::Error::new(
-            field.span(),
-            "#[confer(default = ...)] and #[confer(init = ...)] cannot be combined",
-        ));
+    if ignore {
+        if let Some((_, span)) = &default_expr {
+            return Err(syn::Error::new(
+                *span,
+                "#[confer(default)] cannot be combined with #[confer(ignore)]; use #[confer(ignore = <expr>)]",
+            ));
+        }
+        if let Some((_, span)) = &rename {
+            return Err(syn::Error::new(
+                *span,
+                "#[confer(rename)] cannot be combined with #[confer(ignore)]; an ignored field has no TOML key",
+            ));
+        }
     }
 
-    let key = rename.unwrap_or_else(|| ident.unraw().to_string());
+    let key = rename.map_or_else(|| ident.unraw().to_string(), |(key, _)| key);
 
-    if let Some(prev_span) = seen_keys.insert(key.clone(), field.span()) {
+    // An ignored field has no TOML key, so it cannot collide with another field.
+    if !ignore && let Some(prev_span) = seen_keys.insert(key.clone(), field.span()) {
         return Err(syn::Error::new(
             field.span(),
             format!(
@@ -166,20 +177,20 @@ fn parse_field(field: &SynField, seen_keys: &mut HashMap<String, Span>) -> Resul
         Some(classify_type(&field.ty)?)
     };
 
-    let default_tokens = match (&default_expr, &kind) {
-        (Some(expr), Some(kind)) => Some(transform_default(expr.clone(), kind)?),
-        (Some(expr), None) => Some(quote! { #expr }),
-        (None, _) => None,
+    let default_tokens = match (default_expr, &kind) {
+        (Some((expr, _)), Some(kind)) => Some(transform_default(expr, kind)?),
+        _ => None,
     };
 
-    let init_tokens = init_expr.map(|expr| quote! { #expr });
+    let initializer_tokens = initializer.map(|expr| quote! { #expr });
 
     Ok(Field {
         ident,
+        ty: field.ty.clone(),
         key,
         kind,
         default: default_tokens,
-        init: init_tokens,
+        initializer: initializer_tokens,
         ignore,
         span: field.span(),
     })
@@ -200,17 +211,6 @@ fn default_section_name(ident: &syn::Ident) -> String {
 /// Returns `true` when the attribute is `#[confer(...)]`.
 fn is_confer_attr(attr: &Attribute) -> bool {
     attr.path().is_ident("confer")
-}
-
-/// Parses the `init` attribute, allowing either raw expressions or string literals.
-fn parse_init_expr(meta: &ParseNestedMeta) -> Result<Expr> {
-    let expr: Expr = meta.value()?.parse()?;
-    if let Expr::Lit(expr_lit) = &expr
-        && let Lit::Str(lit) = &expr_lit.lit
-    {
-        return syn::parse_str::<Expr>(&lit.value());
-    }
-    Ok(expr)
 }
 
 /// Classifies a field type into container and scalar components.

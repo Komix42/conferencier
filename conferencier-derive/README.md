@@ -34,7 +34,7 @@ struct AppConfig {
 - This crate contains only the derive macro; runtime APIs live in `conferencier`.
 - No Tokio dependency is required here; the generated code targets `conferencier`’s Tokio-backed API.
 
-For detailed attribute reference (`section`, `rename`, `default`, `init`, `ignore`) and supported field types, see the main crate’s README.
+For detailed attribute reference (`section`, `rename`, `default`, `ignore`) and supported field types, see the main crate’s README.
 
 ## License
 

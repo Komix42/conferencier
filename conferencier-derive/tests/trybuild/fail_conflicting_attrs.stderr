@@ -1,5 +1,5 @@
-error: #[confer(default = ...)] and #[confer(init = ...)] cannot be combined
- --> tests/trybuild/fail_conflicting_attrs.rs:3:5
+error: #[confer(init)] was removed in 0.0.4; use #[confer(ignore = <expr>)] for ignored fields; remove it from loaded fields and add #[confer(default = ...)] only if a missing-key fallback is intended
+ --> tests/trybuild/fail_conflicting_attrs.rs:3:27
   |
 3 |     #[confer(default = 5, init = "Default::default()")]
-  |     ^
+  |                           ^^^^

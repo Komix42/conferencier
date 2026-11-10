@@ -1,0 +1,11 @@
+error: duplicate #[confer(ignore)] attribute
+ --> tests/trybuild/fail_duplicate_ignore.rs:3:22
+  |
+3 |     #[confer(ignore, ignore)]
+  |                      ^^^^^^
+
+error: duplicate #[confer(ignore)] attribute
+  --> tests/trybuild/fail_duplicate_ignore.rs:10:14
+   |
+10 |     #[confer(ignore = 5)]
+   |              ^^^^^^

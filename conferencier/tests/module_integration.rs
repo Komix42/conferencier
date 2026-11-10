@@ -18,7 +18,7 @@ struct Server {
     #[confer(default = "example.com")]
     endpoint: Option<String>,
     notes: Option<String>,
-    #[confer(ignore, init = "Vec::new()")]
+    #[confer(ignore = Vec::new())]
     cache: Vec<u8>,
 }
 
@@ -474,6 +474,165 @@ async fn module_without_loaded_fields_is_constructed_directly() -> Result<()> {
 
     RuntimeOnly::save(&module, store.clone()).await?;
     assert!(store.list_keys("Runtime").await?.is_empty());
+
+    Ok(())
+}
+
+/// Implements neither `Default` nor a shape supported by the derive.
+struct Pool {
+    size: usize,
+}
+
+impl Pool {
+    fn with_size(size: usize) -> Self {
+        Pool { size }
+    }
+}
+
+#[derive(ConferModule)]
+#[confer(section = "Workers")]
+struct Workers {
+    threads: u32,
+    #[confer(ignore = Pool::with_size(4))]
+    pool: Pool,
+    #[confer(ignore = vec![1, 2, 3])]
+    ids: Vec<u8>,
+}
+
+#[tokio::test]
+async fn ignore_expression_fields_ignore_the_file_and_survive_load_and_save() -> Result<()> {
+    let store = Confer::from_string(
+        r#"[Workers]
+threads = 2
+ids = [9]
+"#,
+    )?;
+
+    let module = Workers::from_confer(store.clone()).await?;
+
+    {
+        let guard = module.read().await;
+        assert_eq!(guard.threads, 2);
+        assert_eq!(guard.pool.size, 4);
+        assert_eq!(guard.ids, [1, 2, 3]);
+    }
+
+    {
+        let mut guard = module.write().await;
+        guard.pool = Pool::with_size(8);
+        guard.ids.push(4);
+    }
+
+    Workers::load(&module, store.clone()).await?;
+    {
+        let guard = module.read().await;
+        assert_eq!(guard.pool.size, 8);
+        assert_eq!(guard.ids, [1, 2, 3, 4]);
+    }
+
+    // An ignored field has no TOML key, so `save` writes none and treats a stray one like any
+    // other unknown key.
+    Workers::save(&module, store.clone()).await?;
+    assert_eq!(store.list_keys("Workers").await?, ["threads"]);
+
+    Ok(())
+}
+
+/// An ignored field has no TOML key, so its name may equal the key of another field.
+#[derive(ConferModule)]
+#[confer(section = "Collision")]
+struct KeyCollision {
+    #[confer(rename = "name")]
+    title: String,
+    #[confer(ignore = 7)]
+    name: u32,
+}
+
+#[tokio::test]
+async fn ignored_field_may_share_its_name_with_the_key_of_another_field() -> Result<()> {
+    let store = Confer::from_string("[Collision]\nname = \"widget\"\n")?;
+    let module = KeyCollision::from_confer(store.clone()).await?;
+
+    {
+        let guard = module.read().await;
+        assert_eq!(guard.title, "widget");
+        assert_eq!(guard.name, 7);
+    }
+
+    module.write().await.title = "gadget".into();
+    KeyCollision::save(&module, store.clone()).await?;
+    assert_eq!(store.get_string("Collision", "name").await?, "gadget");
+
+    Ok(())
+}
+
+static TICKETS: AtomicUsize = AtomicUsize::new(0);
+
+fn next_ticket() -> usize {
+    TICKETS.fetch_add(1, Ordering::SeqCst)
+}
+
+#[derive(ConferModule)]
+#[confer(section = "Ticketed")]
+struct Ticketed {
+    #[confer(ignore = next_ticket())]
+    before: usize,
+    port: u16,
+    #[confer(ignore = next_ticket())]
+    after: usize,
+}
+
+/// One test owns the counter, because tests in this file run in parallel.
+#[tokio::test]
+async fn ignore_expressions_run_once_in_declaration_order_after_conversion() -> Result<()> {
+    let store = Confer::from_string("[Ticketed]\nport = \"eighty\"\n")?;
+    let err = Ticketed::from_confer(store)
+        .await
+        .err()
+        .expect("a mistyped value must fail");
+    assert!(matches!(&err, ConferError::TypeMismatch { key, .. } if key == "port"));
+    assert_eq!(TICKETS.load(Ordering::SeqCst), 0);
+
+    let store = Confer::from_string("[Ticketed]\nport = 80\n")?;
+    let module = Ticketed::from_confer(store.clone()).await?;
+    {
+        let guard = module.read().await;
+        assert_eq!((guard.before, guard.after), (0, 1));
+    }
+
+    Ticketed::load(&module, store.clone()).await?;
+    Ticketed::save(&module, store).await?;
+    assert_eq!(TICKETS.load(Ordering::SeqCst), 2);
+
+    Ok(())
+}
+
+/// Initializers run in closures: `return` and `?` end the initializer, not `from_confer`.
+#[derive(ConferModule)]
+#[confer(section = "Closures")]
+struct Closures {
+    #[confer(ignore = {
+        let digits = "7".parse::<u8>().ok()?;
+        Some(digits)
+    })]
+    parsed: Option<u8>,
+    #[confer(ignore = {
+        let words: Vec<&str> = Vec::new();
+        if words.is_empty() {
+            return 1;
+        }
+        2
+    })]
+    early: u8,
+}
+
+#[tokio::test]
+async fn ignore_expressions_cannot_return_from_from_confer() -> Result<()> {
+    let module = Closures::from_confer(Confer::new()).await?;
+
+    let guard = module.read().await;
+    assert_eq!(guard.parsed, Some(7));
+    assert_eq!(guard.early, 1);
 
     Ok(())
 }

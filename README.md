@@ -61,6 +61,10 @@ The `#[derive(ConferModule)]` macro understands a small set of field/struct attr
 
 - `#[confer(section = "Name")]` on the struct sets the TOML section name. If omitted, it defaults to the struct name with a leading `Confer` word stripped (e.g., `ConferApp` → `App`, while `ConferenceSettings` stays `ConferenceSettings`).
 
+Every field is either loaded from TOML or ignored by the configuration file.
+
+**Loaded fields** (the default) are read from and written to a TOML key:
+
 - `#[confer(rename = "key")]` on a field overrides the TOML key name.
 
 - `#[confer(default = <expr>)]` provides a default when the key is missing.
@@ -69,9 +73,18 @@ The `#[derive(ConferModule)]` macro understands a small set of field/struct attr
     - Works with `Option<T>` and `Option<Vec<T>>` as well; when no default is given, missing keys become `None`.
     - Without a default, a missing key is an error for plain `T` and `Vec<T>` fields (`ConferError::MissingKey`), including `Datetime`.
 
-- `#[confer(init = "<expr>")]` initializes a field before the first load (useful for preallocations or derived values). The expression is evaluated as-is; you can also pass it as a string literal if that’s clearer.
+**Ignored fields** are never read from or written to TOML. They have no key, so they are not checked for key collisions. Use them for runtime-only state or for types the derive does not support (e.g., maps or custom structs):
 
-- `#[confer(ignore)]` excludes a field from both load and save.
+- `#[confer(ignore)]` initializes the field with `Default::default()`.
+
+- `#[confer(ignore = <expr>)]` initializes the field with a Rust expression, e.g. `#[confer(ignore = Vec::with_capacity(16))]`.
+    - The expression is evaluated once, in `from_confer`, after all loaded fields have been read successfully; ignored fields are initialized in declaration order. `load` and `save` never touch them.
+    - It is a plain, synchronous Rust expression (not a string) evaluated in its own closure: it cannot use `store`, other fields or `.await`, and `return` or `?` end the expression, not `from_confer`. A string literal is just a `&str`, so for a `String` field write `String::from("abc")`.
+    - The field type does not need to implement `Default`.
+
+`ignore` cannot be combined with `rename` or `default`, because an ignored field has no key.
+
+Migrating from 0.0.3: `#[confer(init = ...)]` was removed. Replace `ignore, init = "<expr>"` and `ignore, default = <expr>` with `ignore = <expr>` (no quotes), drop `rename` from ignored fields, and delete `init` from loaded fields (add `default` only if a missing key should fall back to a value). The [changelog](CHANGELOG.md) has the full table.
 
 ### Supported field types
 

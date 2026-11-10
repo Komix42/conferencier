@@ -67,6 +67,10 @@ The `#[derive(ConferModule)]` macro supports a few attributes to control how you
 
 - `#[confer(section = "Name")]` on the struct sets the TOML section. If omitted, it defaults to the struct name, with a leading `Confer` word stripped (e.g. `ConferApp` → `App`, while `ConferenceSettings` stays `ConferenceSettings`).
 
+Every field is either loaded from TOML or ignored by the configuration file.
+
+**Loaded fields** (the default) are read from and written to a TOML key:
+
 - `#[confer(rename = "key")]` on a field overrides the TOML key name.
 
 - `#[confer(default = <expr>)]` provides a value when the key is missing.
@@ -75,11 +79,18 @@ The `#[derive(ConferModule)]` macro supports a few attributes to control how you
     - Works with `Option<T>` and `Option<Vec<T>>`; if no default is given, missing keys become `None`.
     - Without a default, a missing key is an error for plain `T` and `Vec<T>` fields (`ConferError::MissingKey`), including `Datetime`.
 
-- `#[confer(init = "<expr>")]` initializes a field before the first load. Useful for preallocations or derived values. Accepts a raw Rust expression or a string literal containing one.
+**Ignored fields** are never read from or written to TOML. They have no key, so they are not checked for key collisions. Use them for runtime-only state or for types the derive does not support (e.g., maps or custom structs):
 
-- `#[confer(ignore)]` excludes a field from both load and save; also useful for fields whose type isn’t supported by the derive (e.g., maps or custom structs), or for runtime-only state that shouldn’t be persisted.
+- `#[confer(ignore)]` initializes the field with `Default::default()`.
 
-Note: `default` and `init` cannot be combined on the same field.
+- `#[confer(ignore = <expr>)]` initializes the field with a Rust expression, e.g. `#[confer(ignore = Vec::with_capacity(16))]`.
+    - The expression is evaluated once, in `from_confer`, after all loaded fields have been read successfully; ignored fields are initialized in declaration order. `load` and `save` never touch them.
+    - It is a plain, synchronous Rust expression (not a string) evaluated in its own closure: it cannot use `store`, other fields or `.await`, and `return` or `?` end the expression, not `from_confer`. A string literal is just a `&str`, so for a `String` field write `String::from("abc")`.
+    - The field type does not need to implement `Default`.
+
+`ignore` cannot be combined with `rename` or `default`, because an ignored field has no key.
+
+Migrating from 0.0.3: `#[confer(init = ...)]` was removed. Replace `ignore, init = "<expr>"` and `ignore, default = <expr>` with `ignore = <expr>` (no quotes), drop `rename` from ignored fields, and delete `init` from loaded fields (add `default` only if a missing key should fall back to a value). The repository's `CHANGELOG.md` has the full table.
 
 ### Supported field types
 
@@ -97,8 +108,9 @@ TOML 1.1 times may omit seconds (for example `07:30`, also accepted as a datetim
 ### Troubleshooting
 
 - "unsupported field type" → use one of the supported scalar/container combinations above.
-- "duplicate TOML key" → two fields map to the same key; rename one via `#[confer(rename = ...)]`.
-- "cannot combine default and init" → pick one of the attributes per field.
+- "duplicate TOML key" → two loaded fields map to the same key; rename one via `#[confer(rename = ...)]`.
+- "`#[confer(init)]` was removed" → for an ignored field write `#[confer(ignore = <expr>)]` (no quotes); on a loaded field delete `init`, and add `#[confer(default = ...)]` only if a missing key should fall back to a value.
+- "cannot be combined with `#[confer(ignore)]`" → an ignored field has no TOML key; use `#[confer(ignore = <expr>)]` instead of `default`, and drop `rename`.
 - Defaults must have the right literal form (e.g., `"string"`, `[1, 2]`, or RFC 3339 for datetimes).
 
 ## Saving configuration

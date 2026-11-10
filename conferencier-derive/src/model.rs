@@ -1,5 +1,5 @@
 use proc_macro2::{Span, TokenStream};
-use syn::Ident;
+use syn::{Ident, Type};
 
 /// Intermediate representation of a module annotated with `#[derive(ConferModule)]`.
 #[derive(Debug, Clone)]
@@ -14,10 +14,13 @@ pub struct Module {
 #[derive(Debug, Clone)]
 pub struct Field {
     pub ident: Ident,
+    pub ty: Type,
     pub key: String,
     pub kind: Option<FieldType>,
+    /// Literal fallback for a missing key; only present on loaded fields.
     pub default: Option<TokenStream>,
-    pub init: Option<TokenStream>,
+    /// Expression from `#[confer(ignore = <expr>)]`; only present on ignored fields.
+    pub initializer: Option<TokenStream>,
     pub ignore: bool,
     pub span: Span,
 }

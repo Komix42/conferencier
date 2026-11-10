@@ -1,5 +1,6 @@
 use proc_macro2::{Span, TokenStream};
-use quote::{format_ident, quote};
+use quote::{format_ident, quote, quote_spanned};
+use syn::spanned::Spanned;
 use syn::{Ident, LitStr, Result};
 
 use crate::model::{ContainerKind, Field, FieldType, FloatKind, IntegerKind, Module, ScalarKind};
@@ -15,6 +16,7 @@ pub fn generate(module: Module, crate_path: syn::Path) -> Result<TokenStream> {
 
     let section_lit = LitStr::new(&section, Span::call_site());
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
+    let store = store_ident();
 
     let load_values: Vec<_> = fields
         .iter()
@@ -36,15 +38,12 @@ pub fn generate(module: Module, crate_path: syn::Path) -> Result<TokenStream> {
 
     let struct_fields = fields.iter().map(|field| {
         let ident = &field.ident;
-        if !field.ignore {
+        if field.ignore {
+            let value = ignored_value(field);
+            quote! { #ident: #value }
+        } else {
             let local = field_local(ident);
             quote! { #ident: #local }
-        } else if let Some(init) = &field.init {
-            quote! { #ident: #init }
-        } else if let Some(default) = &field.default {
-            quote! { #ident: #default }
-        } else {
-            quote! { #ident: ::core::default::Default::default() }
         }
     });
 
@@ -93,13 +92,13 @@ pub fn generate(module: Module, crate_path: syn::Path) -> Result<TokenStream> {
     Ok(quote! {
         #[#crate_private::async_trait]
         impl #impl_generics #crate_path::confer_module::ConferModule for #ident #ty_generics #where_clause {
-            async fn from_confer(store: #shared_confer) -> #result_type<#shared_module> {
+            async fn from_confer(#store: #shared_confer) -> #result_type<#shared_module> {
                 #( #from_confer_locals )*
                 let value = Self { #(#struct_fields),* };
                 Ok(#crate_private::new_shared_module(value))
             }
 
-            async fn load(module: &#shared_module, store: #shared_confer) -> #result_type<()> {
+            async fn load(module: &#shared_module, #store: #shared_confer) -> #result_type<()> {
                 #( #load_blocks )*
                 Ok(())
             }
@@ -123,10 +122,30 @@ pub fn generate(module: Module, crate_path: syn::Path) -> Result<TokenStream> {
 
 /// Name of the local holding a field's value inside the generated functions.
 ///
-/// The prefix keeps user field names (e.g. `store`, `module`) from shadowing
-/// the identifiers used by the generated code.
+/// The prefix keeps user field names (e.g. `store`, `module`) from shadowing the identifiers
+/// used by the generated code. The mixed-site span additionally hides the local from user
+/// expressions, which carry call-site spans.
 fn field_local(ident: &Ident) -> Ident {
-    format_ident!("__confer_{}", ident)
+    format_ident!("__confer_{}", ident, span = Span::mixed_site())
+}
+
+/// Name of the `store` parameter of the generated `from_confer` and `load`.
+///
+/// It has a mixed-site span, so initializers from `#[confer(ignore = <expr>)]` cannot refer to it.
+fn store_ident() -> Ident {
+    Ident::new("store", Span::mixed_site())
+}
+
+/// Generates the initial value of an ignored field.
+///
+/// An initializer runs in a closure that returns the field type: type errors then point at the
+/// user's expression, and `return` or `?` cannot leave the generated `from_confer`.
+fn ignored_value(field: &Field) -> TokenStream {
+    let ty = &field.ty;
+    match &field.initializer {
+        Some(init) => quote! { (|| -> #ty { #init })() },
+        None => quote_spanned! { ty.span() => ::core::default::Default::default() },
+    }
 }
 
 /// Produces the `let (...) = { ... }` block cloning mutable fields for persistence.
@@ -233,7 +252,8 @@ fn fetch_expression(kind: &FieldType, section: &LitStr, key: &LitStr) -> TokenSt
     };
 
     let ident = Ident::new(method, Span::call_site());
-    quote! { store.#ident(#section, #key).await }
+    let store = store_ident();
+    quote! { #store.#ident(#section, #key).await }
 }
 
 /// Converts the raw value obtained from the store into the field's Rust type.
