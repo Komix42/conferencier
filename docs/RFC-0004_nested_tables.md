@@ -5,12 +5,13 @@ Status: Approved
 Author: Komix42 <komix[at]ignore.cz>
 Target release: 0.0.4
 Requires: [RFC-0003](./RFC-0003_field_attributes.md)
+Amends: [RFC-0001](./RFC-0001_baseline_architecture.md)
 
 ## Document Scope
 
 This RFC specifies support for nested TOML tables in derived configuration modules: a struct field can hold another struct that is stored as a sub-table (`[App.server]`), an optional sub-table, or an array of tables (`[[App.upstream]]`). It defines the new public API (`ConferTable` trait and derive, `#[confer(table)]` field attribute, `Confer::set_section_table`), the load/save semantics, error reporting for nested locations, compile-time diagnostics, and an internal refactor of `#[derive(ConferModule)]` that the feature builds on.
 
-It amends the following parts of [RFC-0001](./RFC-0001_baseline_architecture.md):
+It amends the following parts of [RFC-0001](./RFC-0001_baseline_architecture.md), whose text stays unchanged (see [Documentation deliverables](#documentation-deliverables)):
 
 - the [API surface summary](./RFC-0001_baseline_architecture.md#api-surface-summary): the [trait surface](./RFC-0001_baseline_architecture.md#canonical-type-aliases-and-trait-surface) (new `ConferTable` trait), the [core crate](./RFC-0001_baseline_architecture.md#core-crate-conferencier) raw accessors (`set_section_table`) and the [derive crate summary](./RFC-0001_baseline_architecture.md#derive-crate-conferencier-derive) (new derive, `table` attribute, table field shapes);
 - the "Nested table projections" item listed as [out of scope](./RFC-0001_baseline_architecture.md#out-of-scope) and "nested structures" in [Open questions / next steps](./RFC-0001_baseline_architecture.md#open-questions--next-steps);
@@ -421,7 +422,7 @@ When both derives are applied to one struct, each derive invocation validates th
 1. **Core** — `set_section_table`, `ConferTable` trait and re-exports, `__private` helpers (section snapshot, paths, conversions); unit tests.
 2. **`ConferModule` refactor** — table-based load/save using direct construction as specified in RFC-0003 A5 (R1–R7); tests as updated by RFC-0003 unchanged and green (R6), new atomicity tests.
 3. **`ConferTable`** — derive macro, `#[confer(table)]` for all three shapes, diagnostics; integration and `trybuild` tests.
-4. **Documentation** — README sections, changelog, example, RFC-0001 amendments; RFC status → Implemented (see [Resolved questions](#resolved-questions), item 4).
+4. **Documentation** — README sections, changelog, example, cross-reference in RFC-0001; RFC status → Implemented (see [Resolved questions](#resolved-questions), item 4).
 
 ## Testing strategy
 
@@ -461,14 +462,7 @@ When both derives are applied to one struct, each derive invocation validates th
   - "Changed" for R2/R3/R5 and the diagnostic message.
 - A runnable example (e.g. `examples/nested_tables.rs` with `required-features = ["with-derive"]`).
 - Rustdoc of `ConferTable`, including the stability note for manual implementations.
-- RFC-0001:
-  - update the API surface summary: the `ConferTable` trait, `set_section_table`, and the derive crate summary;
-  - point "Nested table projections" (Out of scope) and "nested structures" (Open questions) to this RFC;
-  - mark Interaction with derived modules and its Save semantics as amended by this RFC (R1–R7);
-  - update the Error model reference for nested paths (E1–E5) and table types in Type normalisation and fallbacks;
-  - update the procedural macro reference: supported field types, the `table` attribute, loading and saving;
-  - update Edge cases and behavior for the table-field shapes and load/save semantics;
-  - update Limitations: custom user types can be mapped as table types.
+- RFC-0001 stays unchanged, as specified in [RFC-0003](./RFC-0003_field_attributes.md#documentation-deliverables). When this RFC is marked Implemented, it is added to the `Amended by:` header line of RFC-0001. The amended parts are listed in [Document Scope](#document-scope) only.
 
 ## Resolved questions
 

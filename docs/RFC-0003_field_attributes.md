@@ -4,12 +4,13 @@ Date: 2026-11-09
 Status: Approved
 Author: Komix42 <komix[at]ignore.cz>
 Target release: 0.0.4
+Amends: [RFC-0001](./RFC-0001_baseline_architecture.md)
 
 ## Document Scope
 
 This RFC simplifies the field attributes and construction behavior of `#[derive(ConferModule)]`. The `init` attribute is removed, ignored fields get their initial value from `#[confer(ignore = <expr>)]`, and they no longer have a TOML key. `from_confer` constructs the module directly from successfully converted loaded values instead of first requiring a default value for every field. This is a breaking change of the derive macro's attribute syntax, but does not change TOML files, the `Confer` store or the `ConferModule` trait signatures.
 
-It amends the descriptions of `init`, `ignore` and `default` in [RFC-0001](./RFC-0001_baseline_architecture.md): the [Glossary](./RFC-0001_baseline_architecture.md#glossary), the [derive crate summary](./RFC-0001_baseline_architecture.md#derive-crate-conferencier-derive), the [Contract of `from_confer`](./RFC-0001_baseline_architecture.md#contract-of-from_confer), the [attribute reference](./RFC-0001_baseline_architecture.md#conferencier-derive-procedural-macro), the example [Ignored fields and init expression](./RFC-0001_baseline_architecture.md#ignored-fields-and-init-expression), [Save semantics](./RFC-0001_baseline_architecture.md#interaction-with-derived-modules), [Edge cases and behavior](./RFC-0001_baseline_architecture.md#edge-cases-and-behavior) and the [compile-time contract tests](./RFC-0001_baseline_architecture.md#testing-strategy).
+It amends the descriptions of `init`, `ignore` and `default` in [RFC-0001](./RFC-0001_baseline_architecture.md): the [Glossary](./RFC-0001_baseline_architecture.md#glossary), the [derive crate summary](./RFC-0001_baseline_architecture.md#derive-crate-conferencier-derive), the [Contract of `from_confer`](./RFC-0001_baseline_architecture.md#contract-of-from_confer), the [attribute reference](./RFC-0001_baseline_architecture.md#conferencier-derive-procedural-macro), the example [Ignored fields and init expression](./RFC-0001_baseline_architecture.md#ignored-fields-and-init-expression), [Save semantics](./RFC-0001_baseline_architecture.md#interaction-with-derived-modules), [Edge cases and behavior](./RFC-0001_baseline_architecture.md#edge-cases-and-behavior) and the [compile-time contract tests](./RFC-0001_baseline_architecture.md#testing-strategy). RFC-0001 is a historical record: its text is not edited (see [Documentation deliverables](#documentation-deliverables)).
 
 This RFC is self-contained for existing modules. It requires no new store API or persisted field shapes and can be implemented and released independently of later extensions.
 
@@ -182,7 +183,7 @@ Messages are indicative; the exact wording is fixed by the `trybuild` snapshots.
 ## Milestones
 
 1. **Derive** — parser, model and codegen changes (A1–A5); migrated tests, example and `trybuild` cases; new tests.
-2. **Documentation** — READMEs, changelog, RFC-0001 amendments; RFC status → Implemented. An implementation report (like [IMPL-001](./IMPL_001_baseline.md)) is written only if the implementation has to depart from this RFC.
+2. **Documentation** — READMEs, changelog, cross-reference in RFC-0001 (see [Documentation deliverables](#documentation-deliverables)); RFC status → Implemented. An implementation report (like [IMPL-001](./IMPL_001_baseline.md)) is written only if the implementation has to depart from this RFC.
 
 ## Testing
 
@@ -208,14 +209,10 @@ Messages are indicative; the exact wording is fixed by the `trybuild` snapshots.
   - In `conferencier/README.md`, replace the Troubleshooting entry "cannot combine default and init" with entries for the removed `init` and for `ignore` combined with `default` or `rename`.
 - `conferencier-derive/README.md`: the attribute list in the reference sentence.
 - `CHANGELOG.md` (Unreleased): a **Breaking:** entry with the migration hints and the changed initialization time of ignored fields; **Fixed:** entries for required `Datetime` fields without `default` and for duplicate key detection that no longer includes ignored fields.
-- RFC-0001: mark as amended by this RFC:
-  - the Glossary entries;
-  - the derive crate summary;
-  - the Contract of `from_confer`;
-  - the attribute reference;
-  - the example "Ignored fields and init expression";
-  - Save semantics;
-  - the Edge cases;
-  - the compile-time contract tests in Testing strategy.
+- RFC-0001 stays unchanged as the historical record of the 0.0.1 baseline: an accepted RFC is amended by a later RFC, not edited. Only its status, cross-references between documents and typos may change. When this RFC is marked Implemented, RFC-0001 gets:
+  - an `Amended by:` header line linking to this RFC;
+  - a short note below the header saying that the document is a historical baseline, that a later RFC prevails where the two differ, and that the READMEs describe the current behavior.
+
+  The amended sections are listed in [Document Scope](#document-scope) only; RFC-0001 gets no per-section markers.
 
   [IMPL-001](./IMPL_001_baseline.md) is a historical record and stays unchanged.
