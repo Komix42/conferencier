@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.0.4] - 2026-11-11
+
 ### Added
 - `ConferTable`, a synchronous trait for plain nested configuration values, and `Confer::set_section_table` for atomic replacement of a complete section.
 - `#[derive(ConferTable)]` and the `#[confer(table)]` field attribute map nested TOML tables to plain structs. A table field can be `T` (a sub-table such as `[App.server]`), `Option<T>` or `Vec<T>` (an array of tables such as `[[App.upstream]]`), in modules and in other tables, to any depth. An absent `T` is loaded from an empty table, so its fields' defaults apply; an absent `Vec<T>` loads as empty, unlike a scalar `Vec` without `default`; an empty `Vec<T>` is not written on save. Errors inside nested tables name the full path, for example `invalid value at App.upstream[1].weight: value out of range for u32`. One struct can derive both `ConferModule` and `ConferTable`.
@@ -14,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - README sections on the scope of the crate, listing what it intentionally leaves out (formats other than TOML, layered sources, hot reload, validation beyond value types and format-preserving saves), on reloading configuration manually, and on keeping runtime state in a module through ignored fields, which later loads keep.
 - API documentation for the variants and fields of `ConferError`, the `Result` alias and the `conferencier-derive` crate. The documentation of `ConferModule::load` and `ConferModule::save` now says what they change and that they lock the module, so a task must not call them while it holds a guard of that module; the README explains this as well.
 - `docs/BACKLOG.md` collects known technical debt and ideas for future versions, which were previously spread over the future-work sections of the RFCs.
+- A security policy (`SECURITY.md`) for reporting vulnerabilities privately through GitHub, a code of conduct, and issue and pull request templates.
 
 ### Changed
 - **Breaking:** `ConferError` is now `#[non_exhaustive]`, so future releases can add error variants without a breaking change. A `match` on `ConferError` outside this crate needs a wildcard arm (`_ => ...`); constructing variants and matching individual variants work as before.
