@@ -100,6 +100,30 @@ Every field is either loaded from TOML or ignored by the configuration file.
 
 Migrating from 0.0.3: `#[confer(init = ...)]` was removed. Replace `ignore, init = "<expr>"` and `ignore, default = <expr>` with `ignore = <expr>` (no quotes), drop `rename` from ignored fields, and delete `init` from loaded fields (add `default` only if a missing key should fall back to a value). The [changelog](CHANGELOG.md) has the full table.
 
+### Sharing configuration and runtime state
+
+A `ConferModule` can hold both settings loaded from TOML and runtime state that should not be persisted. The module is shared as a `SharedConferModule<T>` (`Arc<RwLock<T>>`), so application tasks can read or update both kinds of fields through the same handle. An ignored module field is initialized by `from_confer`, left untouched by later `load` calls, and never written by `save`.
+
+```rust
+use conferencier::{ConferModule, SharedConferModule};
+
+#[derive(ConferModule)]
+#[confer(section = "Server")]
+#[allow(dead_code)]
+struct Server {
+    port: u16,
+    #[confer(ignore)]
+    requests_served: u64,
+}
+
+#[allow(dead_code)]
+async fn record_request(server: &SharedConferModule<Server>) {
+    server.write().await.requests_served += 1;
+}
+```
+
+Clone the `SharedConferModule` handle to share this state with other tasks. Put persistent fields in the module itself: ignored fields inside `ConferTable` values are initialized again whenever those tables are loaded.
+
 ### Supported field types
 
 - Scalars: `String`, `bool`, signed/unsigned integers (`i8..i64`, `isize`, `u8..u64`, `usize`), floats (`f32`, `f64`), and `Datetime` (`conferencier::Datetime`, a re-export of `toml::value::Datetime`).

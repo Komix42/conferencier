@@ -23,6 +23,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Derived modules load and save whole sections. `from_confer` and `load` convert a single snapshot of the section, and `load` updates the module only if every field converts, so a failing `load` leaves the module unchanged (previously the fields before the failing one were already updated). `save` converts the whole module first and then replaces the section in a single write: readers never observe a half-saved module, and a conversion error such as a `u64` above `i64::MAX` leaves the store unchanged (previously earlier fields were already written). Such conversion errors are reported before a section that is not a table. `load` of a module without loaded fields now also fails when its section exists but is not a table.
 - The "unsupported field type" compile error now says how to nest a struct: `#[confer(table)]` on the field and `#[derive(ConferTable)]` on the type.
 - The README and the crate description present conferencier as a minimal, single-purpose library. A new "Scope" section lists what it intentionally leaves out: other formats than TOML, layered sources, hot reload, validation beyond value types and format-preserving saves.
+- The README explains how a `ConferModule` can combine persisted settings with ignored runtime state shared through the same handle, and clarifies that later loads preserve ignored module fields.
 
 ### Fixed
 - A required `Datetime` field (plain type without `default`) now compiles and loads; a missing key fails with `MissingKey`.
