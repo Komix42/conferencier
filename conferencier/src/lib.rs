@@ -1,7 +1,7 @@
 #![cfg_attr(feature = "with-derive", doc = include_str!("../README.md"))]
 #![cfg_attr(
     not(feature = "with-derive"),
-    doc = "Async, TOML-backed configuration hub with an ergonomic derive macro."
+    doc = "A minimal, single-purpose TOML configuration library for Tokio applications. Enable the `with-derive` feature for `#[derive(ConferModule)]` and `#[derive(ConferTable)]`."
 )]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 

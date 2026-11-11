@@ -1,17 +1,28 @@
 # conferencier
 
-Async-first, TOML-backed configuration hub with an ergonomic derive macro for mapping strongly typed modules onto shared configuration state.
+A minimal, single-purpose TOML configuration library for Tokio applications. Each part of an application describes its configuration section as a typed Rust struct; conferencier loads the struct from TOML and lets async tasks share it.
+
+The crate does this one job and deliberately stays small instead of becoming a general-purpose configuration framework (see [Scope](#scope)).
 
 ## Highlights
 
-- **Shared store** powered by Tokio’s `Arc<RwLock<Table>>` for concurrent async access.
-- **Typed getters/setters** covering strings, numbers, booleans, datetimes, and their vector counterparts.
-- **`#[derive(ConferModule)]` macro** to load/save module structs with minimal boilerplate.
-- **Nested tables** and arrays of tables mapped to plain structs with `#[derive(ConferTable)]`.
-- **File and in-memory workflows** with synchronous and asynchronous loaders.
-- **Precise error reporting** built on `thiserror` for user-friendly diagnostics.
+- **Typed modules.** `#[derive(ConferModule)]` maps a struct to one top-level TOML section, with defaults, optional values, renamed keys and runtime-only fields.
+- **Nested tables** and arrays of tables map to plain structs with `#[derive(ConferTable)]`.
+- **Shared across async tasks.** Modules and the store are cheap-to-clone handles built on `Arc` and `tokio::sync::RwLock`.
+- **Nothing runs in the background.** `from_confer`, `load` and `save` copy data between a module and the store only when called, and the store reads or writes files only on request.
+- **Errors name the key**, such as `missing key App.name` or `invalid value at App.upstream[1].weight`; mistakes in attributes are compile errors.
+- **Typed store access without the derive:** getters and setters for strings, numbers, booleans, datetimes and their vectors.
 
-> ⚡ Conferencier is built on the [Tokio](https://tokio.rs/) async runtime. All async APIs expect to run inside a Tokio executor and the shared state uses `tokio::sync::RwLock` under the hood.
+## Scope
+
+Conferencier is built on [Tokio](https://tokio.rs/): all async APIs expect a Tokio runtime. TOML is the only supported format. The following are intentionally left out:
+
+- layering configuration from environment variables, command-line arguments or several files;
+- watching files and reloading configuration automatically;
+- validation beyond value types, such as allowed ranges, patterns or rules across fields; check these in your application after loading;
+- preserving comments and formatting when saving (see [Saving configuration](#saving-configuration)).
+
+If you need any of these, a general-purpose configuration crate is a better fit.
 
 ## Quick start
 
@@ -54,7 +65,7 @@ Async-first, TOML-backed configuration hub with an ergonomic derive macro for ma
    }
    ```
 
-3. Run your application as usual; the derive macro keeps the TOML store and module state in sync.
+3. Nothing is synchronized in the background: `load` refreshes a module from the store and `save` writes it back; `Confer::load_file` and `Confer::save_file` do the same between the store and a file.
 
 ## Derive attributes
 
