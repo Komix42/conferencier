@@ -1,3 +1,11 @@
+//! Derive macros `ConferModule` and `ConferTable` for
+//! [conferencier](https://docs.rs/conferencier).
+//!
+//! Applications normally use these macros through `conferencier`, which re-exports them
+//! with its default `with-derive` feature. The generated code calls into `conferencier`,
+//! so it is always a dependency. The attribute reference is in the `conferencier`
+//! documentation.
+
 mod codegen;
 mod crate_path;
 mod model;

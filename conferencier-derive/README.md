@@ -4,11 +4,11 @@ Procedural macro crate for `#[derive(ConferModule)]` and `#[derive(ConferTable)]
 
 ## Usage
 
-Add to `Cargo.toml` (end users typically depend on `conferencier` and enable `with-derive`):
+End users typically depend only on `conferencier`, which re-exports both macros through its `with-derive` feature, enabled by default:
 
 ```toml
 [dependencies]
-conferencier = { version = "0.0.4", features = ["with-derive"] }
+conferencier = "0.0.4"
 ```
 
 Direct use is possible if you prefer to import the macro explicitly. The generated code always calls into `conferencier`, so that crate stays a dependency (here without its default `with-derive` feature):

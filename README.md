@@ -65,7 +65,7 @@ If you need any of these, a general-purpose configuration crate is a better fit.
    }
    ```
 
-3. Nothing is synchronized in the background: `load` refreshes a module from the store and `save` writes it back; `Confer::load_file` and `Confer::save_file` do the same between the store and a file.
+3. Nothing is synchronized in the background: `load` refreshes a module from the store and `save` writes it into the store. `Confer::save_file` writes the store to a file, and `Confer::load_file` replaces the store with the content of a file (see [Reloading configuration](#reloading-configuration)).
 
 ## Derive attributes
 
@@ -87,7 +87,7 @@ Every field is either loaded from TOML or ignored by the configuration file.
 
 - `#[confer(table)]` maps the field to a nested table or an array of tables; see [Nested tables](#nested-tables).
 
-**Ignored fields** are never read from or written to TOML. They have no key, so they are not checked for key collisions. Use them for runtime-only state or for types the derive does not support (e.g., maps):
+**Ignored fields** are never read from or written to TOML. They have no key, so they are not checked for key collisions. Use them for runtime-only state (see [Configuration and runtime state](#configuration-and-runtime-state)) or for types the derive does not support (e.g., maps):
 
 - `#[confer(ignore)]` initializes the field with `Default::default()`.
 
@@ -99,30 +99,6 @@ Every field is either loaded from TOML or ignored by the configuration file.
 `ignore` cannot be combined with `rename` or `default`, because an ignored field has no key.
 
 Migrating from 0.0.3: `#[confer(init = ...)]` was removed. Replace `ignore, init = "<expr>"` and `ignore, default = <expr>` with `ignore = <expr>` (no quotes), drop `rename` from ignored fields, and delete `init` from loaded fields (add `default` only if a missing key should fall back to a value). The [changelog](CHANGELOG.md) has the full table.
-
-### Sharing configuration and runtime state
-
-A `ConferModule` can hold both settings loaded from TOML and runtime state that should not be persisted. The module is shared as a `SharedConferModule<T>` (`Arc<RwLock<T>>`), so application tasks can read or update both kinds of fields through the same handle. An ignored module field is initialized by `from_confer`, left untouched by later `load` calls, and never written by `save`.
-
-```rust
-use conferencier::{ConferModule, SharedConferModule};
-
-#[derive(ConferModule)]
-#[confer(section = "Server")]
-#[allow(dead_code)]
-struct Server {
-    port: u16,
-    #[confer(ignore)]
-    requests_served: u64,
-}
-
-#[allow(dead_code)]
-async fn record_request(server: &SharedConferModule<Server>) {
-    server.write().await.requests_served += 1;
-}
-```
-
-Clone the `SharedConferModule` handle to share this state with other tasks. Put persistent fields in the module itself: ignored fields inside `ConferTable` values are initialized again whenever those tables are loaded.
 
 ### Supported field types
 
@@ -137,6 +113,15 @@ If a type falls outside this set, the derive emits a compile error with a friend
 Conferencier uses `toml` 1.2 with TOML 1.1 support. Prefer `conferencier::toml::{Table, Value}` and `conferencier::Datetime` for types shared with the store; types from `toml` 0.9 are not interchangeable with them.
 
 TOML 1.1 times may omit seconds (for example `07:30`, also accepted as a datetime default). In the new datetime API, `Time::second` and `Time::nanosecond` are optional: `None` means the component was omitted, not explicitly set to zero.
+
+### Troubleshooting
+
+- "unsupported field type" → use one of the supported scalar/container combinations above; for a struct, derive `ConferTable` on it and add `#[confer(table)]` to the field.
+- "cannot be used as a nested configuration table" → the type of a `#[confer(table)]` field must implement `ConferTable`; derive it, or remove `#[confer(table)]` from a scalar field.
+- "duplicate TOML key" → two loaded fields map to the same key; rename one via `#[confer(rename = ...)]`.
+- "`#[confer(init)]` was removed" → for an ignored field write `#[confer(ignore = <expr>)]` (no quotes); on a loaded field delete `init`, and add `#[confer(default = ...)]` only if a missing key should fall back to a value.
+- "cannot be combined with `#[confer(ignore)]`" → an ignored field has no TOML key; use `#[confer(ignore = <expr>)]` instead of `default`, and drop `rename`.
+- Defaults must have the right literal form (e.g., `"string"`, `[1, 2]`, or RFC 3339 for datetimes).
 
 ## Nested tables
 
@@ -210,6 +195,71 @@ A table type takes the same field attributes as a module (`rename`, `default`, `
 - `#[confer(section = "App.server")]` does not refer to the nested table `[App.server]`: it names a top-level section whose name contains a dot (saved as `["App.server"]`). A nested table always belongs to the module of its top-level section.
 - A generic table field needs an explicit bound such as `where T: ConferTable`. `ConferTable` can also be implemented manually; see its documentation.
 
+## Reloading configuration
+
+Conferencier never reloads anything on its own. To apply an edited configuration file, load it into the store and then reload every module that uses it:
+
+```rust
+use std::path::Path;
+
+use conferencier::{ConferModule, SharedConfer, SharedConferModule};
+
+async fn reload<M: ConferModule>(
+    store: &SharedConfer,
+    module: &SharedConferModule<M>,
+    path: &Path,
+) -> conferencier::Result<()> {
+    store.load_file(path).await?;
+    M::load(module, store.clone()).await
+}
+```
+
+- `Confer::load_file` and `Confer::load_str` replace the whole store, including sections that no module owns and values saved into the store but not yet written to a file. If the new document cannot be read or parsed, the store keeps its previous content.
+- `load` updates a module only if all its loaded fields convert successfully; otherwise it returns the error and the module keeps its previous values. Ignored fields of the module keep their values in both cases.
+- A module that is not reloaded keeps its previous values, even though the store has changed.
+
+## Configuration and runtime state
+
+A module can also hold runtime state that does not belong in the configuration file, such as counters, caches or client handles. Mark such fields with `#[confer(ignore)]` or `#[confer(ignore = <expr>)]`: `from_confer` initializes them, later `load` calls keep their values, and `save` never writes them. Tasks then share the settings and the state through one `SharedConferModule<T>` handle (`Arc<RwLock<T>>`); clone the handle to pass it to another task.
+
+```rust
+use conferencier::{Confer, ConferModule};
+
+#[derive(ConferModule)]
+#[confer(section = "Server")]
+struct Server {
+    port: u16,
+    #[confer(ignore)]
+    requests_served: u64,
+}
+
+#[tokio::main]
+async fn main() -> conferencier::Result<()> {
+    let store = Confer::from_string("[Server]\nport = 8080\n")?;
+    let server = Server::from_confer(store.clone()).await?;
+
+    let handle = server.clone();
+    tokio::spawn(async move {
+        handle.write().await.requests_served += 1;
+    })
+    .await
+    .expect("task panicked");
+
+    // A reload updates the port and keeps the counter.
+    store.load_str("[Server]\nport = 9090\n").await?;
+    Server::load(&server, store.clone()).await?;
+
+    let state = server.read().await;
+    assert_eq!(state.port, 9090);
+    assert_eq!(state.requests_served, 1);
+    Ok(())
+}
+```
+
+Keep state that must survive reloads directly in the module: ignored fields inside `ConferTable` values are initialized again on every load (see [Nested tables](#nested-tables)).
+
+The handle's Tokio `RwLock` is not reentrant, so drop every guard of a module before calling its `load` or `save` in the same task. `load` locks the module for writing and would wait for a held guard forever. `save` locks it for reading, which waits forever behind a held write guard and, because Tokio's lock is fair, also behind a held read guard while another task is waiting to write. Copy what you need out of a short-lived guard instead, for example `let port = server.read().await.port;`.
+
 ## Saving configuration
 
 Conferencier is primarily meant for reading configuration. Saving works, but it rewrites the configuration rather than editing it:
@@ -230,7 +280,7 @@ The crate includes runnable examples:
 Run an example with:
 
 ```powershell
-cargo run --example advanced_usage --features with-derive
+cargo run --example advanced_usage
 ```
 
 ## Testing
@@ -245,8 +295,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the remaining checks run in CI.
 
 ## Documentation
 
-- Architecture notes: [`docs/RFC-0001_baseline_architecture.md`](docs/RFC-0001_baseline_architecture.md)
-- Implementation report: see the `docs/` folder for up-to-date status and rationale.
+- [API reference](https://docs.rs/conferencier) of the latest release on docs.rs.
+- [CHANGELOG.md](CHANGELOG.md) lists the changes in each release, including migration notes.
+- [`docs/`](docs/) keeps the design records (RFCs and implementation reports). They record the design at the time they were written and are not updated later; this README and the API reference describe the current behavior.
+- [`docs/BACKLOG.md`](docs/BACKLOG.md) collects known technical debt and ideas for future versions.
 
 ## License
 

@@ -65,20 +65,11 @@ async fn main() -> conferencier::Result<()> {
 }
 ```
 
-Nothing is synchronized in the background: `load` refreshes a module from the store and `save` writes it back; `Confer::load_file` and `Confer::save_file` do the same between the store and a file.
-
-## Examples
-
-Run an example:
-
-```powershell
-cargo run --example advanced_usage --features with-derive
-cargo run --example nested_tables --features with-derive
-```
+Nothing is synchronized in the background: `load` refreshes a module from the store and `save` writes it into the store. `Confer::save_file` writes the store to a file, and `Confer::load_file` replaces the store with the content of a file (see [Reloading configuration](#reloading-configuration)).
 
 ## Derive attributes
 
-The `#[derive(ConferModule)]` macro supports a few attributes to control how your struct maps to TOML. `#[derive(ConferTable)]` accepts the same field attributes (see [Nested tables](#nested-tables)).
+The `#[derive(ConferModule)]` macro understands a small set of field/struct attributes that control how data is mapped to TOML. `#[derive(ConferTable)]` accepts the same field attributes (see [Nested tables](#nested-tables)).
 
 - `#[confer(section = "Name")]` on the struct sets the TOML section. If omitted, it defaults to the struct name, with a leading `Confer` word stripped (e.g. `ConferApp` → `App`, while `ConferenceSettings` stays `ConferenceSettings`).
 
@@ -89,14 +80,14 @@ Every field is either loaded from TOML or ignored by the configuration file.
 - `#[confer(rename = "key")]` on a field overrides the TOML key name.
 
 - `#[confer(default = <expr>)]` provides a value when the key is missing.
-    - Scalars: strings (quoted), integers and floats (including negative values such as `-1` or `-0.5`), booleans, RFC 3339 datetimes as strings.
-    - Vectors: use array syntax, e.g. `#[confer(default = [1, 2, 3])]`, `#[confer(default = ["a", "b"]) ]`.
-    - Works with `Option<T>` and `Option<Vec<T>>`; if no default is given, missing keys become `None`.
+    - Supported scalar defaults: strings (in quotes), integers and floats (including negative values such as `-1` or `-0.5`), booleans, and RFC 3339 datetimes as strings.
+    - Vector defaults use array syntax: `#[confer(default = [1, 2, 3])]` or `#[confer(default = ["a", "b"]) ]`.
+    - Works with `Option<T>` and `Option<Vec<T>>` as well; when no default is given, missing keys become `None`.
     - Without a default, a missing key is an error for plain `T` and `Vec<T>` fields (`ConferError::MissingKey`), including `Datetime`.
 
 - `#[confer(table)]` maps the field to a nested table or an array of tables; see [Nested tables](#nested-tables).
 
-**Ignored fields** are never read from or written to TOML. They have no key, so they are not checked for key collisions. Use them for runtime-only state or for types the derive does not support (e.g., maps):
+**Ignored fields** are never read from or written to TOML. They have no key, so they are not checked for key collisions. Use them for runtime-only state (see [Configuration and runtime state](#configuration-and-runtime-state)) or for types the derive does not support (e.g., maps):
 
 - `#[confer(ignore)]` initializes the field with `Default::default()`.
 
@@ -109,37 +100,13 @@ Every field is either loaded from TOML or ignored by the configuration file.
 
 Migrating from 0.0.3: `#[confer(init = ...)]` was removed. Replace `ignore, init = "<expr>"` and `ignore, default = <expr>` with `ignore = <expr>` (no quotes), drop `rename` from ignored fields, and delete `init` from loaded fields (add `default` only if a missing key should fall back to a value). The repository's `CHANGELOG.md` has the full table.
 
-### Sharing configuration and runtime state
-
-A `ConferModule` can hold both settings loaded from TOML and runtime state that should not be persisted. The module is shared as a `SharedConferModule<T>` (`Arc<RwLock<T>>`), so application tasks can read or update both kinds of fields through the same handle. An ignored module field is initialized by `from_confer`, left untouched by later `load` calls, and never written by `save`.
-
-```rust
-use conferencier::{ConferModule, SharedConferModule};
-
-#[derive(ConferModule)]
-#[confer(section = "Server")]
-#[allow(dead_code)]
-struct Server {
-    port: u16,
-    #[confer(ignore)]
-    requests_served: u64,
-}
-
-#[allow(dead_code)]
-async fn record_request(server: &SharedConferModule<Server>) {
-    server.write().await.requests_served += 1;
-}
-```
-
-Clone the `SharedConferModule` handle to share this state with other tasks. Put persistent fields in the module itself: ignored fields inside `ConferTable` values are initialized again whenever those tables are loaded.
-
 ### Supported field types
 
 - Scalars: `String`, `bool`, signed/unsigned integers (`i8`..`i64`, `isize`, `u8`..`u64`, `usize`), floats (`f32`, `f64`), and `Datetime` (`conferencier::Datetime`, a re-export of `toml::value::Datetime`).
 - Containers: plain `T`, `Vec<T>`, `Option<T>`, `Option<Vec<T>>`.
 - Nested tables: `T`, `Option<T>` and `Vec<T>` where `T` implements `ConferTable`, with `#[confer(table)]`.
 
-Types outside this set produce a friendly compile error.
+If a type falls outside this set, the derive emits a compile error with a friendly message.
 
 ### TOML compatibility
 
@@ -228,6 +195,71 @@ A table type takes the same field attributes as a module (`rename`, `default`, `
 - `#[confer(section = "App.server")]` does not refer to the nested table `[App.server]`: it names a top-level section whose name contains a dot (saved as `["App.server"]`). A nested table always belongs to the module of its top-level section.
 - A generic table field needs an explicit bound such as `where T: ConferTable`. `ConferTable` can also be implemented manually; see its documentation.
 
+## Reloading configuration
+
+Conferencier never reloads anything on its own. To apply an edited configuration file, load it into the store and then reload every module that uses it:
+
+```rust
+use std::path::Path;
+
+use conferencier::{ConferModule, SharedConfer, SharedConferModule};
+
+async fn reload<M: ConferModule>(
+    store: &SharedConfer,
+    module: &SharedConferModule<M>,
+    path: &Path,
+) -> conferencier::Result<()> {
+    store.load_file(path).await?;
+    M::load(module, store.clone()).await
+}
+```
+
+- `Confer::load_file` and `Confer::load_str` replace the whole store, including sections that no module owns and values saved into the store but not yet written to a file. If the new document cannot be read or parsed, the store keeps its previous content.
+- `load` updates a module only if all its loaded fields convert successfully; otherwise it returns the error and the module keeps its previous values. Ignored fields of the module keep their values in both cases.
+- A module that is not reloaded keeps its previous values, even though the store has changed.
+
+## Configuration and runtime state
+
+A module can also hold runtime state that does not belong in the configuration file, such as counters, caches or client handles. Mark such fields with `#[confer(ignore)]` or `#[confer(ignore = <expr>)]`: `from_confer` initializes them, later `load` calls keep their values, and `save` never writes them. Tasks then share the settings and the state through one `SharedConferModule<T>` handle (`Arc<RwLock<T>>`); clone the handle to pass it to another task.
+
+```rust
+use conferencier::{Confer, ConferModule};
+
+#[derive(ConferModule)]
+#[confer(section = "Server")]
+struct Server {
+    port: u16,
+    #[confer(ignore)]
+    requests_served: u64,
+}
+
+#[tokio::main]
+async fn main() -> conferencier::Result<()> {
+    let store = Confer::from_string("[Server]\nport = 8080\n")?;
+    let server = Server::from_confer(store.clone()).await?;
+
+    let handle = server.clone();
+    tokio::spawn(async move {
+        handle.write().await.requests_served += 1;
+    })
+    .await
+    .expect("task panicked");
+
+    // A reload updates the port and keeps the counter.
+    store.load_str("[Server]\nport = 9090\n").await?;
+    Server::load(&server, store.clone()).await?;
+
+    let state = server.read().await;
+    assert_eq!(state.port, 9090);
+    assert_eq!(state.requests_served, 1);
+    Ok(())
+}
+```
+
+Keep state that must survive reloads directly in the module: ignored fields inside `ConferTable` values are initialized again on every load (see [Nested tables](#nested-tables)).
+
+The handle's Tokio `RwLock` is not reentrant, so drop every guard of a module before calling its `load` or `save` in the same task. `load` locks the module for writing and would wait for a held guard forever. `save` locks it for reading, which waits forever behind a held write guard and, because Tokio's lock is fair, also behind a held read guard while another task is waiting to write. Copy what you need out of a short-lived guard instead, for example `let port = server.read().await.port;`.
+
 ## Saving configuration
 
 Conferencier is primarily meant for reading configuration. Saving works, but it rewrites the configuration rather than editing it:
@@ -236,6 +268,20 @@ Conferencier is primarily meant for reading configuration. Saving works, but it 
 - A module's `save` owns its section, including all tables nested in it: it removes every key and sub-table that is not mapped to a non-ignored field, at any depth (also inside tables mapped with `#[confer(table)]`). A misspelled key such as `prot = 9090` is therefore ignored on load (`port` falls back to its default) and deleted by the next save. Other sections are not changed; keep data that no module owns in a separate section.
 
 If people edit the configuration file by hand, prefer to only load it, and use saving mainly to generate an initial configuration file.
+
+## Examples
+
+The crate includes runnable examples:
+
+- `basic_usage` – loads a single module from an in-memory TOML string, updates it, and saves it back.
+- `advanced_usage` – demonstrates loading from disk, applying updates, and persisting changes atomically.
+- `nested_tables` – maps a sub-table and an array of tables to plain structs and shows an error inside a nested table.
+
+Run an example with:
+
+```powershell
+cargo run --example advanced_usage
+```
 
 ## License
 
