@@ -8,7 +8,6 @@
 pub mod confer_module;
 pub mod confer_table;
 pub mod error;
-mod section_guard;
 mod store;
 mod table_path;
 mod value_conversion;

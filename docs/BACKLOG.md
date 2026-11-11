@@ -2,13 +2,12 @@
 
 Known technical debt and ideas for future versions of conferencier.
 
-Unlike the RFCs and implementation reports in this folder, this is a living document: entries are added, changed and removed as the project evolves. An entry is not a commitment. An idea that is taken up gets its own RFC and its entry links to it; the entry is removed once the RFC is implemented. Fixed technical debt is recorded in the [changelog](../CHANGELOG.md) and removed from here.
+Unlike the RFCs and implementation reports in this folder, this is a living document: entries are added, changed and removed as the project evolves. An entry is not a commitment. An idea that is taken up gets its own RFC and its entry links to it. Once an entry is done, because its RFC is implemented or the technical debt is fixed, it is replaced by a one-line note under [Done](#done) with the version that resolved it; changes that affect users are also recorded in the [changelog](../CHANGELOG.md).
 
 Each entry states the problem, a possible direction and where it comes from.
 
 ## Technical debt
 
-- **Unused `SectionGuard`.** `conferencier/src/section_guard.rs` is compiled but not used anywhere; only `#[allow(dead_code)]` keeps it building without warnings. Derived modules replace whole sections on save, so they no longer need to track the keys they own. Direction: remove the module. Origin: [IMPL-001](./IMPL_001_baseline.md#7-known-limitations--follow-up-ideas).
 - **API names.** Public identifiers still carry `Confer`, the working name of the crate, which was already taken on crates.io: `Confer`, `SharedConfer`, `ConferModule`, `SharedConferModule`, `ConferTable`, `ConferError`, `from_confer` and the modules `confer_module` and `confer_table`. "Module" also clashes with Rust modules, and no name says that a module shares runtime state between tasks through its ignored fields, not only values from the TOML file. Almost every public name changes, so the renaming should happen while the crate is at 0.0.x; revisit it after the 0.0.4 release and write an RFC with the final names. Direction, with working names from the discussion:
     - `Confer` → `ConfigStore`. The trait functions take `&ConfigStore` instead of an `Arc` by value, because derived code uses the store only during the call: callers no longer clone the `Arc` for every `load` and `save`, and a `&Arc<ConfigStore>` coerces to `&ConfigStore`. A store is almost always shared by the tasks that build their domains from it. Open question: what the constructors return.
         - `Arc<ConfigStore>`, as today. The typical use needs no `Arc::new`, but every store is an `Arc`, also in a single task, inside an application state that is already shared, or in a `static`. It is also inconsistent with `Default`, which returns the bare store.
@@ -59,3 +58,7 @@ The README's [Scope](../README.md#scope) lists these as intentionally left out. 
 ### Examples
 
 - An example integrated with an HTTP server, and a command-line workflow for exporting and importing configuration snapshots. Origin: [RFC-0002](./RFC-0002_baseline_examples.md#future-work).
+
+## Done
+
+- **Unused `SectionGuard`**: removed in 0.0.4. Origin: [IMPL-001](./IMPL_001_baseline.md#7-known-limitations--follow-up-ideas).
