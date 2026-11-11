@@ -79,9 +79,9 @@ Every field is either loaded from TOML or ignored by the configuration file.
 
 - `#[confer(rename = "key")]` on a field overrides the TOML key name.
 
-- `#[confer(default = <expr>)]` provides a value when the key is missing.
+- `#[confer(default = <literal>)]` provides a value when the key is missing.
     - Supported scalar defaults: strings (in quotes), integers and floats (including negative values such as `-1` or `-0.5`), booleans, and RFC 3339 datetimes as strings.
-    - Vector defaults use array syntax: `#[confer(default = [1, 2, 3])]` or `#[confer(default = ["a", "b"]) ]`.
+    - Vector defaults use array syntax: `#[confer(default = [1, 2, 3])]` or `#[confer(default = ["a", "b"])]`.
     - Works with `Option<T>` and `Option<Vec<T>>` as well; when no default is given, missing keys become `None`.
     - Without a default, a missing key is an error for plain `T` and `Vec<T>` fields (`ConferError::MissingKey`), including `Datetime`.
 
@@ -98,7 +98,7 @@ Every field is either loaded from TOML or ignored by the configuration file.
 
 `ignore` cannot be combined with `rename` or `default`, because an ignored field has no key.
 
-Migrating from 0.0.3: `#[confer(init = ...)]` was removed. Replace `ignore, init = "<expr>"` and `ignore, default = <expr>` with `ignore = <expr>` (no quotes), drop `rename` from ignored fields, and delete `init` from loaded fields (add `default` only if a missing key should fall back to a value). The repository's `CHANGELOG.md` has the full table.
+Migrating from 0.0.3: `#[confer(init = ...)]` was removed. Replace `ignore, init = "<expr>"` and `ignore, default = <literal>` with `ignore = <expr>` (no quotes), drop `rename` from ignored fields, and delete `init` from loaded fields (add `default` only if a missing key should fall back to a value). The repository's `CHANGELOG.md` has the full table.
 
 ### Supported field types
 
