@@ -1,0 +1,6 @@
+# Store and check out all text files with LF line endings.
+* text=auto eol=lf
+
+# cmd.exe can fail to find goto/call labels in batch files with LF line endings.
+*.bat text eol=crlf
+*.cmd text eol=crlf
