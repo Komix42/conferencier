@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 - `ConferTable`, a synchronous trait for plain nested configuration values, and `Confer::set_section_table` for atomic replacement of a complete section.
 - `#[derive(ConferTable)]` and the `#[confer(table)]` field attribute map nested TOML tables to plain structs. A table field can be `T` (a sub-table such as `[App.server]`), `Option<T>` or `Vec<T>` (an array of tables such as `[[App.upstream]]`), in modules and in other tables, to any depth. An absent `T` is loaded from an empty table, so its fields' defaults apply; an absent `Vec<T>` loads as empty, unlike a scalar `Vec` without `default`; an empty `Vec<T>` is not written on save. Errors inside nested tables name the full path, for example `invalid value at App.upstream[1].weight: value out of range for u32`. One struct can derive both `ConferModule` and `ConferTable`.
+- The `nested_tables` example and a "Nested tables" section in the README.
 - The README explains what saving does to a hand-written configuration file: comments, key order and value notation are not preserved, and a module's `save` removes unknown keys and sub-tables from its section, including misspelled ones. Saving is recommended mainly for generating an initial configuration file.
 
 ### Changed

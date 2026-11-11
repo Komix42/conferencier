@@ -36,6 +36,10 @@ required-features = ["with-derive"]
 name = "advanced_usage"
 required-features = ["with-derive"]
 
+[[example]]
+name = "nested_tables"
+required-features = ["with-derive"]
+
 [[test]]
 name = "module_integration"
 required-features = ["with-derive"]

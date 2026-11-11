@@ -3,7 +3,7 @@
 Date: 2025-09-29
 Status: Implemented
 Author: Komix42 <komix[at]ignore.cz>
-Amended by: [RFC-0003](./RFC-0003_field_attributes.md)
+Amended by: [RFC-0003](./RFC-0003_field_attributes.md), [RFC-0004](./RFC-0004_nested_tables.md)
 
 > **Historical baseline.** This document describes the initial 0.0.1 state and is not edited when later RFCs change the behavior. Where an RFC listed in `Amended by` differs from this text, that RFC prevails. The READMEs describe the current behavior.
 

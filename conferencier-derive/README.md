@@ -1,6 +1,6 @@
 # conferencier-derive
 
-Procedural macro crate for `#[derive(ConferModule)]`, used by the `conferencier` crate to generate async load/save implementations from TOML-backed configuration.
+Procedural macro crate for `#[derive(ConferModule)]` and `#[derive(ConferTable)]`, used by the `conferencier` crate to generate async load/save implementations for configuration modules and conversions for nested TOML tables.
 
 ## Usage
 
@@ -20,21 +20,29 @@ conferencier-derive = "0.0.4"
 ```
 
 ```rust
-use conferencier_derive::ConferModule;
+use conferencier_derive::{ConferModule, ConferTable};
+
+#[derive(ConferTable)]
+struct Server {
+    port: u16,
+}
 
 #[derive(ConferModule)]
 #[confer(section = "App")]
 struct AppConfig {
     name: String,
+    // Mapped to the nested table `[App.server]`.
+    #[confer(table)]
+    server: Server,
 }
 ```
 
 ## Notes
 
-- This crate contains only the derive macro; runtime APIs live in `conferencier`.
+- This crate contains only the derive macros; runtime APIs, including the `ConferModule` and `ConferTable` traits, live in `conferencier`.
 - No Tokio dependency is required here; the generated code targets `conferencier`’s Tokio-backed API.
 
-For detailed attribute reference (`section`, `rename`, `default`, `ignore`) and supported field types, see the main crate’s README.
+For detailed attribute reference (`section`, `rename`, `default`, `ignore`, `table`) and supported field types, see the main crate’s README.
 
 ## License
 

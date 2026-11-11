@@ -7,6 +7,7 @@ Async-first, TOML-backed configuration hub with an ergonomic derive macro for ma
 - **Shared store** powered by Tokio’s `Arc<RwLock<Table>>` for concurrent async access.
 - **Typed getters/setters** covering strings, numbers, booleans, datetimes, and their vector counterparts.
 - **`#[derive(ConferModule)]` macro** to load/save module structs with minimal boilerplate.
+- **Nested tables** and arrays of tables mapped to plain structs with `#[derive(ConferTable)]`.
 - **File and in-memory workflows** with synchronous and asynchronous loaders.
 - **Precise error reporting** built on `thiserror` for user-friendly diagnostics.
 
@@ -57,7 +58,7 @@ Async-first, TOML-backed configuration hub with an ergonomic derive macro for ma
 
 ## Derive attributes
 
-The `#[derive(ConferModule)]` macro understands a small set of field/struct attributes that control how data is mapped to TOML.
+The `#[derive(ConferModule)]` macro understands a small set of field/struct attributes that control how data is mapped to TOML. `#[derive(ConferTable)]` accepts the same field attributes (see [Nested tables](#nested-tables)).
 
 - `#[confer(section = "Name")]` on the struct sets the TOML section name. If omitted, it defaults to the struct name with a leading `Confer` word stripped (e.g., `ConferApp` → `App`, while `ConferenceSettings` stays `ConferenceSettings`).
 
@@ -73,7 +74,9 @@ Every field is either loaded from TOML or ignored by the configuration file.
     - Works with `Option<T>` and `Option<Vec<T>>` as well; when no default is given, missing keys become `None`.
     - Without a default, a missing key is an error for plain `T` and `Vec<T>` fields (`ConferError::MissingKey`), including `Datetime`.
 
-**Ignored fields** are never read from or written to TOML. They have no key, so they are not checked for key collisions. Use them for runtime-only state or for types the derive does not support (e.g., maps or custom structs):
+- `#[confer(table)]` maps the field to a nested table or an array of tables; see [Nested tables](#nested-tables).
+
+**Ignored fields** are never read from or written to TOML. They have no key, so they are not checked for key collisions. Use them for runtime-only state or for types the derive does not support (e.g., maps):
 
 - `#[confer(ignore)]` initializes the field with `Default::default()`.
 
@@ -90,6 +93,7 @@ Migrating from 0.0.3: `#[confer(init = ...)]` was removed. Replace `ignore, init
 
 - Scalars: `String`, `bool`, signed/unsigned integers (`i8..i64`, `isize`, `u8..u64`, `usize`), floats (`f32`, `f64`), and `Datetime` (`conferencier::Datetime`, a re-export of `toml::value::Datetime`).
 - Containers: plain `T`, `Vec<T>`, `Option<T>`, `Option<Vec<T>>`.
+- Nested tables: `T`, `Option<T>` and `Vec<T>` where `T` implements `ConferTable`, with `#[confer(table)]`.
 
 If a type falls outside this set, the derive emits a compile error with a friendly message.
 
@@ -99,12 +103,84 @@ Conferencier uses `toml` 1.2 with TOML 1.1 support. Prefer `conferencier::toml::
 
 TOML 1.1 times may omit seconds (for example `07:30`, also accepted as a datetime default). In the new datetime API, `Time::second` and `Time::nanosecond` are optional: `None` means the component was omitted, not explicitly set to zero.
 
+## Nested tables
+
+Groups of settings inside a section map to plain structs that derive `ConferTable`. Mark the field holding them with `#[confer(table)]`:
+
+```rust
+use conferencier::{Confer, ConferModule, ConferTable};
+
+#[derive(ConferTable)]
+struct Server {
+    #[confer(default = "localhost")]
+    host: String,
+    #[confer(default = 8080)]
+    port: u16,
+}
+
+#[derive(ConferTable)]
+struct Upstream {
+    url: String,
+    #[confer(default = 1)]
+    weight: u32,
+}
+
+#[derive(ConferModule)]
+#[confer(section = "App")]
+struct AppConfig {
+    #[confer(table)]
+    server: Server,
+    #[confer(table)]
+    upstream: Vec<Upstream>,
+}
+
+#[tokio::main]
+async fn main() -> conferencier::Result<()> {
+    let store = Confer::from_string(
+        r#"
+[App.server]
+port = 9000
+
+[[App.upstream]]
+url = "http://10.0.0.1"
+
+[[App.upstream]]
+url = "http://10.0.0.2"
+weight = 3
+"#,
+    )?;
+    let module = AppConfig::from_confer(store.clone()).await?;
+
+    let config = module.read().await;
+    assert_eq!(config.server.host, "localhost");
+    assert_eq!(config.server.port, 9000);
+    assert_eq!(config.upstream[1].weight, 3);
+    Ok(())
+}
+```
+
+A table type takes the same field attributes as a module (`rename`, `default`, `ignore` and `table`), so tables can be nested to any depth. A table field has one of these shapes, where `T` implements `ConferTable`:
+
+| Field type | TOML | Key missing on load | Save |
+| --- | --- | --- | --- |
+| `T` | table: `[App.server]` or `server = { ... }` | loaded from an empty table: the defaults of `T` apply, a required field of `T` fails with `MissingKey` | always written |
+| `Option<T>` | table | `None` | `None` removes the key |
+| `Vec<T>` | array of tables: `[[App.upstream]]` or `upstream = [{ ... }]` | empty `Vec` | an empty `Vec` removes the key |
+
+- An absent table `Vec<T>` loads as empty, while an absent scalar `Vec` without `default` (e.g. `Vec<String>`) fails with `MissingKey`. An empty `Vec<T>` is not saved as `upstream = []`, because TOML would then reject `[[App.upstream]]` entries added by hand.
+- `#[confer(table)]` cannot be combined with `default` or `ignore`; defaults belong to the fields of `T`. Other shapes such as `Option<Vec<T>>`, `Box<T>` or maps are not supported.
+- Errors name the full path of the failing key, e.g. `invalid value at App.upstream[1].weight: value out of range for u32`.
+- Tables are plain values: every successful `load` builds them anew. Ignored fields inside a table type are therefore initialized again on each load (with `Default::default()` or their `ignore = <expr>` initializer), unlike ignored fields of the module itself. If the load fails, the module keeps its previous state, but side effects of initializers that have already run are not undone.
+- One struct can derive both `ConferModule` and `ConferTable`; `section` then applies only to the module. `#[derive(ConferModule)]` alone does not make a struct usable as a table field.
+- `#[confer(section = "App.server")]` does not refer to the nested table `[App.server]`: it names a top-level section whose name contains a dot (saved as `["App.server"]`). A nested table always belongs to the module of its top-level section.
+- A generic table field needs an explicit bound such as `where T: ConferTable`. `ConferTable` can also be implemented manually; see its documentation.
+
 ## Saving configuration
 
 Conferencier is primarily meant for reading configuration. Saving works, but it rewrites the configuration rather than editing it:
 
 - `Confer::save_str` and `Confer::save_file` regenerate the whole document from the stored values. Comments are lost, keys may be reordered, inline tables become `[section.table]` headers, and values are written in canonical notation (for example `0x1F90` becomes `8080` and `'text'` becomes `"text"`).
-- A module's `save` owns its section: it removes every key and sub-table in the section that is not mapped to a non-ignored field. A misspelled key such as `prot = 9090` is therefore ignored on load (`port` falls back to its default) and deleted by the next save. Other sections are not changed; keep data that no module owns in a separate section.
+- A module's `save` owns its section, including all tables nested in it: it removes every key and sub-table that is not mapped to a non-ignored field, at any depth (also inside tables mapped with `#[confer(table)]`). A misspelled key such as `prot = 9090` is therefore ignored on load (`port` falls back to its default) and deleted by the next save. Other sections are not changed; keep data that no module owns in a separate section.
 
 If people edit the configuration file by hand, prefer to only load it, and use saving mainly to generate an initial configuration file.
 
@@ -114,6 +190,7 @@ The crate includes runnable examples:
 
 - `basic_usage` – loads a single module from an in-memory TOML string, updates it, and saves it back.
 - `advanced_usage` – demonstrates loading from disk, applying updates, and persisting changes atomically.
+- `nested_tables` – maps a sub-table and an array of tables to plain structs and shows an error inside a nested table.
 
 Run an example with:
 

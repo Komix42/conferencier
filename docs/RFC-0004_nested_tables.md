@@ -1,7 +1,7 @@
 # RFC-0004: Nested tables via `ConferTable`
 
 Date: 2026-11-09
-Status: Approved
+Status: Implemented
 Author: Komix42 <komix[at]ignore.cz>
 Target release: 0.0.4
 Requires: [RFC-0003](./RFC-0003_field_attributes.md)
