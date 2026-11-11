@@ -4,7 +4,7 @@ Thanks for your interest in improving **conferencier**! This quick guide explain
 
 ## Development workflow
 
-1. **Clone** the repository and install the latest stable Rust toolchain (the project targets the 2024 edition; the minimum supported Rust version is 1.88).
+1. **Clone** the repository and install the latest stable Rust toolchain (the project targets the 2024 edition; the minimum supported Rust version is 1.85, so language features and standard library APIs stabilized later, such as let chains, cannot be used).
 2. **Run tests** locally before opening a pull request:
 
    ```powershell

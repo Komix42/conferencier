@@ -26,6 +26,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Derived modules load and save whole sections. `from_confer` and `load` convert a single snapshot of the section, and `load` updates the module only if every field converts, so a failing `load` leaves the module unchanged (previously the fields before the failing one were already updated). `save` converts the whole module first and then replaces the section in a single write: readers never observe a half-saved module, and a conversion error such as a `u64` above `i64::MAX` leaves the store unchanged (previously earlier fields were already written). Such conversion errors are reported before a section that is not a table. `load` of a module without loaded fields now also fails when its section exists but is not a table.
 - The "unsupported field type" compile error now says how to nest a struct: `#[confer(table)]` on the field and `#[derive(ConferTable)]` on the type.
 - The crate description and the README introduction present conferencier as a minimal, single-purpose library.
+- The minimum supported Rust version is lowered from 1.88 to 1.85, the lowest version that the 2024 edition and the `toml` 1.x dependency allow, so both crates build with older toolchains.
 
 ### Fixed
 - A required `Datetime` field (plain type without `default`) now compiles and loads; a missing key fails with `MissingKey`.

@@ -209,15 +209,17 @@ fn parse_field(
     let key = rename.map_or_else(|| ident.unraw().to_string(), |(key, _)| key);
 
     // An ignored field has no TOML key, so it cannot collide with another field.
-    if !ignore && let Some(prev_span) = seen_keys.insert(key.clone(), field.span()) {
-        return Err(syn::Error::new(
-            field.span(),
-            format!(
-                "duplicate TOML key `{}` detected (previously declared here)",
-                key
-            ),
-        )
-        .with_span(prev_span));
+    if !ignore {
+        if let Some(prev_span) = seen_keys.insert(key.clone(), field.span()) {
+            return Err(syn::Error::new(
+                field.span(),
+                format!(
+                    "duplicate TOML key `{}` detected (previously declared here)",
+                    key
+                ),
+            )
+            .with_span(prev_span));
+        }
     }
 
     let kind = if ignore {
@@ -393,15 +395,20 @@ fn match_outer_type<'a>(ty: &'a Type, expected: &str) -> Option<&'a Type> {
     };
 
     let last = path.path.segments.last()?;
-    if last.ident == expected
-        && let syn::PathArguments::AngleBracketed(generic) = &last.arguments
-        && generic.args.len() == 1
-        && let Some(syn::GenericArgument::Type(inner)) = generic.args.first()
-    {
-        return Some(inner);
+    if last.ident != expected {
+        return None;
+    }
+    let syn::PathArguments::AngleBracketed(generic) = &last.arguments else {
+        return None;
+    };
+    if generic.args.len() != 1 {
+        return None;
     }
 
-    None
+    match generic.args.first() {
+        Some(syn::GenericArgument::Type(inner)) => Some(inner),
+        _ => None,
+    }
 }
 
 /// Converts a literal default expression into tokens matching the field type.
