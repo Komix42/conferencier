@@ -9,6 +9,26 @@ Each entry states the problem, a possible direction and where it comes from.
 ## Technical debt
 
 - **Unused `SectionGuard`.** `conferencier/src/section_guard.rs` is compiled but not used anywhere; only `#[allow(dead_code)]` keeps it building without warnings. Derived modules replace whole sections on save, so they no longer need to track the keys they own. Direction: remove the module. Origin: [IMPL-001](./IMPL_001_baseline.md#7-known-limitations--follow-up-ideas).
+- **API names.** Public identifiers still carry `Confer`, the working name of the crate, which was already taken on crates.io: `Confer`, `SharedConfer`, `ConferModule`, `SharedConferModule`, `ConferTable`, `ConferError`, `from_confer` and the modules `confer_module` and `confer_table`. "Module" also clashes with Rust modules, and no name says that a module shares runtime state between tasks through its ignored fields, not only values from the TOML file. Almost every public name changes, so the renaming should happen while the crate is at 0.0.x; revisit it after the 0.0.4 release and write an RFC with the final names. Direction, with working names from the discussion:
+    - `Confer` → `ConfigStore`. The trait functions take `&ConfigStore` instead of an `Arc` by value, because derived code uses the store only during the call: callers no longer clone the `Arc` for every `load` and `save`, and a `&Arc<ConfigStore>` coerces to `&ConfigStore`. A store is almost always shared by the tasks that build their domains from it. Open question: what the constructors return.
+        - `Arc<ConfigStore>`, as today. The typical use needs no `Arc::new`, but every store is an `Arc`, also in a single task, inside an application state that is already shared, or in a `static`. It is also inconsistent with `Default`, which returns the bare store.
+        - `ConfigStore`, which the application wraps in an `Arc` once. Conventional and flexible: an `Arc` can be added, but not removed.
+        - Working preference: `ConfigStore` as a cheap handle that holds the table in an `Arc` and implements `Clone`, like `reqwest::Client` or `sqlx::Pool`. Constructors return `ConfigStore`, sharing is `store.clone()`, and `SharedConfer` disappears without an `Arc` in the public API. A clone shares the data instead of copying it, which the documentation must say.
+
+      None of the variants needs a `ConfigStore::into_shared` helper.
+    - `ConferModule` → `ConfigDomain`, `SharedConferModule<T>` → `SharedDomain<T>`. A domain belongs to one component and owns one section: its loaded fields map to the section, its ignored fields hold runtime state. Weakness: the word is abstract and has other meanings, such as DNS domains or domain-driven design. Alternatives considered:
+        - `ConfigUnit` clashes with `()` and unit structs.
+        - `ConfigSection` fits the loaded fields, but suggests that the struct holds only what is in the TOML file, and a section with `#[confer(section = ...)]` reads as a tautology.
+        - `ConfigNode` suggests a tree, is hard to tell apart from nested tables and means a cluster node in networked applications.
+        - `ConfigRealm` is overblown and an established term for authentication realms.
+    - `from_confer` → `from_store`. `load` and `save` keep their names; `reload_from_store` and `save_to_store` are redundant, because the argument type already names the store.
+    - `ConferTable` → `ConfigTable`, `ConferError` → `Error`. `Result` keeps its name.
+    - The public modules `confer_module`, `confer_table`, `error` and `store`: rename them or make them private, since everything is re-exported at the crate root.
+    - One naming scheme for the store's constructors and methods: today `from_string` stands next to `load_str` and `save_str`. A method named `from_str` triggers clippy's `should_implement_trait` lint.
+    - The feature `with-derive` → `derive`, declared as `derive = ["dep:conferencier-derive"]` so that no implicit `conferencier-derive` feature exists. The feature is enabled by default, so most users are not affected.
+    - The attribute `#[confer(...)]` keeps its name. Like `#[serde(...)]`, it abbreviates the crate name, while a generic name such as `#[unit(...)]` could be read by another derive on the same struct.
+
+    The documentation, which speaks of "modules" throughout, moves to the new terms; the RFCs and implementation reports keep the old names. There are no deprecated aliases, since the API is not stable yet; the changelog gets a **Breaking** entry with a table of old and new names. Origin: a discussion of the API names during the 0.0.4 development.
 
 ## Ideas
 
