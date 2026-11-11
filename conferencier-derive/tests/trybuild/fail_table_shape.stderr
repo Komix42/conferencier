@@ -1,0 +1,35 @@
+error: #[confer(table)] supports T, Option<T> and Vec<T>
+ --> tests/trybuild/fail_table_shape.rs:9:12
+  |
+9 |     inner: Option<Vec<Inner>>,
+  |            ^^^^^^
+
+error: #[confer(table)] supports T, Option<T> and Vec<T>
+  --> tests/trybuild/fail_table_shape.rs:15:12
+   |
+15 |     inner: Vec<Option<Inner>>,
+   |            ^^^
+
+error: #[confer(table)] supports T, Option<T> and Vec<T>
+  --> tests/trybuild/fail_table_shape.rs:21:12
+   |
+21 |     inner: Option<Option<Inner>>,
+   |            ^^^^^^
+
+error: #[confer(table)] supports T, Option<T> and Vec<T>
+  --> tests/trybuild/fail_table_shape.rs:27:12
+   |
+27 |     inner: Vec<Vec<Inner>>,
+   |            ^^^
+
+error: #[confer(table)] supports T, Option<T> and Vec<T>
+  --> tests/trybuild/fail_table_shape.rs:33:12
+   |
+33 |     inner: &'static Inner,
+   |            ^
+
+error: #[confer(table)] supports T, Option<T> and Vec<T>
+  --> tests/trybuild/fail_table_shape.rs:39:12
+   |
+39 |     inner: (Inner, Inner),
+   |            ^^^^^^^^^^^^^^

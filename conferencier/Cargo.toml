@@ -43,3 +43,7 @@ required-features = ["with-derive"]
 [[test]]
 name = "module_snapshots"
 required-features = ["with-derive"]
+
+[[test]]
+name = "nested_tables"
+required-features = ["with-derive"]

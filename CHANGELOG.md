@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 - `ConferTable`, a synchronous trait for plain nested configuration values, and `Confer::set_section_table` for atomic replacement of a complete section.
+- `#[derive(ConferTable)]` and the `#[confer(table)]` field attribute map nested TOML tables to plain structs. A table field can be `T` (a sub-table such as `[App.server]`), `Option<T>` or `Vec<T>` (an array of tables such as `[[App.upstream]]`), in modules and in other tables, to any depth. An absent `T` is loaded from an empty table, so its fields' defaults apply; an absent `Vec<T>` loads as empty, unlike a scalar `Vec` without `default`; an empty `Vec<T>` is not written on save. Errors inside nested tables name the full path, for example `invalid value at App.upstream[1].weight: value out of range for u32`. One struct can derive both `ConferModule` and `ConferTable`.
 - The README explains what saving does to a hand-written configuration file: comments, key order and value notation are not preserved, and a module's `save` removes unknown keys and sub-tables from its section, including misspelled ones. Saving is recommended mainly for generating an initial configuration file.
 
 ### Changed
@@ -19,6 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
     - `#[confer(init = ...)]` on a loaded field → remove it; add `#[confer(default = ...)]` only if a missing key should fall back to a value
 - The derived `from_confer` builds the module directly from the values read from the store instead of creating a default instance and loading into it, so loaded fields no longer need to implement `Default`.
 - Derived modules load and save whole sections. `from_confer` and `load` convert a single snapshot of the section, and `load` updates the module only if every field converts, so a failing `load` leaves the module unchanged (previously the fields before the failing one were already updated). `save` converts the whole module first and then replaces the section in a single write: readers never observe a half-saved module, and a conversion error such as a `u64` above `i64::MAX` leaves the store unchanged (previously earlier fields were already written). Such conversion errors are reported before a section that is not a table. `load` of a module without loaded fields now also fails when its section exists but is not a table.
+- The "unsupported field type" compile error now says how to nest a struct: `#[confer(table)]` on the field and `#[derive(ConferTable)]` on the type.
 
 ### Fixed
 - A required `Datetime` field (plain type without `default`) now compiles and loads; a missing key fails with `MissingKey`.

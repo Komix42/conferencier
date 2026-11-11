@@ -3,7 +3,10 @@ use quote::{format_ident, quote, quote_spanned};
 use syn::spanned::Spanned;
 use syn::{Ident, LitStr, Result};
 
-use crate::model::{ContainerKind, Field, FieldType, FloatKind, IntegerKind, Module, ScalarKind};
+use crate::model::{
+    ContainerKind, Field, FieldKind, FieldType, FloatKind, IntegerKind, Module, ScalarKind,
+    TableContainer, TableType,
+};
 
 /// Produces the async load/save implementation for a parsed module description.
 ///
@@ -33,17 +36,7 @@ pub fn generate(module: Module, crate_path: syn::Path) -> Result<TokenStream> {
     let load_statements = load_statements(&fields, &path, &table, &crate_path)?;
     let store_statements =
         store_statements(&fields, &quote! { #guard }, &path, &table, &crate_path)?;
-
-    let struct_fields = fields.iter().map(|field| {
-        let ident = &field.ident;
-        if field.ignore {
-            let value = ignored_value(field);
-            quote! { #ident: #value }
-        } else {
-            let local = field_local(ident);
-            quote! { #ident: #local }
-        }
-    });
+    let struct_fields = struct_fields(&fields);
 
     let crate_private = quote! { #crate_path::__private };
     let shared_confer = quote! { #crate_path::SharedConfer };
@@ -106,6 +99,99 @@ pub fn generate(module: Module, crate_path: syn::Path) -> Result<TokenStream> {
     })
 }
 
+/// Produces the synchronous `ConferTable` implementation for a parsed struct description.
+///
+/// It uses the same field conversions as `ConferModule`, with the `path` argument in place of
+/// the section name.
+pub fn generate_table(module: Module, crate_path: syn::Path) -> Result<TokenStream> {
+    let Module {
+        ident,
+        generics,
+        fields,
+        ..
+    } = module;
+
+    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
+    let path = generated_local("path");
+    let table = generated_local("table");
+    let path_expr = quote! { #path };
+    let load_statements = load_statements(&fields, &path_expr, &table, &crate_path)?;
+    let store_statements =
+        store_statements(&fields, &quote! { self }, &path_expr, &table, &crate_path)?;
+    let struct_fields = struct_fields(&fields);
+    let table_type = quote! { #crate_path::toml::Table };
+    let result_type = quote! { #crate_path::Result };
+
+    // Unused parameters are left unnamed, so no lint fires in the user's crate.
+    let has_loaded = fields.iter().any(|field| !field.ignore);
+    let from_params = if has_loaded {
+        quote! { #path: &str, mut #table: #table_type }
+    } else {
+        quote! { _: &str, _: #table_type }
+    };
+    let to_path = if fields
+        .iter()
+        .filter_map(|field| field.kind.as_ref())
+        .any(store_uses_path)
+    {
+        quote! { #path }
+    } else {
+        quote! { _ }
+    };
+    let to_body = if has_loaded {
+        quote! {
+            let mut #table = #table_type::new();
+            #( #store_statements )*
+            Ok(#table)
+        }
+    } else {
+        quote! { Ok(#table_type::new()) }
+    };
+
+    Ok(quote! {
+        impl #impl_generics #crate_path::confer_table::ConferTable for #ident #ty_generics #where_clause {
+            fn from_table(#from_params) -> #result_type<Self> {
+                #( #load_statements )*
+                Ok(Self { #(#struct_fields),* })
+            }
+
+            fn to_table(&self, #to_path: &str) -> #result_type<#table_type> {
+                #to_body
+            }
+        }
+    })
+}
+
+/// Field initializers of the generated `Self { ... }` expression.
+///
+/// Loaded fields take their converted locals; ignored fields are initialized afterwards.
+fn struct_fields(fields: &[Field]) -> Vec<TokenStream> {
+    fields
+        .iter()
+        .map(|field| {
+            let ident = &field.ident;
+            if field.ignore {
+                let value = ignored_value(field);
+                quote! { #ident: #value }
+            } else {
+                let local = field_local(ident);
+                quote! { #ident: #local }
+            }
+        })
+        .collect()
+}
+
+/// Returns `true` when saving a field of this kind can report an error with its path.
+fn store_uses_path(kind: &FieldKind) -> bool {
+    match kind {
+        FieldKind::Scalar(kind) => matches!(
+            kind.scalar,
+            ScalarKind::Integer(IntegerKind::U64 | IntegerKind::Usize)
+        ),
+        FieldKind::Table(_) => true,
+    }
+}
+
 /// Name of the local holding a field's value inside the generated functions.
 ///
 /// The prefix keeps user field names (e.g. `store`, `module`) from shadowing the identifiers
@@ -134,8 +220,8 @@ fn ignored_value(field: &Field) -> TokenStream {
     }
 }
 
-/// Returns the classified type of a loaded field.
-fn field_kind(field: &Field) -> Result<&FieldType> {
+/// Returns the conversion of a loaded field.
+fn field_kind(field: &Field) -> Result<&FieldKind> {
     field
         .kind
         .as_ref()
@@ -145,8 +231,8 @@ fn field_kind(field: &Field) -> Result<&FieldType> {
 /// Generates statements binding every loaded field to its local, in declaration order.
 ///
 /// Each statement moves the field's value out of the owned `table` and converts it, applying
-/// the default, `None` or `MissingKey` behavior for absent keys. `path` is a `&str` expression
-/// naming `table` in errors. Errors are returned from the enclosing function.
+/// the default, `None`, `MissingKey` or empty-table behavior for absent keys. `path` is a `&str`
+/// expression naming `table` in errors. Errors are returned from the enclosing function.
 fn load_statements(
     fields: &[Field],
     path: &TokenStream,
@@ -157,11 +243,17 @@ fn load_statements(
         .iter()
         .filter(|field| !field.ignore)
         .map(|field| {
-            let kind = field_kind(field)?;
             let local = field_local(&field.ident);
             let key = LitStr::new(&field.key, field.span);
-            let present = present_value(kind, path, &key, crate_path);
-            let absent = absent_value(kind, field.default.as_ref(), path, &key, crate_path);
+            let (present, absent) = match field_kind(field)? {
+                FieldKind::Scalar(kind) => (
+                    present_value(kind, path, &key, crate_path),
+                    absent_value(kind, field.default.as_ref(), path, &key, crate_path),
+                ),
+                FieldKind::Table(table_type) => {
+                    table_from_value(table_type, path, &key, crate_path)
+                }
+            };
             Ok(quote! {
                 let #local = match #table.remove(#key) {
                     ::core::option::Option::Some(value) => #present,
@@ -174,7 +266,8 @@ fn load_statements(
 
 /// Generates statements inserting every loaded field of `source` into `table`.
 ///
-/// `source` is an expression whose fields are read by reference. `None` options are omitted.
+/// `source` is an expression whose fields are read by reference. `None` options and empty
+/// vectors of tables are omitted.
 fn store_statements(
     fields: &[Field],
     source: &TokenStream,
@@ -186,32 +279,12 @@ fn store_statements(
         .iter()
         .filter(|field| !field.ignore)
         .map(|field| {
-            let kind = field_kind(field)?;
             let ident = &field.ident;
             let key = LitStr::new(&field.key, field.span);
-            let insert = |value: TokenStream| {
-                quote! { #table.insert(::std::string::String::from(#key), #value); }
-            };
-            let block = match kind.container {
-                ContainerKind::Plain => {
-                    insert(scalar_to_value(&kind.scalar, path, &key, crate_path))
-                }
-                ContainerKind::Vec => insert(vec_to_value(&kind.scalar, path, &key, crate_path)),
-                ContainerKind::Option => {
-                    let insert = insert(scalar_to_value(&kind.scalar, path, &key, crate_path));
-                    quote! {
-                        if let ::core::option::Option::Some(value) = value {
-                            #insert
-                        }
-                    }
-                }
-                ContainerKind::OptionVec => {
-                    let insert = insert(vec_to_value(&kind.scalar, path, &key, crate_path));
-                    quote! {
-                        if let ::core::option::Option::Some(value) = value {
-                            #insert
-                        }
-                    }
+            let block = match field_kind(field)? {
+                FieldKind::Scalar(kind) => scalar_insert(kind, table, path, &key, crate_path),
+                FieldKind::Table(table_type) => {
+                    table_insert(table_type, table, path, &key, crate_path)
                 }
             };
             Ok(quote! {
@@ -222,6 +295,138 @@ fn store_statements(
             })
         })
         .collect()
+}
+
+/// Inserts the scalar field referenced by `value` into `table`.
+fn scalar_insert(
+    kind: &FieldType,
+    table: &Ident,
+    path: &TokenStream,
+    key: &LitStr,
+    crate_path: &syn::Path,
+) -> TokenStream {
+    let insert = |value: TokenStream| {
+        quote! { #table.insert(::std::string::String::from(#key), #value); }
+    };
+    match kind.container {
+        ContainerKind::Plain => insert(scalar_to_value(&kind.scalar, path, key, crate_path)),
+        ContainerKind::Vec => insert(vec_to_value(&kind.scalar, path, key, crate_path)),
+        ContainerKind::Option => {
+            let insert = insert(scalar_to_value(&kind.scalar, path, key, crate_path));
+            quote! {
+                if let ::core::option::Option::Some(value) = value {
+                    #insert
+                }
+            }
+        }
+        ContainerKind::OptionVec => {
+            let insert = insert(vec_to_value(&kind.scalar, path, key, crate_path));
+            quote! {
+                if let ::core::option::Option::Some(value) = value {
+                    #insert
+                }
+            }
+        }
+    }
+}
+
+/// Path to a `ConferTable` method of the field's inner type.
+///
+/// The call carries the span of the inner type, so a missing implementation is reported there.
+fn table_method(table_type: &TableType, method: &str, crate_path: &syn::Path) -> TokenStream {
+    let inner = &table_type.inner;
+    let method = Ident::new(method, Span::call_site());
+    quote_spanned! { inner.span() =>
+        <#inner as #crate_path::confer_table::ConferTable>::#method
+    }
+}
+
+/// Converts a present TOML `value` of a table field and handles its absence.
+///
+/// Returns the expressions for the present and the absent case. Array elements are checked and
+/// converted one at a time, so the first error in declaration order is reported (L5).
+fn table_from_value(
+    table_type: &TableType,
+    path: &TokenStream,
+    key: &LitStr,
+    crate_path: &syn::Path,
+) -> (TokenStream, TokenStream) {
+    let private = quote! { #crate_path::__private };
+    let from_table = table_method(table_type, "from_table", crate_path);
+    let nested = quote! {
+        {
+            let value = #private::table(#path, #key, value)?;
+            #from_table(&#private::child_path(#path, #key), value)?
+        }
+    };
+    match table_type.container {
+        TableContainer::Plain => (
+            nested,
+            quote! {
+                #from_table(&#private::child_path(#path, #key), #crate_path::toml::Table::new())?
+            },
+        ),
+        TableContainer::Option => (
+            quote! { ::core::option::Option::Some(#nested) },
+            quote! { ::core::option::Option::None },
+        ),
+        TableContainer::Vec => (
+            quote! {
+                {
+                    let value = #private::array(#path, #key, value)?;
+                    let array_path = #private::child_path(#path, #key);
+                    let mut out = ::std::vec::Vec::with_capacity(value.len());
+                    for (index, value) in value.into_iter().enumerate() {
+                        let value = #private::table_element(#path, #key, value, index)?;
+                        out.push(#from_table(&#private::element_path(&array_path, index), value)?);
+                    }
+                    out
+                }
+            },
+            quote! { ::std::vec::Vec::new() },
+        ),
+    }
+}
+
+/// Inserts the table field referenced by `value` into `table`.
+///
+/// A plain table is always written; `None` and an empty vector are omitted.
+fn table_insert(
+    table_type: &TableType,
+    table: &Ident,
+    path: &TokenStream,
+    key: &LitStr,
+    crate_path: &syn::Path,
+) -> TokenStream {
+    let private = quote! { #crate_path::__private };
+    let value_type = quote! { #crate_path::toml::Value };
+    let to_table = table_method(table_type, "to_table", crate_path);
+    let insert_nested = quote! {
+        #table.insert(
+            ::std::string::String::from(#key),
+            #value_type::Table(#to_table(value, &#private::child_path(#path, #key))?),
+        );
+    };
+    match table_type.container {
+        TableContainer::Plain => insert_nested,
+        TableContainer::Option => quote! {
+            if let ::core::option::Option::Some(value) = value {
+                #insert_nested
+            }
+        },
+        TableContainer::Vec => quote! {
+            if !value.is_empty() {
+                let array_path = #private::child_path(#path, #key);
+                let mut array = ::std::vec::Vec::with_capacity(value.len());
+                for (index, value) in value.iter().enumerate() {
+                    array.push(#value_type::Table(
+                        #to_table(value, &#private::element_path(&array_path, index))?,
+                    ));
+                }
+                #table.insert(::std::string::String::from(#key), #value_type::Array(array));
+            }
+        },
+    }
 }
 
 /// Converts a present TOML `value` into the field's Rust type.

@@ -1,23 +1,43 @@
 use proc_macro2::{Span, TokenStream};
 use syn::{Ident, Type};
 
-/// Intermediate representation of a module annotated with `#[derive(ConferModule)]`.
+/// Derive macro being expanded; selects error messages and the generated trait.
+#[derive(Debug, Clone, Copy)]
+pub enum DeriveKind {
+    Module,
+    Table,
+}
+
+impl DeriveKind {
+    /// Name of the derive macro, used in error messages.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Module => "ConferModule",
+            Self::Table => "ConferTable",
+        }
+    }
+}
+
+/// Intermediate representation of a struct annotated with `#[derive(ConferModule)]` or
+/// `#[derive(ConferTable)]`.
 #[derive(Debug, Clone)]
 pub struct Module {
     pub ident: Ident,
     pub generics: syn::Generics,
+    /// TOML section of a module; validated but unused for tables.
     pub section: String,
     pub fields: Vec<Field>,
 }
 
-/// Description of a single field within a derived module.
+/// Description of a single field within a derived struct.
 #[derive(Debug, Clone)]
 pub struct Field {
     pub ident: Ident,
     pub ty: Type,
     pub key: String,
-    pub kind: Option<FieldType>,
-    /// Literal fallback for a missing key; only present on loaded fields.
+    /// Conversion of a loaded field; `None` for ignored fields.
+    pub kind: Option<FieldKind>,
+    /// Literal fallback for a missing key; only present on loaded scalar fields.
     pub default: Option<TokenStream>,
     /// Expression from `#[confer(ignore = <expr>)]`; only present on ignored fields.
     pub initializer: Option<TokenStream>,
@@ -25,11 +45,34 @@ pub struct Field {
     pub span: Span,
 }
 
+/// How a loaded field is converted from and to TOML.
+#[derive(Debug, Clone)]
+pub enum FieldKind {
+    Scalar(FieldType),
+    /// Field marked `#[confer(table)]`.
+    Table(Box<TableType>),
+}
+
 /// Fully classified field type, including container and scalar information.
 #[derive(Debug, Clone)]
 pub struct FieldType {
     pub container: ContainerKind,
     pub scalar: ScalarKind,
+}
+
+/// Type of a `#[confer(table)]` field: a container around a type implementing `ConferTable`.
+#[derive(Debug, Clone)]
+pub struct TableType {
+    pub container: TableContainer,
+    pub inner: Type,
+}
+
+/// Container shapes supported for table fields.
+#[derive(Debug, Clone, Copy)]
+pub enum TableContainer {
+    Plain,
+    Option,
+    Vec,
 }
 
 /// High-level container category for a field (plain, option, vector, etc.).

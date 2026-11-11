@@ -25,10 +25,10 @@ pub use toml;
 /// TOML datetime type, usable directly as a field type in derived modules.
 pub use toml::value::Datetime;
 
-// The derive macro shares the trait's name but lives in the macro namespace, so
-// `use conferencier::ConferModule;` imports both.
+// The derive macros share the traits' names but live in the macro namespace, so
+// `use conferencier::ConferModule;` imports both (likewise for `ConferTable`).
 #[cfg(feature = "with-derive")]
-pub use conferencier_derive::ConferModule;
+pub use conferencier_derive::{ConferModule, ConferTable};
 
 #[doc(hidden)]
 pub mod __private {
