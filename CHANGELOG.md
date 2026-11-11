@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 ### Added
+- `ConferTable`, a synchronous trait for plain nested configuration values, and `Confer::set_section_table` for atomic replacement of a complete section.
 - The README explains what saving does to a hand-written configuration file: comments, key order and value notation are not preserved, and a module's `save` removes unknown keys and sub-tables from its section, including misspelled ones. Saving is recommended mainly for generating an initial configuration file.
 
 ### Changed

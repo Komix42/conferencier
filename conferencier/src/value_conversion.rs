@@ -2,8 +2,8 @@
 
 use std::str::FromStr;
 
-use toml::Value;
 use toml::value::Datetime;
+use toml::{Table, Value};
 
 use crate::error::{ConferError, Result};
 
@@ -83,6 +83,43 @@ pub fn datetime(section: &str, key: &str, value: Value) -> Result<Datetime> {
             key,
             "datetime",
             describe(&other),
+        )),
+    }
+}
+
+/// Converts a TOML value to a [`Table`], producing a type-mismatch error when incompatible.
+pub fn table(section: &str, key: &str, value: Value) -> Result<Table> {
+    match value {
+        Value::Table(table) => Ok(table),
+        other => Err(ConferError::type_mismatch(
+            section,
+            key,
+            "table",
+            describe(&other),
+        )),
+    }
+}
+
+/// Converts a TOML value to its array elements without converting them.
+pub fn array(section: &str, key: &str, value: Value) -> Result<Vec<Value>> {
+    match value {
+        Value::Array(items) => Ok(items),
+        other => Err(ConferError::type_mismatch(
+            section,
+            key,
+            "array",
+            describe(&other),
+        )),
+    }
+}
+
+/// Converts one element of an array of tables, reporting its index on mismatch.
+pub fn table_element(section: &str, key: &str, value: Value, index: usize) -> Result<Table> {
+    match value {
+        Value::Table(table) => Ok(table),
+        other => Err(annotate_with_index(
+            element_mismatch(section, key, "table", &other),
+            index,
         )),
     }
 }
