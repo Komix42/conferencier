@@ -3,17 +3,25 @@ use std::collections::HashMap;
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
 use syn::ext::IdentExt;
-use syn::meta::ParseNestedMeta;
 use syn::spanned::Spanned;
 use syn::{
     Attribute, DeriveInput, Expr, ExprLit, ExprUnary, Field as SynField, Fields, Lit, LitStr,
-    Result, Type, UnOp,
+    Result, Token, Type, UnOp,
 };
 
-use crate::model::{ContainerKind, Field, FieldType, FloatKind, IntegerKind, Module, ScalarKind};
+use crate::model::{
+    ContainerKind, DeriveKind, Field, FieldKind, FieldType, FloatKind, IntegerKind, Module,
+    ScalarKind, TableContainer, TableType,
+};
+
+/// Error reported for any use of the removed `#[confer(init)]` attribute.
+const INIT_REMOVED: &str = "#[confer(init)] was removed in 0.0.4; use #[confer(ignore = <expr>)] for ignored fields; remove it from loaded fields and add #[confer(default = ...)] only if a missing-key fallback is intended";
+
+/// Error reported for a `#[confer(table)]` field of an unsupported container shape.
+const TABLE_SHAPE: &str = "#[confer(table)] supports T, Option<T> and Vec<T>";
 
 /// Parses the derive input into the intermediate `Module` representation.
-pub fn parse_module(input: DeriveInput) -> Result<Module> {
+pub fn parse_module(input: DeriveInput, derive: DeriveKind) -> Result<Module> {
     let DeriveInput {
         attrs,
         ident,
@@ -22,14 +30,17 @@ pub fn parse_module(input: DeriveInput) -> Result<Module> {
         ..
     } = input;
 
-    let section = parse_section_name(&attrs, &ident)?;
+    let section = parse_section_name(&attrs, &ident, derive)?;
 
     let data = match data {
         syn::Data::Struct(data) => data,
         _ => {
             return Err(syn::Error::new(
                 ident.span(),
-                "#[derive(ConferModule)] can only be applied to structs",
+                format!(
+                    "#[derive({})] can only be applied to structs",
+                    derive.name()
+                ),
             ));
         }
     };
@@ -39,7 +50,7 @@ pub fn parse_module(input: DeriveInput) -> Result<Module> {
         _ => {
             return Err(syn::Error::new(
                 ident.span(),
-                "#[derive(ConferModule)] requires named fields",
+                format!("#[derive({})] requires named fields", derive.name()),
             ));
         }
     };
@@ -48,7 +59,7 @@ pub fn parse_module(input: DeriveInput) -> Result<Module> {
     let mut seen_keys: HashMap<String, Span> = HashMap::new();
 
     for field in fields {
-        result_fields.push(parse_field(&field, &mut seen_keys)?);
+        result_fields.push(parse_field(&field, &mut seen_keys, derive)?);
     }
 
     Ok(Module {
@@ -60,7 +71,14 @@ pub fn parse_module(input: DeriveInput) -> Result<Module> {
 }
 
 /// Extracts the TOML section name from the `#[confer(...)]` attributes or generates a default.
-fn parse_section_name(attrs: &[Attribute], ident: &syn::Ident) -> Result<String> {
+///
+/// `ConferTable` accepts and validates `section` but does not use it, so one struct can derive
+/// both macros.
+fn parse_section_name(
+    attrs: &[Attribute],
+    ident: &syn::Ident,
+    derive: DeriveKind,
+) -> Result<String> {
     let mut section: Option<String> = None;
 
     for attr in attrs {
@@ -77,7 +95,10 @@ fn parse_section_name(attrs: &[Attribute], ident: &syn::Ident) -> Result<String>
                 section = Some(value.value());
                 Ok(())
             } else {
-                Err(meta.error("unsupported attribute on struct for #[derive(ConferModule)]"))
+                Err(meta.error(format!(
+                    "unsupported attribute on struct for #[derive({})]",
+                    derive.name()
+                )))
             }
         })?;
     }
@@ -90,16 +111,21 @@ fn parse_section_name(attrs: &[Attribute], ident: &syn::Ident) -> Result<String>
 }
 
 /// Parses an individual struct field, tracking duplicate keys and metadata.
-fn parse_field(field: &SynField, seen_keys: &mut HashMap<String, Span>) -> Result<Field> {
+fn parse_field(
+    field: &SynField,
+    seen_keys: &mut HashMap<String, Span>,
+    derive: DeriveKind,
+) -> Result<Field> {
     let ident = field
         .ident
         .clone()
         .ok_or_else(|| syn::Error::new(field.span(), "expected named field"))?;
 
-    let mut rename: Option<String> = None;
-    let mut default_expr: Option<Expr> = None;
-    let mut init_expr: Option<Expr> = None;
-    let mut ignore = false;
+    let mut rename: Option<(String, Span)> = None;
+    let mut default_expr: Option<(Expr, Span)> = None;
+    let mut initializer: Option<Expr> = None;
+    let mut ignore: Option<Span> = None;
+    let mut table = false;
 
     for attr in &field.attrs {
         if !is_confer_attr(attr) {
@@ -111,75 +137,113 @@ fn parse_field(field: &SynField, seen_keys: &mut HashMap<String, Span>) -> Resul
                 if rename.is_some() {
                     return Err(meta.error("duplicate #[confer(rename = ...)] attribute"));
                 }
+                let span = meta.path.span();
                 let value: LitStr = meta.value()?.parse()?;
-                rename = Some(value.value());
+                rename = Some((value.value(), span));
                 Ok(())
             } else if meta.path.is_ident("default") {
                 if default_expr.is_some() {
                     return Err(meta.error("duplicate #[confer(default = ...)] attribute"));
                 }
+                let span = meta.path.span();
                 let expr: Expr = meta.value()?.parse()?;
-                default_expr = Some(expr);
+                default_expr = Some((expr, span));
                 Ok(())
             } else if meta.path.is_ident("init") {
-                if init_expr.is_some() {
-                    return Err(meta.error("duplicate #[confer(init = ...)] attribute"));
-                }
-                let expr: Expr = parse_init_expr(&meta)?;
-                init_expr = Some(expr);
-                Ok(())
+                Err(meta.error(INIT_REMOVED))
             } else if meta.path.is_ident("ignore") {
-                if ignore {
+                if ignore.is_some() {
                     return Err(meta.error("duplicate #[confer(ignore)] attribute"));
                 }
-                ignore = true;
+                ignore = Some(meta.path.span());
+                if meta.input.peek(Token![=]) {
+                    initializer = Some(meta.value()?.parse()?);
+                }
+                Ok(())
+            } else if meta.path.is_ident("table") {
+                if table {
+                    return Err(meta.error("duplicate #[confer(table)] attribute"));
+                }
+                table = true;
                 Ok(())
             } else {
-                Err(meta.error("unsupported attribute for #[derive(ConferModule)]"))
+                Err(meta.error(format!(
+                    "unsupported attribute for #[derive({})]",
+                    derive.name()
+                )))
             }
         })?;
     }
 
-    if default_expr.is_some() && init_expr.is_some() {
-        return Err(syn::Error::new(
-            field.span(),
-            "#[confer(default = ...)] and #[confer(init = ...)] cannot be combined",
-        ));
+    if table {
+        if let Some((_, span)) = &default_expr {
+            return Err(syn::Error::new(
+                *span,
+                "#[confer(table)] cannot be combined with #[confer(default)]",
+            ));
+        }
+        if let Some(span) = ignore {
+            return Err(syn::Error::new(
+                span,
+                "#[confer(table)] cannot be combined with #[confer(ignore)]",
+            ));
+        }
     }
 
-    let key = rename.unwrap_or_else(|| ident.unraw().to_string());
+    let ignore = ignore.is_some();
+    if ignore {
+        if let Some((_, span)) = &default_expr {
+            return Err(syn::Error::new(
+                *span,
+                "#[confer(default)] cannot be combined with #[confer(ignore)]; use #[confer(ignore = <expr>)]",
+            ));
+        }
+        if let Some((_, span)) = &rename {
+            return Err(syn::Error::new(
+                *span,
+                "#[confer(rename)] cannot be combined with #[confer(ignore)]; an ignored field has no TOML key",
+            ));
+        }
+    }
 
-    if let Some(prev_span) = seen_keys.insert(key.clone(), field.span()) {
-        return Err(syn::Error::new(
-            field.span(),
-            format!(
-                "duplicate TOML key `{}` detected (previously declared here)",
-                key
-            ),
-        )
-        .with_span(prev_span));
+    let key = rename.map_or_else(|| ident.unraw().to_string(), |(key, _)| key);
+
+    // An ignored field has no TOML key, so it cannot collide with another field.
+    if !ignore {
+        if let Some(prev_span) = seen_keys.insert(key.clone(), field.span()) {
+            return Err(syn::Error::new(
+                field.span(),
+                format!(
+                    "duplicate TOML key `{}` detected (previously declared here)",
+                    key
+                ),
+            )
+            .with_span(prev_span));
+        }
     }
 
     let kind = if ignore {
         None
+    } else if table {
+        Some(FieldKind::Table(Box::new(classify_table(&field.ty)?)))
     } else {
-        Some(classify_type(&field.ty)?)
+        Some(FieldKind::Scalar(classify_type(&field.ty, derive)?))
     };
 
-    let default_tokens = match (&default_expr, &kind) {
-        (Some(expr), Some(kind)) => Some(transform_default(expr.clone(), kind)?),
-        (Some(expr), None) => Some(quote! { #expr }),
-        (None, _) => None,
+    let default_tokens = match (default_expr, &kind) {
+        (Some((expr, _)), Some(FieldKind::Scalar(kind))) => Some(transform_default(expr, kind)?),
+        _ => None,
     };
 
-    let init_tokens = init_expr.map(|expr| quote! { #expr });
+    let initializer_tokens = initializer.map(|expr| quote! { #expr });
 
     Ok(Field {
         ident,
+        ty: field.ty.clone(),
         key,
         kind,
         default: default_tokens,
-        init: init_tokens,
+        initializer: initializer_tokens,
         ignore,
         span: field.span(),
     })
@@ -202,22 +266,55 @@ fn is_confer_attr(attr: &Attribute) -> bool {
     attr.path().is_ident("confer")
 }
 
-/// Parses the `init` attribute, allowing either raw expressions or string literals.
-fn parse_init_expr(meta: &ParseNestedMeta) -> Result<Expr> {
-    let expr: Expr = meta.value()?.parse()?;
-    if let Expr::Lit(expr_lit) = &expr
-        && let Lit::Str(lit) = &expr_lit.lit
-    {
-        return syn::parse_str::<Expr>(&lit.value());
-    }
-    Ok(expr)
+/// Classifies a field type into container and scalar components.
+fn classify_type(ty: &Type, derive: DeriveKind) -> Result<FieldType> {
+    let (container, inner) = classify_container(ty)?;
+    let scalar = classify_scalar(inner, derive)?;
+    Ok(FieldType { container, scalar })
 }
 
-/// Classifies a field type into container and scalar components.
-fn classify_type(ty: &Type) -> Result<FieldType> {
-    let (container, inner) = classify_container(ty)?;
-    let scalar = classify_scalar(inner)?;
-    Ok(FieldType { container, scalar })
+/// Classifies the type of a `#[confer(table)]` field into its container and inner type.
+///
+/// Only syntactically recognizable shapes are rejected; whether the inner type implements
+/// `ConferTable` is checked by the compiler on the generated code.
+fn classify_table(ty: &Type) -> Result<TableType> {
+    let ty = ungroup(ty);
+    let (container, inner) = if let Some(inner) = match_outer_type(ty, "Option") {
+        (TableContainer::Option, ungroup(inner))
+    } else if let Some(inner) = match_outer_type(ty, "Vec") {
+        (TableContainer::Vec, ungroup(inner))
+    } else {
+        (TableContainer::Plain, ty)
+    };
+
+    let supported = match inner {
+        Type::Path(path) => {
+            path.qself.is_some()
+                || (match_outer_type(inner, "Option").is_none()
+                    && match_outer_type(inner, "Vec").is_none())
+        }
+        Type::Macro(_) | Type::Verbatim(_) => true,
+        _ => false,
+    };
+    if !supported {
+        return Err(syn::Error::new(ty.span(), TABLE_SHAPE));
+    }
+
+    Ok(TableType {
+        container,
+        inner: inner.clone(),
+    })
+}
+
+/// Strips invisible groups and parentheses around a type.
+fn ungroup(mut ty: &Type) -> &Type {
+    loop {
+        match ty {
+            Type::Group(group) => ty = &group.elem,
+            Type::Paren(paren) => ty = &paren.elem,
+            _ => return ty,
+        }
+    }
 }
 
 /// Determines the outer container kind and the innermost scalar type.
@@ -242,8 +339,8 @@ fn classify_container(ty: &Type) -> Result<(ContainerKind, &Type)> {
 }
 
 /// Resolves the scalar kind supported by the derive implementation.
-fn classify_scalar(ty: &Type) -> Result<ScalarKind> {
-    let ident = type_ident(ty)?;
+fn classify_scalar(ty: &Type, derive: DeriveKind) -> Result<ScalarKind> {
+    let ident = type_ident(ty, derive)?;
     match ident.as_str() {
         "String" => Ok(ScalarKind::String),
         "bool" => Ok(ScalarKind::Bool),
@@ -262,13 +359,16 @@ fn classify_scalar(ty: &Type) -> Result<ScalarKind> {
         "Datetime" => Ok(ScalarKind::Datetime),
         other => Err(syn::Error::new(
             ty.span(),
-            format!("unsupported field type `{}`", other),
+            format!(
+                "unsupported field type `{}`; nested structs require #[confer(table)] on the field and #[derive(ConferTable)] on the type",
+                other
+            ),
         )),
     }
 }
 
 /// Extracts the terminal identifier from a type path.
-fn type_ident(ty: &Type) -> Result<String> {
+fn type_ident(ty: &Type, derive: DeriveKind) -> Result<String> {
     match ty {
         Type::Path(path) if path.qself.is_none() => {
             let ident = &path
@@ -279,10 +379,10 @@ fn type_ident(ty: &Type) -> Result<String> {
                 .ident;
             Ok(ident.to_string())
         }
-        Type::Reference(reference) => type_ident(&reference.elem),
+        Type::Reference(reference) => type_ident(&reference.elem, derive),
         _ => Err(syn::Error::new(
             ty.span(),
-            "unsupported field type for #[derive(ConferModule)]",
+            format!("unsupported field type for #[derive({})]", derive.name()),
         )),
     }
 }
@@ -295,15 +395,20 @@ fn match_outer_type<'a>(ty: &'a Type, expected: &str) -> Option<&'a Type> {
     };
 
     let last = path.path.segments.last()?;
-    if last.ident == expected
-        && let syn::PathArguments::AngleBracketed(generic) = &last.arguments
-        && generic.args.len() == 1
-        && let Some(syn::GenericArgument::Type(inner)) = generic.args.first()
-    {
-        return Some(inner);
+    if last.ident != expected {
+        return None;
+    }
+    let syn::PathArguments::AngleBracketed(generic) = &last.arguments else {
+        return None;
+    };
+    if generic.args.len() != 1 {
+        return None;
     }
 
-    None
+    match generic.args.first() {
+        Some(syn::GenericArgument::Type(inner)) => Some(inner),
+        _ => None,
+    }
 }
 
 /// Converts a literal default expression into tokens matching the field type.

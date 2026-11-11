@@ -1,0 +1,8 @@
+error[E0728]: `await` is only allowed inside `async` functions and blocks
+ --> tests/trybuild/fail_ignore_expr_await.rs:7:30
+  |
+5 | #[derive(conferencier_derive::ConferModule)]
+  |          --------------------------------- this is not `async`
+6 | struct UsesAwait {
+7 |     #[confer(ignore = make().await)]
+  |                              ^^^^^ only allowed inside `async` functions and blocks

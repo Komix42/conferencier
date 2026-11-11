@@ -1,4 +1,4 @@
-error: unsupported field type `HashMap`
+error: unsupported field type `HashMap`; nested structs require #[confer(table)] on the field and #[derive(ConferTable)] on the type
  --> tests/trybuild/fail_unsupported_type.rs:5:10
   |
 5 |     map: HashMap<String, String>,

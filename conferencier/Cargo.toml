@@ -3,7 +3,7 @@ name = "conferencier"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "Tokio-backed asynchronous shared configuration hub with TOML persistence"
+description = "Minimal, typed TOML configuration for Tokio applications"
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -36,6 +36,18 @@ required-features = ["with-derive"]
 name = "advanced_usage"
 required-features = ["with-derive"]
 
+[[example]]
+name = "nested_tables"
+required-features = ["with-derive"]
+
 [[test]]
 name = "module_integration"
+required-features = ["with-derive"]
+
+[[test]]
+name = "module_snapshots"
+required-features = ["with-derive"]
+
+[[test]]
+name = "nested_tables"
 required-features = ["with-derive"]

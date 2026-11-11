@@ -100,6 +100,47 @@ impl Confer {
         section_table(&guard, section).cloned()
     }
 
+    pub(crate) async fn read_section_table(&self, section: &str) -> Result<Table> {
+        let guard = self.table.read().await;
+        match guard.get(section) {
+            Some(Value::Table(table)) => Ok(table.clone()),
+            Some(other) => Err(ConferError::type_mismatch(
+                section,
+                "<section>",
+                "table",
+                value_conversion::describe(other),
+            )),
+            None => Ok(Table::new()),
+        }
+    }
+
+    /// Atomically replaces the complete table at `section`, creating it if absent.
+    ///
+    /// Unknown keys in the old section are removed. If the section holds a
+    /// non-table value, returns a type mismatch and leaves the store unchanged.
+    /// `section` is a literal top-level key, not a dotted path.
+    pub async fn set_section_table(&self, section: &str, table: Table) -> Result<()> {
+        let mut guard = self.table.write().await;
+        match guard.entry(section.to_owned()) {
+            toml::map::Entry::Occupied(mut entry) => match entry.get_mut() {
+                Value::Table(inner) => {
+                    *inner = table;
+                    Ok(())
+                }
+                other => Err(ConferError::type_mismatch(
+                    section,
+                    "<section>",
+                    "table",
+                    value_conversion::describe(other),
+                )),
+            },
+            toml::map::Entry::Vacant(entry) => {
+                entry.insert(Value::Table(table));
+                Ok(())
+            }
+        }
+    }
+
     /// Inserts `value` at `section.key`, creating the section if necessary.
     pub async fn set_value(&self, section: &str, key: &str, value: Value) -> Result<()> {
         let mut guard = self.table.write().await;
@@ -408,6 +449,54 @@ mod tests {
     async fn new_store_is_empty() {
         let store = Confer::new();
         assert!(store.list_sections().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn section_tables_create_replace_and_snapshot() -> Result<()> {
+        let store = Confer::from_string("[Other]\nkeep = 1")?;
+        assert!(store.read_section_table("App").await?.is_empty());
+        let first: Table = "old = 1\nnested = { stale = true }".parse().unwrap();
+        store.set_section_table("App", first.clone()).await?;
+        let mut snapshot = store.read_section_table("App").await?;
+        assert_eq!(snapshot, first);
+        snapshot.clear();
+        assert_eq!(store.get_section_table("App").await, Some(first));
+
+        let second: Table = "new = 2".parse().unwrap();
+        store.set_section_table("App", second.clone()).await?;
+        assert_eq!(store.get_section_table("App").await, Some(second));
+        assert_eq!(store.get_integer("Other", "keep").await?, 1);
+        store.set_section_table("App", Table::new()).await?;
+        assert_eq!(store.get_section_table("App").await, Some(Table::new()));
+        store.set_section_table("App.server", Table::new()).await?;
+        assert!(store.section_exists("App.server").await);
+        assert!(store.get_value("App", "server").await.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn strict_section_operations_reject_non_tables_without_changes() -> Result<()> {
+        let store = Confer::from_string("App = 7\n[Other]\nkeep = true")?;
+        let before = store.save_str().await?;
+        for error in [
+            store.read_section_table("App").await.unwrap_err(),
+            store
+                .set_section_table("App", Table::new())
+                .await
+                .unwrap_err(),
+        ] {
+            assert!(matches!(
+                &error,
+                ConferError::TypeMismatch { section, key, expected: "table", found: "integer" }
+                    if section == "App" && key == "<section>"
+            ));
+            assert_eq!(
+                error.to_string(),
+                "expected table at App.<section> but found integer"
+            );
+        }
+        assert_eq!(store.save_str().await?, before);
+        Ok(())
     }
 
     #[tokio::test]

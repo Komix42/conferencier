@@ -1,0 +1,7 @@
+#[derive(conferencier_derive::ConferModule)]
+struct MissingExpression {
+    #[confer(ignore = )]
+    value: i32,
+}
+
+fn main() {}

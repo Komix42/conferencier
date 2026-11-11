@@ -1,0 +1,80 @@
+name: Bug report
+description: Report incorrect behavior, a panic, a compile error or a documentation mistake.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a problem!
+        **Security vulnerabilities must not be reported here**; see the [security policy](https://github.com/Komix42/conferencier/security/policy).
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What went wrong?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: The smallest code (and TOML input, if relevant) that shows the problem.
+      render: rust
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include the full error message, compiler output or panic message if there is one.
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Conferencier version
+      description: Version of `conferencier` (and `conferencier-derive`, if used directly) from your `Cargo.lock`.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: features
+    attributes:
+      label: Features
+      options:
+        - Default features (`with-derive`)
+        - "`default-features = false`"
+        - "`default-features = false` + `conferencier-derive` used directly"
+    validations:
+      required: true
+
+  - type: input
+    id: rust-version
+    attributes:
+      label: Rust version
+      description: Output of `rustc --version`.
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: Windows 11, Ubuntu 24.04, macOS 15, ...
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context

@@ -1,0 +1,8 @@
+error[E0277]: the `?` operator can only be used in a closure that returns `Result` or `Option` (or another type that implements `FromResidual`)
+ --> tests/trybuild/fail_ignore_expr_try.rs:4:40
+  |
+2 | #[derive(conferencier_derive::ConferModule)]
+  |          --------------------------------- this function should return `Result` or `Option` to accept `?`
+3 | struct UsesTry {
+4 |     #[confer(ignore = "5".parse::<u8>()?)]
+  |                                        ^ cannot use the `?` operator in a closure that returns `u8`

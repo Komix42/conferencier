@@ -1,35 +1,66 @@
+//! The [`ConferError`] type and the [`Result`] alias used throughout the crate.
+
 use std::path::PathBuf;
 
 use thiserror::Error;
 
+/// Result type returned by conferencier operations.
 pub type Result<T> = std::result::Result<T, ConferError>;
 
-/// Errors that can be raised while interacting with a [`Confer`](crate::store::Confer) store.
+/// Errors returned by the [`Confer`](crate::store::Confer) store and by derived
+/// [`ConferModule`](crate::ConferModule) and [`ConferTable`](crate::ConferTable)
+/// implementations.
+///
+/// For keys inside nested tables, `section` holds the path of the table, such as
+/// `App.upstream[1]`. When a section exists but is not a table, `key` is `<section>`.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum ConferError {
+    /// Reading or writing a file failed.
     #[error("I/O error (path: {path:?}): {source}")]
     Io {
+        /// The file involved, if known.
         path: Option<PathBuf>,
+        /// The underlying I/O error.
         #[source]
         source: std::io::Error,
     },
+    /// The input is not a valid TOML document.
     #[error("failed to parse TOML: {0}")]
     Parse(#[from] toml::de::Error),
+    /// The store could not be serialized to TOML.
     #[error("failed to serialize TOML: {0}")]
     Serialize(#[from] toml::ser::Error),
+    /// A required key is absent.
     #[error("missing key {section}.{key}")]
-    MissingKey { section: String, key: String },
+    MissingKey {
+        /// Section or table path containing the key.
+        section: String,
+        /// The missing key.
+        key: String,
+    },
+    /// A value has a different TOML type than the field expects.
     #[error("expected {expected} at {section}.{key} but found {found}")]
     TypeMismatch {
+        /// Section or table path containing the key.
         section: String,
+        /// The key holding the value.
         key: String,
+        /// Expected TOML type, such as `integer` or `table`.
         expected: &'static str,
+        /// TOML type found in the document.
         found: &'static str,
     },
+    /// A value has an acceptable TOML type but cannot be converted, for example an
+    /// integer out of range for the field type, an invalid datetime string or an
+    /// array element of the wrong type.
     #[error("invalid value at {section}.{key}: {message}")]
     ValueParse {
+        /// Section or table path containing the key.
         section: String,
+        /// The key holding the value.
         key: String,
+        /// Description of the problem.
         message: String,
     },
 }
