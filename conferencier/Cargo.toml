@@ -39,3 +39,7 @@ required-features = ["with-derive"]
 [[test]]
 name = "module_integration"
 required-features = ["with-derive"]
+
+[[test]]
+name = "module_snapshots"
+required-features = ["with-derive"]

@@ -6,6 +6,9 @@ use syn::{Ident, LitStr, Result};
 use crate::model::{ContainerKind, Field, FieldType, FloatKind, IntegerKind, Module, ScalarKind};
 
 /// Produces the async load/save implementation for a parsed module description.
+///
+/// Loading converts a snapshot of the whole section and saving replaces the whole section, so
+/// both operations are atomic with respect to the store (RFC-0004 R1–R5).
 pub fn generate(module: Module, crate_path: syn::Path) -> Result<TokenStream> {
     let Module {
         ident,
@@ -15,26 +18,21 @@ pub fn generate(module: Module, crate_path: syn::Path) -> Result<TokenStream> {
     } = module;
 
     let section_lit = LitStr::new(&section, Span::call_site());
+    let path = quote! { #section_lit };
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
-    let store = store_ident();
+    let store = generated_local("store");
+    let table = generated_local("table");
+    let guard = generated_local("guard");
 
-    let load_values: Vec<_> = fields
+    let loaded: Vec<_> = fields.iter().filter(|field| !field.ignore).collect();
+    let loaded_idents: Vec<_> = loaded.iter().map(|field| &field.ident).collect();
+    let loaded_locals: Vec<_> = loaded_idents
         .iter()
-        .filter(|field| !field.ignore)
-        .map(|field| generate_load_value(field, &section_lit, &crate_path))
-        .collect::<Result<_>>()?;
-
-    // Loaded fields are converted into locals first, so that ignored fields are only
-    // initialized once every conversion has succeeded.
-    let from_confer_locals: Vec<_> = fields
-        .iter()
-        .filter(|field| !field.ignore)
-        .zip(&load_values)
-        .map(|(field, value)| {
-            let local = field_local(&field.ident);
-            quote! { let #local = #value; }
-        })
+        .map(|ident| field_local(ident))
         .collect();
+    let load_statements = load_statements(&fields, &path, &table, &crate_path)?;
+    let store_statements =
+        store_statements(&fields, &quote! { #guard }, &path, &table, &crate_path)?;
 
     let struct_fields = fields.iter().map(|field| {
         let ident = &field.ident;
@@ -47,74 +45,62 @@ pub fn generate(module: Module, crate_path: syn::Path) -> Result<TokenStream> {
         }
     });
 
-    let load_blocks: Vec<_> = fields
-        .iter()
-        .filter(|field| !field.ignore)
-        .zip(&load_values)
-        .map(|(field, value)| {
-            let ident = &field.ident;
-            let local = field_local(ident);
-            quote! {
-                let #local = #value;
-                {
-                    let mut guard = module.write().await;
-                    guard.#ident = #local;
-                }
-            }
-        })
-        .collect();
-
-    let save_blocks: Vec<_> = fields
-        .iter()
-        .filter(|field| !field.ignore)
-        .map(|field| generate_save(field, &section_lit, &crate_path))
-        .collect::<Result<_>>()?;
-
-    let owned_keys: Vec<_> = fields
-        .iter()
-        .filter(|field| !field.ignore)
-        .map(|field| LitStr::new(&field.key, field.span))
-        .collect();
-
-    let known_keys_expr = if owned_keys.is_empty() {
-        quote! { &[] as &[&str] }
-    } else {
-        quote! { &[#(#owned_keys),*] }
-    };
-
-    let clone_block = generate_clone_block(&fields);
-
     let crate_private = quote! { #crate_path::__private };
     let shared_confer = quote! { #crate_path::SharedConfer };
     let shared_module = quote! { #crate_path::confer_module::SharedConferModule<Self> };
     let result_type = quote! { #crate_path::Result };
+    let table_type = quote! { #crate_path::toml::Table };
+
+    let read_section = quote! { #crate_private::read_section(&#store, #section_lit).await? };
+    // Without loaded fields the section is only checked (R5); a binding would be unused.
+    let snapshot = if loaded.is_empty() {
+        quote! { #read_section; }
+    } else {
+        quote! { let mut #table = #read_section; }
+    };
+
+    let assign = if loaded.is_empty() {
+        TokenStream::new()
+    } else {
+        quote! {
+            let mut #guard = module.write().await;
+            #( #guard.#loaded_idents = #loaded_locals; )*
+        }
+    };
+
+    let section_table = if loaded.is_empty() {
+        quote! { #table_type::new() }
+    } else {
+        quote! {
+            {
+                let #guard = module.read().await;
+                let mut #table = #table_type::new();
+                #( #store_statements )*
+                #table
+            }
+        }
+    };
 
     Ok(quote! {
         #[#crate_private::async_trait]
         impl #impl_generics #crate_path::confer_module::ConferModule for #ident #ty_generics #where_clause {
             async fn from_confer(#store: #shared_confer) -> #result_type<#shared_module> {
-                #( #from_confer_locals )*
+                #snapshot
+                #( #load_statements )*
                 let value = Self { #(#struct_fields),* };
                 Ok(#crate_private::new_shared_module(value))
             }
 
             async fn load(module: &#shared_module, #store: #shared_confer) -> #result_type<()> {
-                #( #load_blocks )*
+                #snapshot
+                #( #load_statements )*
+                #assign
                 Ok(())
             }
 
-            async fn save(module: &#shared_module, store: #shared_confer) -> #result_type<()> {
-                store.add_section(#section_lit).await?;
-                #clone_block
-                #( #save_blocks )*
-
-                let existing = store.list_keys(#section_lit).await?;
-                for key in existing {
-                    if !(#known_keys_expr).contains(&key.as_str()) {
-                        store.remove_key(#section_lit, &key).await?;
-                    }
-                }
-                Ok(())
+            async fn save(module: &#shared_module, #store: #shared_confer) -> #result_type<()> {
+                let #table = #section_table;
+                #store.set_section_table(#section_lit, #table).await
             }
         }
     })
@@ -129,17 +115,17 @@ fn field_local(ident: &Ident) -> Ident {
     format_ident!("__confer_{}", ident, span = Span::mixed_site())
 }
 
-/// Name of the `store` parameter of the generated `from_confer` and `load`.
+/// Identifier of a local or parameter of the generated code, such as `store` or `table`.
 ///
 /// It has a mixed-site span, so initializers from `#[confer(ignore = <expr>)]` cannot refer to it.
-fn store_ident() -> Ident {
-    Ident::new("store", Span::mixed_site())
+fn generated_local(name: &str) -> Ident {
+    Ident::new(name, Span::mixed_site())
 }
 
 /// Generates the initial value of an ignored field.
 ///
 /// An initializer runs in a closure that returns the field type: type errors then point at the
-/// user's expression, and `return` or `?` cannot leave the generated `from_confer`.
+/// user's expression, and `return` or `?` cannot leave the generated function.
 fn ignored_value(field: &Field) -> TokenStream {
     let ty = &field.ty;
     match &field.initializer {
@@ -148,133 +134,120 @@ fn ignored_value(field: &Field) -> TokenStream {
     }
 }
 
-/// Produces the `let (...) = { ... }` block cloning mutable fields for persistence.
-fn generate_clone_block(fields: &[Field]) -> TokenStream {
-    let idents: Vec<_> = fields
+/// Returns the classified type of a loaded field.
+fn field_kind(field: &Field) -> Result<&FieldType> {
+    field
+        .kind
+        .as_ref()
+        .ok_or_else(|| syn::Error::new(field.span, "internal error: missing field kind"))
+}
+
+/// Generates statements binding every loaded field to its local, in declaration order.
+///
+/// Each statement moves the field's value out of the owned `table` and converts it, applying
+/// the default, `None` or `MissingKey` behavior for absent keys. `path` is a `&str` expression
+/// naming `table` in errors. Errors are returned from the enclosing function.
+fn load_statements(
+    fields: &[Field],
+    path: &TokenStream,
+    table: &Ident,
+    crate_path: &syn::Path,
+) -> Result<Vec<TokenStream>> {
+    fields
         .iter()
         .filter(|field| !field.ignore)
-        .map(|field| &field.ident)
-        .collect();
-
-    if idents.is_empty() {
-        return quote! {
-            let guard = module.read().await;
-            drop(guard);
-        };
-    }
-
-    let locals: Vec<_> = idents.iter().map(|ident| field_local(ident)).collect();
-
-    quote! {
-        let (#(#locals),*) = {
-            let guard = module.read().await;
-            ( #(guard.#idents.clone()),* )
-        };
-    }
+        .map(|field| {
+            let kind = field_kind(field)?;
+            let local = field_local(&field.ident);
+            let key = LitStr::new(&field.key, field.span);
+            let present = present_value(kind, path, &key, crate_path);
+            let absent = absent_value(kind, field.default.as_ref(), path, &key, crate_path);
+            Ok(quote! {
+                let #local = match #table.remove(#key) {
+                    ::core::option::Option::Some(value) => #present,
+                    ::core::option::Option::None => #absent,
+                };
+            })
+        })
+        .collect()
 }
 
-/// Generates an expression yielding the value of a loaded field.
+/// Generates statements inserting every loaded field of `source` into `table`.
 ///
-/// The expression performs the typed store lookup, converts the result and applies the
-/// default, `None` or `MissingKey` behavior. Errors are returned from the enclosing function.
-fn generate_load_value(
-    field: &Field,
-    section: &LitStr,
+/// `source` is an expression whose fields are read by reference. `None` options are omitted.
+fn store_statements(
+    fields: &[Field],
+    source: &TokenStream,
+    path: &TokenStream,
+    table: &Ident,
     crate_path: &syn::Path,
-) -> Result<TokenStream> {
-    let Field {
-        key, kind, default, ..
-    } = field;
-
-    let kind = kind
-        .as_ref()
-        .ok_or_else(|| syn::Error::new(field.span, "internal error: missing field kind"))?;
-
-    let key_lit = LitStr::new(key, field.span);
-    let fetch = fetch_expression(kind, section, &key_lit);
-    let converted = convert_from_store(kind, section, &key_lit, crate_path);
-    let present = present_value(kind, converted);
-    let absent = absent_value(kind, default.as_ref(), section, &key_lit, crate_path);
-
-    Ok(quote! {
-        match #fetch {
-            Ok(value) => #present,
-            Err(err) => match err {
-                #crate_path::ConferError::MissingKey { .. } => #absent,
-                other => return Err(other),
-            },
-        }
-    })
+) -> Result<Vec<TokenStream>> {
+    fields
+        .iter()
+        .filter(|field| !field.ignore)
+        .map(|field| {
+            let kind = field_kind(field)?;
+            let ident = &field.ident;
+            let key = LitStr::new(&field.key, field.span);
+            let insert = |value: TokenStream| {
+                quote! { #table.insert(::std::string::String::from(#key), #value); }
+            };
+            let block = match kind.container {
+                ContainerKind::Plain => {
+                    insert(scalar_to_value(&kind.scalar, path, &key, crate_path))
+                }
+                ContainerKind::Vec => insert(vec_to_value(&kind.scalar, path, &key, crate_path)),
+                ContainerKind::Option => {
+                    let insert = insert(scalar_to_value(&kind.scalar, path, &key, crate_path));
+                    quote! {
+                        if let ::core::option::Option::Some(value) = value {
+                            #insert
+                        }
+                    }
+                }
+                ContainerKind::OptionVec => {
+                    let insert = insert(vec_to_value(&kind.scalar, path, &key, crate_path));
+                    quote! {
+                        if let ::core::option::Option::Some(value) = value {
+                            #insert
+                        }
+                    }
+                }
+            };
+            Ok(quote! {
+                {
+                    let value = &#source.#ident;
+                    #block
+                }
+            })
+        })
+        .collect()
 }
 
-/// Generates the save logic for a single field, respecting optionality and vectors.
-fn generate_save(field: &Field, section: &LitStr, crate_path: &syn::Path) -> Result<TokenStream> {
-    let Field {
-        ident, key, kind, ..
-    } = field;
-
-    let kind = kind
-        .as_ref()
-        .ok_or_else(|| syn::Error::new(field.span, "internal error: missing field kind"))?;
-
-    let key_lit = LitStr::new(key, field.span);
-    let local = field_local(ident);
-
-    let block = match kind.container {
-        ContainerKind::Plain => save_plain(kind, &local, section, &key_lit, crate_path),
-        ContainerKind::Vec => save_vec(kind, &local, section, &key_lit, crate_path),
-        ContainerKind::Option => save_option(kind, &local, section, &key_lit, crate_path),
-        ContainerKind::OptionVec => save_option_vec(kind, &local, section, &key_lit, crate_path),
-    };
-
-    Ok(block)
-}
-
-/// Selects the appropriate async getter call for a field based on its kind.
-fn fetch_expression(kind: &FieldType, section: &LitStr, key: &LitStr) -> TokenStream {
-    let method = match (kind.container, &kind.scalar) {
-        (ContainerKind::Vec, ScalarKind::String)
-        | (ContainerKind::OptionVec, ScalarKind::String) => "get_string_vec",
-        (ContainerKind::Vec, ScalarKind::Bool) | (ContainerKind::OptionVec, ScalarKind::Bool) => {
-            "get_boolean_vec"
-        }
-        (ContainerKind::Vec, ScalarKind::Integer(_))
-        | (ContainerKind::OptionVec, ScalarKind::Integer(_)) => "get_integer_vec",
-        (ContainerKind::Vec, ScalarKind::Float(_))
-        | (ContainerKind::OptionVec, ScalarKind::Float(_)) => "get_float_vec",
-        (ContainerKind::Vec, ScalarKind::Datetime)
-        | (ContainerKind::OptionVec, ScalarKind::Datetime) => "get_datetime_vec",
-        (_, ScalarKind::String) => "get_string",
-        (_, ScalarKind::Bool) => "get_boolean",
-        (_, ScalarKind::Integer(_)) => "get_integer",
-        (_, ScalarKind::Float(_)) => "get_float",
-        (_, ScalarKind::Datetime) => "get_datetime",
-    };
-
-    let ident = Ident::new(method, Span::call_site());
-    let store = store_ident();
-    quote! { #store.#ident(#section, #key).await }
-}
-
-/// Converts the raw value obtained from the store into the field's Rust type.
-fn convert_from_store(
+/// Converts a present TOML `value` into the field's Rust type.
+fn present_value(
     kind: &FieldType,
-    section: &LitStr,
+    path: &TokenStream,
     key: &LitStr,
     crate_path: &syn::Path,
 ) -> TokenStream {
-    match kind.container {
-        ContainerKind::Plain | ContainerKind::Option => {
-            scalar_from_store(&kind.scalar, section, key, crate_path)
+    let (convert, adjust) = match kind.container {
+        ContainerKind::Plain | ContainerKind::Option => (
+            scalar_conversion(&kind.scalar),
+            scalar_from_store(&kind.scalar, path, key, crate_path),
+        ),
+        ContainerKind::Vec | ContainerKind::OptionVec => (
+            vec_conversion(&kind.scalar),
+            vec_from_store(&kind.scalar, path, key, crate_path),
+        ),
+    };
+    let convert = Ident::new(convert, Span::call_site());
+    let converted = quote! {
+        {
+            let value = #crate_path::__private::#convert(#path, #key, value)?;
+            #adjust
         }
-        ContainerKind::Vec | ContainerKind::OptionVec => {
-            vec_from_store(&kind.scalar, section, key, crate_path)
-        }
-    }
-}
-
-/// Wraps a converted value in `Some(...)` for optional containers.
-fn present_value(kind: &FieldType, converted: TokenStream) -> TokenStream {
+    };
     match kind.container {
         ContainerKind::Plain | ContainerKind::Vec => converted,
         ContainerKind::Option | ContainerKind::OptionVec => {
@@ -287,14 +260,14 @@ fn present_value(kind: &FieldType, converted: TokenStream) -> TokenStream {
 fn absent_value(
     kind: &FieldType,
     default: Option<&TokenStream>,
-    section: &LitStr,
+    path: &TokenStream,
     key: &LitStr,
     crate_path: &syn::Path,
 ) -> TokenStream {
     match (kind.container, default) {
         (_, Some(default)) => quote! { #default },
         (ContainerKind::Plain | ContainerKind::Vec, None) => {
-            quote! { return Err(#crate_path::ConferError::missing_key(#section, #key)) }
+            quote! { return Err(#crate_path::ConferError::missing_key(#path, #key)) }
         }
         (ContainerKind::Option | ContainerKind::OptionVec, None) => {
             quote! { ::core::option::Option::None }
@@ -302,174 +275,104 @@ fn absent_value(
     }
 }
 
-/// Saves scalar fields back into the store.
-fn save_plain(
-    kind: &FieldType,
-    local: &Ident,
-    section: &LitStr,
-    key: &LitStr,
-    crate_path: &syn::Path,
-) -> TokenStream {
-    let setter = setter_name(kind, false);
-    let setter_ident = Ident::new(setter, Span::call_site());
-    let value = scalar_to_store(&kind.scalar, quote! { #local }, section, key, crate_path);
-    quote! {
-        store.#setter_ident(#section, #key, #value).await?;
+/// Name of the `__private` conversion from a TOML value to the scalar's TOML representation.
+fn scalar_conversion(scalar: &ScalarKind) -> &'static str {
+    match scalar {
+        ScalarKind::String => "string",
+        ScalarKind::Bool => "boolean",
+        ScalarKind::Integer(_) => "integer",
+        ScalarKind::Float(_) => "float",
+        ScalarKind::Datetime => "datetime",
     }
 }
 
-/// Persists vector fields into the store.
-fn save_vec(
-    kind: &FieldType,
-    local: &Ident,
-    section: &LitStr,
-    key: &LitStr,
-    crate_path: &syn::Path,
-) -> TokenStream {
-    let setter = setter_name(kind, true);
-    let setter_ident = Ident::new(setter, Span::call_site());
-    let value = vec_to_store(&kind.scalar, quote! { #local }, section, key, crate_path);
-    quote! {
-        store.#setter_ident(#section, #key, #value).await?;
+/// Name of the `__private` conversion from a TOML array to a vector of the scalar.
+fn vec_conversion(scalar: &ScalarKind) -> &'static str {
+    match scalar {
+        ScalarKind::String => "string_vec",
+        ScalarKind::Bool => "boolean_vec",
+        ScalarKind::Integer(_) => "integer_vec",
+        ScalarKind::Float(_) => "float_vec",
+        ScalarKind::Datetime => "datetime_vec",
     }
 }
 
-/// Persists `Option<T>` fields, removing keys when the value is `None`.
-fn save_option(
-    kind: &FieldType,
-    local: &Ident,
-    section: &LitStr,
+/// Converts the scalar referenced by `value` into a TOML value.
+fn scalar_to_value(
+    scalar: &ScalarKind,
+    path: &TokenStream,
     key: &LitStr,
     crate_path: &syn::Path,
 ) -> TokenStream {
-    let setter = setter_name(kind, false);
-    let setter_ident = Ident::new(setter, Span::call_site());
-    let value = scalar_to_store(
-        &kind.scalar,
-        quote! { value.clone() },
-        section,
-        key,
-        crate_path,
-    );
-    quote! {
-        match #local {
-            ::core::option::Option::Some(value) => {
-                store.#setter_ident(#section, #key, #value).await?;
-            }
-            ::core::option::Option::None => {
-                store.remove_key(#section, #key).await?;
-            }
+    let value_type = quote! { #crate_path::toml::Value };
+    match scalar {
+        ScalarKind::String => {
+            quote! { #value_type::String(::core::clone::Clone::clone(value)) }
         }
+        ScalarKind::Bool => quote! { #value_type::Boolean(*value) },
+        ScalarKind::Datetime => {
+            quote! { #value_type::Datetime(::core::clone::Clone::clone(value)) }
+        }
+        ScalarKind::Integer(kind) => {
+            let raw = integer_to_store(kind, quote! { (*value) }, path, key, crate_path);
+            quote! { #value_type::Integer(#raw) }
+        }
+        ScalarKind::Float(FloatKind::F64) => quote! { #value_type::Float(*value) },
+        ScalarKind::Float(FloatKind::F32) => quote! { #value_type::Float(f64::from(*value)) },
     }
 }
 
-/// Persists `Option<Vec<T>>` fields with appropriate key cleanup.
-fn save_option_vec(
-    kind: &FieldType,
-    local: &Ident,
-    section: &LitStr,
+/// Converts the vector referenced by `value` into a TOML array.
+fn vec_to_value(
+    scalar: &ScalarKind,
+    path: &TokenStream,
     key: &LitStr,
     crate_path: &syn::Path,
 ) -> TokenStream {
-    let setter = setter_name(kind, true);
-    let setter_ident = Ident::new(setter, Span::call_site());
-    let value = vec_to_store(
-        &kind.scalar,
-        quote! { value.clone() },
-        section,
-        key,
-        crate_path,
-    );
+    let element = scalar_to_value(scalar, path, key, crate_path);
     quote! {
-        match #local {
-            ::core::option::Option::Some(value) => {
-                store.#setter_ident(#section, #key, #value).await?;
+        {
+            let mut array = ::std::vec::Vec::with_capacity(value.len());
+            for value in value {
+                array.push(#element);
             }
-            ::core::option::Option::None => {
-                store.remove_key(#section, #key).await?;
-            }
+            #crate_path::toml::Value::Array(array)
         }
-    }
-}
-
-/// Resolves the setter method name for a given field.
-fn setter_name(kind: &FieldType, vec: bool) -> &'static str {
-    match (vec, &kind.scalar) {
-        (false, ScalarKind::String) => "set_string",
-        (false, ScalarKind::Bool) => "set_boolean",
-        (false, ScalarKind::Integer(_)) => "set_integer",
-        (false, ScalarKind::Float(_)) => "set_float",
-        (false, ScalarKind::Datetime) => "set_datetime",
-        (true, ScalarKind::String) => "set_string_vec",
-        (true, ScalarKind::Bool) => "set_boolean_vec",
-        (true, ScalarKind::Integer(_)) => "set_integer_vec",
-        (true, ScalarKind::Float(_)) => "set_float_vec",
-        (true, ScalarKind::Datetime) => "set_datetime_vec",
     }
 }
 
 /// Applies container-specific conversions for scalar fields.
 fn scalar_from_store(
     scalar: &ScalarKind,
-    section: &LitStr,
+    path: &TokenStream,
     key: &LitStr,
     crate_path: &syn::Path,
 ) -> TokenStream {
     match scalar {
         ScalarKind::String | ScalarKind::Bool | ScalarKind::Datetime => quote! { value },
-        ScalarKind::Integer(kind) => integer_from_store(kind, section, key, crate_path),
-        ScalarKind::Float(kind) => float_from_store(kind, section, key, crate_path),
+        ScalarKind::Integer(kind) => integer_from_store(kind, path, key, crate_path),
+        ScalarKind::Float(kind) => float_from_store(kind, path, key, crate_path),
     }
 }
 
 /// Applies container-specific conversions for vector fields.
 fn vec_from_store(
     scalar: &ScalarKind,
-    section: &LitStr,
+    path: &TokenStream,
     key: &LitStr,
     crate_path: &syn::Path,
 ) -> TokenStream {
     match scalar {
         ScalarKind::String | ScalarKind::Bool | ScalarKind::Datetime => quote! { value },
-        ScalarKind::Integer(kind) => integer_vec_from_store(kind, section, key, crate_path),
-        ScalarKind::Float(kind) => float_vec_from_store(kind, section, key, crate_path),
-    }
-}
-
-/// Converts Rust scalar values into TOML-friendly types.
-fn scalar_to_store(
-    scalar: &ScalarKind,
-    value: TokenStream,
-    section: &LitStr,
-    key: &LitStr,
-    crate_path: &syn::Path,
-) -> TokenStream {
-    match scalar {
-        ScalarKind::String | ScalarKind::Bool | ScalarKind::Datetime => value,
-        ScalarKind::Integer(kind) => integer_to_store(kind, value, section, key, crate_path),
-        ScalarKind::Float(kind) => float_to_store(kind, value),
-    }
-}
-
-/// Converts Rust vector values into TOML-friendly arrays.
-fn vec_to_store(
-    scalar: &ScalarKind,
-    value: TokenStream,
-    section: &LitStr,
-    key: &LitStr,
-    crate_path: &syn::Path,
-) -> TokenStream {
-    match scalar {
-        ScalarKind::String | ScalarKind::Bool | ScalarKind::Datetime => value,
-        ScalarKind::Integer(kind) => integer_vec_to_store(kind, value, section, key, crate_path),
-        ScalarKind::Float(kind) => float_vec_to_store(kind, value),
+        ScalarKind::Integer(kind) => integer_vec_from_store(kind, path, key, crate_path),
+        ScalarKind::Float(kind) => float_vec_from_store(kind, path, key, crate_path),
     }
 }
 
 /// Validates and converts TOML integers into the appropriate Rust integer type.
 fn integer_from_store(
     kind: &IntegerKind,
-    section: &LitStr,
+    path: &TokenStream,
     key: &LitStr,
     crate_path: &syn::Path,
 ) -> TokenStream {
@@ -479,7 +382,7 @@ fn integer_from_store(
         match <#ty as ::core::convert::TryFrom<i64>>::try_from(value) {
             Ok(v) => v,
             Err(_) => {
-                return Err(#err::value_parse_owned(#section, #key, format!("value out of range for {}", stringify!(#ty))));
+                return Err(#err::value_parse_owned(#path, #key, format!("value out of range for {}", stringify!(#ty))));
             }
         }
     }
@@ -488,7 +391,7 @@ fn integer_from_store(
 /// Validates and converts TOML floats into the requested Rust float type.
 fn float_from_store(
     kind: &FloatKind,
-    section: &LitStr,
+    path: &TokenStream,
     key: &LitStr,
     crate_path: &syn::Path,
 ) -> TokenStream {
@@ -500,10 +403,10 @@ fn float_from_store(
                 {
                     let raw = value;
                     if !raw.is_finite() {
-                        return Err(#err::value_parse_owned(#section, #key, String::from("non-finite float")));
+                        return Err(#err::value_parse_owned(#path, #key, String::from("non-finite float")));
                     }
                     if raw < f32::MIN as f64 || raw > f32::MAX as f64 {
-                        return Err(#err::value_parse_owned(#section, #key, String::from("value out of range for f32")));
+                        return Err(#err::value_parse_owned(#path, #key, String::from("value out of range for f32")));
                     }
                     raw as f32
                 }
@@ -515,7 +418,7 @@ fn float_from_store(
 /// Validates and converts TOML integer arrays into typed Rust vectors.
 fn integer_vec_from_store(
     kind: &IntegerKind,
-    section: &LitStr,
+    path: &TokenStream,
     key: &LitStr,
     crate_path: &syn::Path,
 ) -> TokenStream {
@@ -528,7 +431,7 @@ fn integer_vec_from_store(
                 match <#scalar as ::core::convert::TryFrom<i64>>::try_from(raw) {
                     Ok(v) => out.push(v),
                     Err(_) => {
-                        return Err(#err::value_parse_owned(#section, #key, format!("value out of range for {}", stringify!(#scalar))));
+                        return Err(#err::value_parse_owned(#path, #key, format!("value out of range for {}", stringify!(#scalar))));
                     }
                 }
             }
@@ -540,7 +443,7 @@ fn integer_vec_from_store(
 /// Validates and converts TOML float arrays into typed Rust vectors.
 fn float_vec_from_store(
     kind: &FloatKind,
-    section: &LitStr,
+    path: &TokenStream,
     key: &LitStr,
     crate_path: &syn::Path,
 ) -> TokenStream {
@@ -553,10 +456,10 @@ fn float_vec_from_store(
                     let mut out = Vec::with_capacity(value.len());
                     for raw in value.into_iter() {
                         if !raw.is_finite() {
-                            return Err(#err::value_parse_owned(#section, #key, String::from("non-finite float")));
+                            return Err(#err::value_parse_owned(#path, #key, String::from("non-finite float")));
                         }
                         if raw < f32::MIN as f64 || raw > f32::MAX as f64 {
-                            return Err(#err::value_parse_owned(#section, #key, String::from("value out of range for f32")));
+                            return Err(#err::value_parse_owned(#path, #key, String::from("value out of range for f32")));
                         }
                         out.push(raw as f32);
                     }
@@ -567,11 +470,11 @@ fn float_vec_from_store(
     }
 }
 
-/// Widens Rust integers to TOML's signed 64-bit representation, checking ranges when needed.
+/// Widens a Rust integer to TOML's signed 64-bit representation, checking ranges when needed.
 fn integer_to_store(
     kind: &IntegerKind,
     value: TokenStream,
-    section: &LitStr,
+    path: &TokenStream,
     key: &LitStr,
     crate_path: &syn::Path,
 ) -> TokenStream {
@@ -585,65 +488,11 @@ fn integer_to_store(
                 {
                     let raw = #value as u64;
                     if raw > i64::MAX as u64 {
-                        return Err(#err::value_parse_owned(#section, #key, format!("value `{}` out of range for TOML integer", raw)));
+                        return Err(#err::value_parse_owned(#path, #key, format!("value `{}` out of range for TOML integer", raw)));
                     }
                     raw as i64
                 }
             }
         }
-    }
-}
-
-/// Widens Rust floats to TOML's `f64` representation.
-fn float_to_store(kind: &FloatKind, value: TokenStream) -> TokenStream {
-    match kind {
-        FloatKind::F64 => value,
-        FloatKind::F32 => quote! { f64::from(#value) },
-    }
-}
-
-/// Converts Rust integer vectors into TOML integer arrays with range validation.
-fn integer_vec_to_store(
-    kind: &IntegerKind,
-    value: TokenStream,
-    section: &LitStr,
-    key: &LitStr,
-    crate_path: &syn::Path,
-) -> TokenStream {
-    let err = quote! { #crate_path::ConferError };
-    match kind {
-        IntegerKind::I8 | IntegerKind::I16 | IntegerKind::I32 => {
-            quote! { #value.into_iter().map(|v| i64::from(v)).collect::<Vec<_>>() }
-        }
-        IntegerKind::I64 | IntegerKind::Isize => {
-            quote! { #value.into_iter().map(|v| v as i64).collect::<Vec<_>>() }
-        }
-        IntegerKind::U8 | IntegerKind::U16 | IntegerKind::U32 => {
-            quote! { #value.into_iter().map(|v| v as i64).collect::<Vec<_>>() }
-        }
-        IntegerKind::U64 | IntegerKind::Usize => {
-            quote! {
-                {
-                    let value = #value;
-                    let mut out = Vec::with_capacity(value.len());
-                    for item in value.into_iter() {
-                        let as_u64 = item as u64;
-                        if as_u64 > i64::MAX as u64 {
-                            return Err(#err::value_parse_owned(#section, #key, format!("value `{}` out of range for TOML integer", as_u64)));
-                        }
-                        out.push(as_u64 as i64);
-                    }
-                    out
-                }
-            }
-        }
-    }
-}
-
-/// Widens Rust float vectors into TOML float arrays.
-fn float_vec_to_store(kind: &FloatKind, value: TokenStream) -> TokenStream {
-    match kind {
-        FloatKind::F64 => value,
-        FloatKind::F32 => quote! { #value.into_iter().map(|v| f64::from(v)).collect::<Vec<_>>() },
     }
 }
