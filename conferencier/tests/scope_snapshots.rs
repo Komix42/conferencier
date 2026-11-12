@@ -63,13 +63,13 @@ fn pair_table(version: i64) -> Table {
 
 #[tokio::test]
 async fn failing_load_leaves_the_module_unchanged() -> Result<()> {
-    let store = ConfigStore::from_string("[App]\nname = \"first\"\nport = 80")?;
-    let module = App::from_store(store.clone()).await?;
+    let store = ConfigStore::from_str("[App]\nname = \"first\"\nport = 80")?;
+    let module = App::from_store(&store)?;
     module.write().await.state = 42;
 
-    store.set_string("App", "name", "second".into()).await?;
-    store.set_integer("App", "port", 70_000).await?;
-    let error = error_of(App::load(&module, store.clone()).await);
+    store.set_string("App", "name", "second".into())?;
+    store.set_integer("App", "port", 70_000)?;
+    let error = error_of(App::load(&module, &store).await);
     assert_eq!(
         error.to_string(),
         "invalid value at App.port: value out of range for u16"
@@ -84,16 +84,16 @@ async fn failing_load_leaves_the_module_unchanged() -> Result<()> {
 
 #[tokio::test]
 async fn failing_save_leaves_the_store_unchanged() -> Result<()> {
-    let store = ConfigStore::from_string("[Counters]\nlabel = \"old\"\ntotal = 1\nextra = true")?;
-    let module = Counters::from_store(store.clone()).await?;
+    let store = ConfigStore::from_str("[Counters]\nlabel = \"old\"\ntotal = 1\nextra = true")?;
+    let module = Counters::from_store(&store)?;
     {
         let mut guard = module.write().await;
         guard.label = "new".into();
         guard.total = u64::MAX;
     }
-    let before = store.save_str().await?;
+    let before = store.save_str()?;
 
-    let error = error_of(Counters::save(&module, store.clone()).await);
+    let error = error_of(Counters::save(&module, &store).await);
     assert!(matches!(
         &error,
         Error::ValueParse { section, key, .. } if section == "Counters" && key == "total"
@@ -105,54 +105,45 @@ async fn failing_save_leaves_the_store_unchanged() -> Result<()> {
             u64::MAX
         )
     );
-    assert_eq!(store.save_str().await?, before);
+    assert_eq!(store.save_str()?, before);
     Ok(())
 }
 
 #[tokio::test]
 async fn save_reports_conversion_errors_before_a_non_table_section() -> Result<()> {
-    let source = ConfigStore::from_string("[Counters]\nlabel = \"a\"\ntotal = 1")?;
-    let module = Counters::from_store(source).await?;
-    let store = ConfigStore::from_string("Counters = 5")?;
-    let before = store.save_str().await?;
+    let source = ConfigStore::from_str("[Counters]\nlabel = \"a\"\ntotal = 1")?;
+    let module = Counters::from_store(&source)?;
+    let store = ConfigStore::from_str("Counters = 5")?;
+    let before = store.save_str()?;
 
     module.write().await.total = u64::MAX;
-    let error = error_of(Counters::save(&module, store.clone()).await);
+    let error = error_of(Counters::save(&module, &store).await);
     assert!(matches!(error, Error::ValueParse { .. }), "{error:?}");
 
     module.write().await.total = 2;
-    let error = error_of(Counters::save(&module, store.clone()).await);
+    let error = error_of(Counters::save(&module, &store).await);
     assert_not_a_table(&error, "Counters");
-    assert_eq!(store.save_str().await?, before);
+    assert_eq!(store.save_str()?, before);
     Ok(())
 }
 
 #[tokio::test]
 async fn non_table_sections_are_rejected_even_without_loaded_fields() -> Result<()> {
-    let store = ConfigStore::from_string("App = 7")?;
-    assert_not_a_table(&error_of(App::from_store(store.clone()).await), "App");
-    assert_not_a_table(
-        &error_of(RuntimeOnly::from_store(store.clone()).await),
-        "App",
-    );
+    let store = ConfigStore::from_str("App = 7")?;
+    assert_not_a_table(&error_of(App::from_store(&store)), "App");
+    assert_not_a_table(&error_of(RuntimeOnly::from_store(&store)), "App");
 
-    let app = App::from_store(ConfigStore::from_string("[App]\nname = \"a\"\nport = 1")?).await?;
-    let runtime = RuntimeOnly::from_store(ConfigStore::new()).await?;
+    let app = App::from_store(&ConfigStore::from_str("[App]\nname = \"a\"\nport = 1")?)?;
+    let runtime = RuntimeOnly::from_store(&ConfigStore::new())?;
     runtime.write().await.counter = 3;
-    let before = store.save_str().await?;
+    let before = store.save_str()?;
 
-    assert_not_a_table(&error_of(App::load(&app, store.clone()).await), "App");
-    assert_not_a_table(
-        &error_of(RuntimeOnly::load(&runtime, store.clone()).await),
-        "App",
-    );
-    assert_not_a_table(&error_of(App::save(&app, store.clone()).await), "App");
-    assert_not_a_table(
-        &error_of(RuntimeOnly::save(&runtime, store.clone()).await),
-        "App",
-    );
+    assert_not_a_table(&error_of(App::load(&app, &store).await), "App");
+    assert_not_a_table(&error_of(RuntimeOnly::load(&runtime, &store).await), "App");
+    assert_not_a_table(&error_of(App::save(&app, &store).await), "App");
+    assert_not_a_table(&error_of(RuntimeOnly::save(&runtime, &store).await), "App");
 
-    assert_eq!(store.save_str().await?, before);
+    assert_eq!(store.save_str()?, before);
     assert_eq!(app.read().await.name, "a");
     assert_eq!(runtime.read().await.counter, 3);
     Ok(())
@@ -161,17 +152,15 @@ async fn non_table_sections_are_rejected_even_without_loaded_fields() -> Result<
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn concurrent_loads_observe_whole_section_versions() -> Result<()> {
     let store = ConfigStore::new();
-    store.set_section_table("Pair", pair_table(0)).await?;
-    let module = Pair::from_store(store.clone()).await?;
+    store.set_section("Pair", pair_table(0))?;
+    let module = Pair::from_store(&store)?;
     let done = Arc::new(AtomicBool::new(false));
 
     let writer = tokio::spawn({
         let (store, done) = (store.clone(), done.clone());
         async move {
             for version in 1..=2_000 {
-                store
-                    .set_section_table("Pair", pair_table(version % 2))
-                    .await?;
+                store.set_section("Pair", pair_table(version % 2))?;
                 tokio::task::yield_now().await;
             }
             done.store(true, Ordering::SeqCst);
@@ -183,7 +172,7 @@ async fn concurrent_loads_observe_whole_section_versions() -> Result<()> {
         async move {
             loop {
                 let finished = done.load(Ordering::SeqCst);
-                let module = Pair::from_store(store.clone()).await?;
+                let module = Pair::from_store(&store)?;
                 let guard = module.read().await;
                 assert_eq!(guard.left, guard.right, "from_store mixed two versions");
                 drop(guard);
@@ -199,7 +188,7 @@ async fn concurrent_loads_observe_whole_section_versions() -> Result<()> {
         async move {
             loop {
                 let finished = done.load(Ordering::SeqCst);
-                Pair::load(&module, store.clone()).await?;
+                Pair::load(&module, &store).await?;
                 if finished {
                     return Ok::<_, Error>(());
                 }
@@ -233,8 +222,8 @@ async fn concurrent_loads_observe_whole_section_versions() -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn concurrent_saves_publish_whole_section_versions() -> Result<()> {
     let store = ConfigStore::new();
-    store.set_section_table("Pair", pair_table(0)).await?;
-    let module = Pair::from_store(store.clone()).await?;
+    store.set_section("Pair", pair_table(0))?;
+    let module = Pair::from_store(&store)?;
     let done = Arc::new(AtomicBool::new(false));
 
     let writer = tokio::spawn({
@@ -246,7 +235,7 @@ async fn concurrent_saves_publish_whole_section_versions() -> Result<()> {
                     guard.left = version % 2;
                     guard.right = version % 2;
                 }
-                Pair::save(&module, store.clone()).await?;
+                Pair::save(&module, &store).await?;
                 tokio::task::yield_now().await;
             }
             done.store(true, Ordering::SeqCst);
@@ -259,8 +248,7 @@ async fn concurrent_saves_publish_whole_section_versions() -> Result<()> {
             loop {
                 let finished = done.load(Ordering::SeqCst);
                 let table = store
-                    .get_section_table("Pair")
-                    .await
+                    .get_section("Pair")
                     .expect("the section is never removed");
                 assert_eq!(
                     table.get("left"),

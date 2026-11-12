@@ -15,7 +15,10 @@ pub type SharedScope<T> = Arc<RwLock<T>>;
 #[async_trait]
 pub trait ConfigScope: Send + Sync + Sized + 'static {
     /// Instantiates the scope from the provided [`ConfigStore`], performing an initial load.
-    async fn from_store(store: ConfigStore) -> Result<SharedScope<Self>>;
+    ///
+    /// This waits for nothing, so a scope can also be created before the runtime starts.
+    /// Initializers of ignored fields run here, once.
+    fn from_store(store: &ConfigStore) -> Result<SharedScope<Self>>;
     /// Reloads the loaded fields from the scope's section of the store.
     ///
     /// The scope is updated only if every field converts successfully; on error it
@@ -23,7 +26,7 @@ pub trait ConfigScope: Send + Sync + Sized + 'static {
     ///
     /// This locks `scope` for writing, so it never completes while the calling task
     /// holds a guard of `scope`.
-    async fn load(scope: &SharedScope<Self>, store: ConfigStore) -> Result<()>;
+    async fn load(scope: &SharedScope<Self>, store: &ConfigStore) -> Result<()>;
     /// Writes the loaded fields into the store, replacing the scope's whole section.
     ///
     /// Keys in the section that no loaded field maps to are removed. This updates only
@@ -31,5 +34,5 @@ pub trait ConfigScope: Send + Sync + Sized + 'static {
     ///
     /// This locks `scope` for reading, so it may never complete while the calling task
     /// holds a guard of `scope` (see [`tokio::sync::RwLock`] for its fairness rules).
-    async fn save(scope: &SharedScope<Self>, store: ConfigStore) -> Result<()>;
+    async fn save(scope: &SharedScope<Self>, store: &ConfigStore) -> Result<()>;
 }

@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 - **Breaking:** Renamed the public API to `ConfigStore`, `ConfigScope`, `SharedScope`, `ConfigTable` and `Error`; `from_confer` is now `from_store`, the derive feature is `derive`, and the old public modules and `value_parse_owned` helper are removed. See [RFC-0005](docs/RFC-0005_api_redesign.md) for the full migration.
+- **Breaking:** `ConfigStore` is a cloneable handle whose clones share one document; `SharedConfer` is gone. Its in-memory methods are synchronous (no `.await`), and only `from_file`, `load_file` and `save_file` stay async. The store uses `std::sync::RwLock` and recovers from a poisoned lock.
+- **Breaking:** `from_string` is now `from_str` (`ConfigStore` also implements `FromStr`), `from_file` is async and replaces `from_file_async`, and there is no blocking file constructor. `get_section_table`, `set_section_table`, `section_exists` and `add_section` are now `get_section`, `set_section`, `has_section` and `ensure_section`; `remove_section` returns `()`.
+- **Breaking:** `ConfigScope::from_store` is synchronous, and `from_store`, `load` and `save` borrow the store (`&ConfigStore`) instead of taking it by value.
 
 ## [0.0.4] - 2026-11-11
 

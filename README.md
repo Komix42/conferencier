@@ -8,7 +8,7 @@ The crate does this one job and deliberately stays small instead of becoming a g
 
 - **Typed scopes.** `#[derive(ConfigScope)]` maps a struct to one top-level TOML section, with defaults, optional values, renamed keys and runtime-only fields.
 - **Nested tables** and arrays of tables map to plain structs with `#[derive(ConfigTable)]`.
-- **Shared across async tasks.** Scopes and the store are cheap-to-clone handles built on `Arc` and `tokio::sync::RwLock`.
+- **Shared across async tasks.** Scopes are cheap-to-clone handles built on `Arc` and `tokio::sync::RwLock`. The store is a cheap-to-clone handle too: its clones share one document, its in-memory methods are synchronous and only file I/O is async.
 - **Nothing runs in the background.** `from_store`, `load` and `save` copy data between a scope and the store only when called, and the store reads or writes files only on request.
 - **Errors name the key**, such as `missing key App.name` or `invalid value at App.upstream[1].weight`; mistakes in attributes are compile errors.
 - **Typed store access without the derive:** getters and setters for strings, numbers, booleans, datetimes and their vectors.
@@ -51,16 +51,16 @@ If you need any of these, a general-purpose configuration crate is a better fit.
 
    #[tokio::main]
    async fn main() -> conferencier::Result<()> {
-       let store = ConfigStore::from_string("[App]\nname = \"demo\"\n")?;
-       let scope: SharedScope<AppConfig> = AppConfig::from_store(store.clone()).await?;
+       let store = ConfigStore::from_str("[App]\nname = \"demo\"\n")?;
+       let scope: SharedScope<AppConfig> = AppConfig::from_store(&store)?;
 
        {
            let mut guard = scope.write().await;
            guard.features.push("beta-channel".into());
        }
 
-       AppConfig::save(&scope, store.clone()).await?;
-       println!("{}", store.save_str().await?);
+       AppConfig::save(&scope, &store).await?;
+       println!("{}", store.save_str()?);
        Ok(())
    }
    ```
@@ -156,7 +156,7 @@ struct AppConfig {
 
 #[tokio::main]
 async fn main() -> conferencier::Result<()> {
-    let store = ConfigStore::from_string(
+    let store = ConfigStore::from_str(
         r#"
 [App.server]
 port = 9000
@@ -169,7 +169,7 @@ url = "http://10.0.0.2"
 weight = 3
 "#,
     )?;
-    let scope = AppConfig::from_store(store.clone()).await?;
+    let scope = AppConfig::from_store(&store)?;
 
     let config = scope.read().await;
     assert_eq!(config.server.host, "localhost");
@@ -210,7 +210,7 @@ async fn reload<M: ConfigScope>(
     path: &Path,
 ) -> conferencier::Result<()> {
     store.load_file(path).await?;
-    M::load(scope, store.clone()).await
+    M::load(scope, &store).await
 }
 ```
 
@@ -235,8 +235,8 @@ struct Server {
 
 #[tokio::main]
 async fn main() -> conferencier::Result<()> {
-    let store = ConfigStore::from_string("[Server]\nport = 8080\n")?;
-    let server = Server::from_store(store.clone()).await?;
+    let store = ConfigStore::from_str("[Server]\nport = 8080\n")?;
+    let server = Server::from_store(&store)?;
 
     let handle = server.clone();
     tokio::spawn(async move {
@@ -246,8 +246,8 @@ async fn main() -> conferencier::Result<()> {
     .expect("task panicked");
 
     // A reload updates the port and keeps the counter.
-    store.load_str("[Server]\nport = 9090\n").await?;
-    Server::load(&server, store.clone()).await?;
+    store.load_str("[Server]\nport = 9090\n")?;
+    Server::load(&server, &store).await?;
 
     let state = server.read().await;
     assert_eq!(state.port, 9090);

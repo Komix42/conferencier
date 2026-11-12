@@ -38,7 +38,7 @@ struct AppSettings {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let store = ConfigStore::from_string(
+    let store = ConfigStore::from_str(
         r#"[App]
 name = "gateway"
 server = { port = 9000 }
@@ -52,7 +52,7 @@ weight = 3
 "#,
     )?;
 
-    let scope = AppSettings::from_store(store.clone()).await?;
+    let scope = AppSettings::from_store(&store)?;
     {
         let guard = scope.read().await;
         println!(
@@ -68,14 +68,14 @@ weight = 3
         url: "http://10.0.0.3".into(),
         weight: 2,
     });
-    AppSettings::save(&scope, store.clone()).await?;
-    println!("Updated TOML:\n{}", store.save_str().await?);
+    AppSettings::save(&scope, &store).await?;
+    println!("Updated TOML:\n{}", store.save_str()?);
 
     // Errors name the full path of the failing key.
-    store
-        .load_str("[App]\nname = \"gateway\"\n\n[[App.upstream]]\nurl = \"http://10.0.0.1\"\nweight = -1\n")
-        .await?;
-    if let Err(error) = AppSettings::load(&scope, store.clone()).await {
+    store.load_str(
+        "[App]\nname = \"gateway\"\n\n[[App.upstream]]\nurl = \"http://10.0.0.1\"\nweight = -1\n",
+    )?;
+    if let Err(error) = AppSettings::load(&scope, &store).await {
         println!("Load failed: {error}");
     }
 

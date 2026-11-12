@@ -14,8 +14,8 @@ fn error_of<T>(result: Result<T>) -> Error {
 
 /// Saves `store` as TOML text and loads a fresh module from the text.
 async fn reloaded<M: ConfigScope + Clone>(store: &ConfigStore) -> Result<M> {
-    let text = store.save_str().await?;
-    let module = M::from_store(ConfigStore::from_string(&text)?).await?;
+    let text = store.save_str()?;
+    let module = M::from_store(&ConfigStore::from_str(&text)?)?;
     let value = module.read().await.clone();
     Ok(value)
 }
@@ -144,13 +144,13 @@ fn full_app() -> App {
 
 #[tokio::test]
 async fn all_shapes_roundtrip_through_three_levels() -> Result<()> {
-    let store = ConfigStore::from_string(FULL)?;
-    let module = App::from_store(store.clone()).await?;
+    let store = ConfigStore::from_str(FULL)?;
+    let module = App::from_store(&store)?;
     assert_eq!(*module.read().await, full_app());
 
     let saved = ConfigStore::new();
-    App::save(&module, saved.clone()).await?;
-    let section = saved.get_section_table("App").await.expect("saved section");
+    App::save(&module, &saved).await?;
+    let section = saved.get_section("App").expect("saved section");
     assert_eq!(
         sorted_keys(&section),
         ["name", "server", "tls-config", "upstream"]
@@ -168,7 +168,7 @@ async fn all_shapes_roundtrip_through_three_levels() -> Result<()> {
 
 #[tokio::test]
 async fn multi_line_inline_tables_load_and_roundtrip() -> Result<()> {
-    let store = ConfigStore::from_string(
+    let store = ConfigStore::from_str(
         r#"
 [App]
 name = "demo"
@@ -188,10 +188,10 @@ upstream = [
 ]
 "#,
     )?;
-    let module = App::from_store(store.clone()).await?;
+    let module = App::from_store(&store)?;
     assert_eq!(*module.read().await, full_app());
 
-    App::save(&module, store.clone()).await?;
+    App::save(&module, &store).await?;
     assert_eq!(reloaded::<App>(&store).await?, full_app());
     Ok(())
 }
@@ -205,7 +205,7 @@ struct Strict {
 
 #[tokio::test]
 async fn absent_tables_follow_their_shape() -> Result<()> {
-    let module = App::from_store(ConfigStore::from_string("[App]\nname = \"demo\"")?).await?;
+    let module = App::from_store(&ConfigStore::from_str("[App]\nname = \"demo\"")?)?;
     let app = module.read().await;
     assert_eq!(
         app.server,
@@ -222,7 +222,7 @@ async fn absent_tables_follow_their_shape() -> Result<()> {
     assert_eq!(app.tls, None);
     assert!(app.upstream.is_empty());
 
-    let error = error_of(Strict::from_store(ConfigStore::from_string("[Strict]")?).await);
+    let error = error_of(Strict::from_store(&ConfigStore::from_str("[Strict]")?));
     assert!(
         matches!(&error, Error::MissingKey { section, key }
             if section == "Strict.tls" && key == "cert"),
@@ -246,7 +246,7 @@ struct Sparse {
 
 #[tokio::test]
 async fn save_writes_owned_data_only() -> Result<()> {
-    let store = ConfigStore::from_string(
+    let store = ConfigStore::from_str(
         r#"
 [App]
 name = "demo"
@@ -276,11 +276,11 @@ retired = true
 y = 2
 "#,
     )?;
-    let module = App::from_store(store.clone()).await?;
+    let module = App::from_store(&store)?;
 
     // Unknown keys and sub-tables are removed at every level (O1–O2).
-    App::save(&module, store.clone()).await?;
-    let section = store.get_section_table("App").await.expect("saved section");
+    App::save(&module, &store).await?;
+    let section = store.get_section("App").expect("saved section");
     assert_eq!(
         sorted_keys(&section),
         ["name", "server", "tls-config", "upstream"]
@@ -307,8 +307,8 @@ y = 2
         guard.upstream.clear();
         guard.server.limits.rate = None;
     }
-    App::save(&module, store.clone()).await?;
-    let section = store.get_section_table("App").await.expect("saved section");
+    App::save(&module, &store).await?;
+    let section = store.get_section("App").expect("saved section");
     assert_eq!(sorted_keys(&section), ["name", "server"]);
     assert_eq!(
         sorted_keys(sub_table(sub_table(&section, "server"), "limits")),
@@ -317,15 +317,12 @@ y = 2
 
     // A plain table is always written, even when empty.
     let store = ConfigStore::new();
-    let module = Sparse::from_store(store.clone()).await?;
+    let module = Sparse::from_store(&store)?;
     assert_eq!(module.read().await.extras.note, None);
-    Sparse::save(&module, store.clone()).await?;
-    let section = store
-        .get_section_table("Sparse")
-        .await
-        .expect("saved section");
+    Sparse::save(&module, &store).await?;
+    let section = store.get_section("Sparse").expect("saved section");
     assert!(sub_table(&section, "extras").is_empty());
-    assert!(store.save_str().await?.contains("[Sparse.extras]"));
+    assert!(store.save_str()?.contains("[Sparse.extras]"));
     Ok(())
 }
 
@@ -352,9 +349,9 @@ struct Checked {
 }
 
 async fn checked_error(source: &str) -> Result<Error> {
-    Ok(error_of(
-        Checked::from_store(ConfigStore::from_string(source)?).await,
-    ))
+    Ok(error_of(Checked::from_store(&ConfigStore::from_str(
+        source,
+    )?)))
 }
 
 #[tokio::test]
@@ -472,8 +469,8 @@ struct Sessions {
 
 #[tokio::test]
 async fn ignored_fields_follow_value_semantics() -> Result<()> {
-    let store = ConfigStore::from_string("[Sessions]\nport = 1\n[Sessions.main]\nid = \"a\"")?;
-    let module = Sessions::from_store(store.clone()).await?;
+    let store = ConfigStore::from_str("[Sessions]\nport = 1\n[Sessions.main]\nid = \"a\"")?;
+    let module = Sessions::from_store(&store)?;
     {
         let mut guard = module.write().await;
         assert_eq!(guard.local, 100);
@@ -484,13 +481,11 @@ async fn ignored_fields_follow_value_semantics() -> Result<()> {
     }
 
     // I1: a successful load builds new table values; I2: module-level ignored fields stay.
-    store
-        .load_str(
-            "[Sessions]\nport = 2\n[Sessions.main]\nid = \"b\"\n[[Sessions.extra]]\nid = \"x\"",
-        )
-        .await?;
+    store.load_str(
+        "[Sessions]\nport = 2\n[Sessions.main]\nid = \"b\"\n[[Sessions.extra]]\nid = \"x\"",
+    )?;
     let before = TOKENS.load(Ordering::SeqCst);
-    Sessions::load(&module, store.clone()).await?;
+    Sessions::load(&module, &store).await?;
     {
         let mut guard = module.write().await;
         assert_eq!(guard.main.id, "b");
@@ -506,12 +501,10 @@ async fn ignored_fields_follow_value_semantics() -> Result<()> {
     }
 
     // R2: a failing load changes nothing, but initializers of temporary values already ran.
-    store
-        .load_str("[Sessions]\nport = 70000\n[Sessions.main]\nid = \"c\"")
-        .await?;
+    store.load_str("[Sessions]\nport = 70000\n[Sessions.main]\nid = \"c\"")?;
     let token = module.read().await.main.token;
     let before = TOKENS.load(Ordering::SeqCst);
-    let error = error_of(Sessions::load(&module, store.clone()).await);
+    let error = error_of(Sessions::load(&module, &store).await);
     assert_eq!(
         error.to_string(),
         "invalid value at Sessions.port: value out of range for u16"
@@ -543,16 +536,16 @@ struct Stats {
 
 #[tokio::test]
 async fn nested_save_errors_leave_the_store_unchanged() -> Result<()> {
-    let store = ConfigStore::from_string("[Stats]\nlabel = \"a\"\n[[Stats.counters]]\ntotal = 1")?;
-    let module = Stats::from_store(store.clone()).await?;
+    let store = ConfigStore::from_str("[Stats]\nlabel = \"a\"\n[[Stats.counters]]\ntotal = 1")?;
+    let module = Stats::from_store(&store)?;
     {
         let mut guard = module.write().await;
         guard.label = "b".into();
         guard.counters.push(Counter { total: u64::MAX });
     }
 
-    let before = store.get_section_table("Stats").await;
-    let error = error_of(Stats::save(&module, store.clone()).await);
+    let before = store.get_section("Stats");
+    let error = error_of(Stats::save(&module, &store).await);
     assert!(
         matches!(&error, Error::ValueParse { section, key, .. }
             if section == "Stats.counters[1]" && key == "total"),
@@ -565,7 +558,7 @@ async fn nested_save_errors_leave_the_store_unchanged() -> Result<()> {
             u64::MAX
         )
     );
-    assert_eq!(store.get_section_table("Stats").await, before);
+    assert_eq!(store.get_section("Stats"), before);
     Ok(())
 }
 
@@ -592,8 +585,8 @@ fn node(name: &str, children: Vec<TreeNode>) -> TreeNode {
 
 #[tokio::test]
 async fn recursive_tables_roundtrip() -> Result<()> {
-    let store = ConfigStore::from_string("[Tree.root]\nname = \"root\"")?;
-    let module = Tree::from_store(store.clone()).await?;
+    let store = ConfigStore::from_str("[Tree.root]\nname = \"root\"")?;
+    let module = Tree::from_store(&store)?;
     assert_eq!(module.read().await.root, node("root", vec![]));
 
     let expected = node(
@@ -604,15 +597,12 @@ async fn recursive_tables_roundtrip() -> Result<()> {
         ],
     );
     module.write().await.root = expected.clone();
-    Tree::save(&module, store.clone()).await?;
+    Tree::save(&module, &store).await?;
     assert_eq!(reloaded::<Tree>(&store).await?.root, expected);
 
-    let error = error_of(
-        Tree::from_store(ConfigStore::from_string(
-            "[Tree.root]\nname = \"root\"\n[[Tree.root.children]]\nname = \"a\"\n[[Tree.root.children.children]]\nname = 5",
-        )?)
-        .await,
-    );
+    let error = error_of(Tree::from_store(&ConfigStore::from_str(
+        "[Tree.root]\nname = \"root\"\n[[Tree.root.children]]\nname = \"a\"\n[[Tree.root.children.children]]\nname = 5",
+    )?));
     assert_eq!(
         error.to_string(),
         "expected string at Tree.root.children[0].children[0].name but found integer"
@@ -639,15 +629,14 @@ struct BareHolder {
 
 #[tokio::test]
 async fn tables_need_neither_default_nor_clone() -> Result<()> {
-    let store = ConfigStore::from_string(
+    let store = ConfigStore::from_str(
         "[Bare.one]\nid = \"one\"\n[Bare.one.window]\nseconds = 5\n[[Bare.many]]\nid = \"m\"",
     )?;
-    let module = BareHolder::from_store(store.clone()).await?;
+    let module = BareHolder::from_store(&store)?;
     let saved = ConfigStore::new();
-    BareHolder::save(&module, saved.clone()).await?;
+    BareHolder::save(&module, &saved).await?;
 
-    let module =
-        BareHolder::from_store(ConfigStore::from_string(&saved.save_str().await?)?).await?;
+    let module = BareHolder::from_store(&ConfigStore::from_str(&saved.save_str()?)?)?;
     let guard = module.read().await;
     assert_eq!(guard.one.id, "one");
     assert_eq!(guard.one.window, Some(Window { seconds: 5 }));
@@ -684,7 +673,7 @@ struct Services {
 
 #[tokio::test]
 async fn one_struct_can_derive_both_traits() -> Result<()> {
-    let store = ConfigStore::from_string(
+    let store = ConfigStore::from_str(
         r#"
 [Database]
 url = "top"
@@ -704,7 +693,7 @@ size = 32
 "#,
     )?;
 
-    let database = Database::from_store(store.clone()).await?;
+    let database = Database::from_store(&store)?;
     assert_eq!(
         *database.read().await,
         Database {
@@ -712,7 +701,7 @@ size = 32
             pool: 4,
         }
     );
-    let cache = ConferCache::from_store(store.clone()).await?;
+    let cache = ConferCache::from_store(&store)?;
     assert_eq!(cache.read().await.size, 128);
 
     let expected = Services {
@@ -726,12 +715,12 @@ size = 32
         }],
         cache: Some(ConferCache { size: 32 }),
     };
-    let services = Services::from_store(store.clone()).await?;
+    let services = Services::from_store(&store)?;
     assert_eq!(*services.read().await, expected);
 
     let saved = ConfigStore::new();
-    Services::save(&services, saved.clone()).await?;
-    assert_eq!(saved.list_sections().await, ["Services"]);
+    Services::save(&services, &saved).await?;
+    assert_eq!(saved.list_sections(), ["Services"]);
     assert_eq!(reloaded::<Services>(&saved).await?, expected);
     Ok(())
 }
@@ -790,10 +779,10 @@ struct Net {
 
 #[tokio::test]
 async fn manual_implementations_can_be_table_fields() -> Result<()> {
-    let store = ConfigStore::from_string(
+    let store = ConfigStore::from_str(
         "[Net.listen]\naddress = \"0.0.0.0:80\"\n[[Net.peers]]\naddress = \"a:1\"\n[[Net.peers]]\naddress = \"b:2\"",
     )?;
-    let module = Net::from_store(store.clone()).await?;
+    let module = Net::from_store(&store)?;
     let expected = Net {
         listen: Address {
             host: "0.0.0.0".into(),
@@ -812,13 +801,11 @@ async fn manual_implementations_can_be_table_fields() -> Result<()> {
     };
     assert_eq!(*module.read().await, expected);
 
-    Net::save(&module, store.clone()).await?;
+    Net::save(&module, &store).await?;
     assert_eq!(reloaded::<Net>(&store).await?, expected);
 
-    store
-        .load_str("[Net.listen]\naddress = \"0.0.0.0:80\"\n[[Net.peers]]\naddress = \"b\"")
-        .await?;
-    let error = error_of(Net::load(&module, store.clone()).await);
+    store.load_str("[Net.listen]\naddress = \"0.0.0.0:80\"\n[[Net.peers]]\naddress = \"b\"")?;
+    let error = error_of(Net::load(&module, &store).await);
     assert_eq!(
         error.to_string(),
         "invalid value at Net.peers[0].address: expected host:port"
@@ -864,7 +851,7 @@ mod hygiene {
 
     #[tokio::test]
     async fn field_names_do_not_collide_with_generated_code() -> Result<()> {
-        let store = ConfigStore::from_string(
+        let store = ConfigStore::from_str(
             r#"
 [Hygiene]
 path = "p"
@@ -900,16 +887,16 @@ value = 2.5
 key = 6
 "#,
         )?;
-        let module = HygieneModule::from_store(store.clone()).await?;
+        let module = HygieneModule::from_store(&store)?;
         let loaded = module.read().await.clone();
         assert_eq!(loaded.path, "p");
         assert_eq!(loaded.names.table, 3);
         assert_eq!(loaded.names.index[0].key, 8);
         assert_eq!(loaded.array[0].key, 6);
 
-        HygieneModule::save(&module, store.clone()).await?;
-        let text = store.save_str().await?;
-        let reloaded = HygieneModule::from_store(ConfigStore::from_string(&text)?).await?;
+        HygieneModule::save(&module, &store).await?;
+        let text = store.save_str()?;
+        let reloaded = HygieneModule::from_store(&ConfigStore::from_str(&text)?)?;
         assert_eq!(*reloaded.read().await, loaded);
         Ok(())
     }

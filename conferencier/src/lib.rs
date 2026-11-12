@@ -43,11 +43,8 @@ pub mod __private {
     };
 
     /// Returns a snapshot of `section`: empty when absent, an error when not a table.
-    pub async fn read_section(
-        store: &crate::ConfigStore,
-        section: &str,
-    ) -> crate::Result<toml::Table> {
-        store.read_section_table(section).await
+    pub fn read_section(store: &crate::ConfigStore, section: &str) -> crate::Result<toml::Table> {
+        store.read_section(section)
     }
 
     /// Wraps `value` in the shared scope type used by the derive implementation.

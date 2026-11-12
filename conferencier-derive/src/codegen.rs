@@ -39,12 +39,12 @@ pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
     let struct_fields = struct_fields(&fields);
 
     let crate_private = quote! { #crate_path::__private };
-    let shared_store = quote! { #crate_path::ConfigStore };
+    let store_type = quote! { #crate_path::ConfigStore };
     let shared_scope = quote! { #crate_path::SharedScope<Self> };
     let result_type = quote! { #crate_path::Result };
     let table_type = quote! { #crate_path::toml::Table };
 
-    let read_section = quote! { #crate_private::read_section(&#store, #section_lit).await? };
+    let read_section = quote! { #crate_private::read_section(#store, #section_lit)? };
     // Without loaded fields the section is only checked (R5); a binding would be unused.
     let snapshot = if loaded.is_empty() {
         quote! { #read_section; }
@@ -77,23 +77,23 @@ pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
     Ok(quote! {
         #[#crate_private::async_trait]
         impl #impl_generics #crate_path::ConfigScope for #ident #ty_generics #where_clause {
-            async fn from_store(#store: #shared_store) -> #result_type<#shared_scope> {
+            fn from_store(#store: &#store_type) -> #result_type<#shared_scope> {
                 #snapshot
                 #( #load_statements )*
                 let value = Self { #(#struct_fields),* };
                 Ok(#crate_private::new_shared_scope(value))
             }
 
-            async fn load(scope: &#shared_scope, #store: #shared_store) -> #result_type<()> {
+            async fn load(scope: &#shared_scope, #store: &#store_type) -> #result_type<()> {
                 #snapshot
                 #( #load_statements )*
                 #assign
                 Ok(())
             }
 
-            async fn save(scope: &#shared_scope, #store: #shared_store) -> #result_type<()> {
+            async fn save(scope: &#shared_scope, #store: &#store_type) -> #result_type<()> {
                 let #table = #section_table;
-                #store.set_section_table(#section_lit, #table).await
+                #store.set_section(#section_lit, #table)
             }
         }
     })

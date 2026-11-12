@@ -23,7 +23,7 @@ struct AppSettings {
 #[tokio::main]
 async fn main() -> Result<()> {
     // Seed the configuration store from a TOML string. Files work the same via `ConfigStore::from_file`.
-    let store = ConfigStore::from_string(
+    let store = ConfigStore::from_str(
         r#"[App]
 port = 8080
 banner = "Welcome!"
@@ -31,7 +31,7 @@ banner = "Welcome!"
     )?;
 
     // Load a typed scope. The derive macro handles fetching each field using the correct getter.
-    let scope = AppSettings::from_store(store.clone()).await?;
+    let scope = AppSettings::from_store(&store)?;
 
     {
         let guard = scope.read().await;
@@ -48,10 +48,10 @@ banner = "Welcome!"
     }
 
     // Persist the changes back into the TOML store.
-    AppSettings::save(&scope, store.clone()).await?;
+    AppSettings::save(&scope, &store).await?;
 
     // Fetch a raw TOML string to show the result.
-    let serialized = store.save_str().await?;
+    let serialized = store.save_str()?;
     println!("Updated TOML:\n{}", serialized);
 
     Ok(())

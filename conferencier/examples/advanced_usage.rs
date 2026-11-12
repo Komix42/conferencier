@@ -59,14 +59,12 @@ struct FeatureToggles {
 async fn main() -> Result<()> {
     let config_path = example_config_path();
     // Load configuration from disk so the example mirrors real-world usage.
-    let store = ConfigStore::from_file(&config_path)?;
+    let store = ConfigStore::from_file(&config_path).await?;
     println!("Loaded configuration from {}", config_path.display());
 
-    // Load both scopes concurrently – they share the same `ConfigStore` instance.
-    let (server, toggles) = try_join!(
-        ServerProfile::from_store(store.clone()),
-        FeatureToggles::from_store(store.clone())
-    )?;
+    // Both scopes read their sections from the same `ConfigStore`.
+    let server = ServerProfile::from_store(&store)?;
+    let toggles = FeatureToggles::from_store(&store)?;
 
     print_configuration(&server, &toggles).await;
 
@@ -76,12 +74,12 @@ async fn main() -> Result<()> {
 
     // Persist both scopes back into the shared store.
     try_join!(
-        ServerProfile::save(&server, store.clone()),
-        FeatureToggles::save(&toggles, store.clone())
+        ServerProfile::save(&server, &store),
+        FeatureToggles::save(&toggles, &store)
     )?;
 
     // Export the resulting TOML to stdout and to an output file inside `target/`.
-    let snapshot = store.save_str().await?;
+    let snapshot = store.save_str()?;
     println!("\nFinal snapshot:\n{}", snapshot);
 
     let snapshot_path = example_snapshot_path();

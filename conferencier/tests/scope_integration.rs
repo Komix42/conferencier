@@ -24,7 +24,7 @@ struct Server {
 
 #[tokio::test]
 async fn module_from_store_loads_defaults_and_values() -> Result<()> {
-    let store = ConfigStore::from_string(
+    let store = ConfigStore::from_str(
         r#"[Srv]
 extra = 7
 p = 8080
@@ -32,7 +32,7 @@ notes = "temp"
 "#,
     )?;
 
-    let module = Server::from_store(store.clone()).await?;
+    let module = Server::from_store(&store)?;
 
     {
         let guard = module.read().await;
@@ -62,18 +62,30 @@ notes = "temp"
         guard.features = vec!["gamma".into()];
     }
 
-    Server::save(&module, store.clone()).await?;
+    Server::save(&module, &store).await?;
 
-    assert_eq!(store.get_string("Srv", "host").await?, "127.0.0.1");
-    assert_eq!(store.get_integer("Srv", "p").await?, 8080);
-    assert_eq!(store.get_integer("Srv", "retries").await?, 3);
+    assert_eq!(store.get_string("Srv", "host")?, "127.0.0.1");
+    assert_eq!(store.get_integer("Srv", "p")?, 8080);
+    assert_eq!(store.get_integer("Srv", "retries")?, 3);
     assert_eq!(
-        store.get_string_vec("Srv", "features").await?,
+        store.get_string_vec("Srv", "features")?,
         vec!["gamma".to_string()]
     );
-    assert!(store.get_value("Srv", "endpoint").await.is_none());
-    assert!(store.get_value("Srv", "notes").await.is_none());
-    assert!(store.get_value("Srv", "extra").await.is_none());
+    assert!(store.get_value("Srv", "endpoint").is_none());
+    assert!(store.get_value("Srv", "notes").is_none());
+    assert!(store.get_value("Srv", "extra").is_none());
+    Ok(())
+}
+
+#[test]
+fn store_and_from_store_work_without_a_runtime() -> Result<()> {
+    let store: ConfigStore = "[Srv]\np = 8080".parse()?;
+    store.set_string("Srv", "host", String::from("localhost"))?;
+
+    let module = Server::from_store(&store)?;
+    let guard = module.try_read().expect("no other guard exists");
+    assert_eq!(guard.port, 8080);
+    assert_eq!(guard.host, "localhost");
     Ok(())
 }
 
@@ -91,13 +103,13 @@ struct NestedModule {
 
 #[tokio::test]
 async fn option_vec_fields_load_modify_and_save() -> Result<()> {
-    let store = ConfigStore::from_string(
+    let store = ConfigStore::from_str(
         r#"[Nested]
 counters = [10, 20]
 "#,
     )?;
 
-    let module = NestedModule::from_store(store.clone()).await?;
+    let module = NestedModule::from_store(&store)?;
 
     {
         let guard = module.read().await;
@@ -116,15 +128,15 @@ counters = [10, 20]
         guard.aliases = Some(vec!["blue".into(), "green".into()]);
     }
 
-    NestedModule::save(&module, store.clone()).await?;
+    NestedModule::save(&module, &store).await?;
 
-    assert!(store.get_value("Nested", "counters").await.is_none());
+    assert!(store.get_value("Nested", "counters").is_none());
     assert_eq!(
-        store.get_integer_vec("Nested", "thresholds").await?,
+        store.get_integer_vec("Nested", "thresholds")?,
         vec![30, 40, 50]
     );
     assert_eq!(
-        store.get_string_vec("Nested", "aliases").await?,
+        store.get_string_vec("Nested", "aliases")?,
         vec!["blue".to_string(), "green".to_string()]
     );
 
@@ -144,7 +156,7 @@ struct Hygiene {
 
 #[tokio::test]
 async fn field_names_do_not_collide_with_generated_locals() -> Result<()> {
-    let store = ConfigStore::from_string(
+    let store = ConfigStore::from_str(
         r#"[Hygiene]
 store = "s"
 module = "m"
@@ -154,7 +166,7 @@ key = ["k"]
 "#,
     )?;
 
-    let module = Hygiene::from_store(store.clone()).await?;
+    let module = Hygiene::from_store(&store)?;
 
     {
         let mut guard = module.write().await;
@@ -163,14 +175,14 @@ key = ["k"]
         guard.value = None;
     }
 
-    Hygiene::save(&module, store.clone()).await?;
+    Hygiene::save(&module, &store).await?;
 
-    assert_eq!(store.get_string("Hygiene", "store").await?, "s2");
-    assert_eq!(store.get_string("Hygiene", "module").await?, "m");
-    assert_eq!(store.get_integer("Hygiene", "guard").await?, 2);
-    assert!(store.get_value("Hygiene", "value").await.is_none());
+    assert_eq!(store.get_string("Hygiene", "store")?, "s2");
+    assert_eq!(store.get_string("Hygiene", "module")?, "m");
+    assert_eq!(store.get_integer("Hygiene", "guard")?, 2);
+    assert!(store.get_value("Hygiene", "value").is_none());
     assert_eq!(
-        store.get_string_vec("Hygiene", "key").await?,
+        store.get_string_vec("Hygiene", "key")?,
         vec!["k".to_string()]
     );
 
@@ -188,13 +200,13 @@ struct RawIdents {
 
 #[tokio::test]
 async fn raw_identifier_fields_use_unprefixed_keys() -> Result<()> {
-    let store = ConfigStore::from_string(
+    let store = ConfigStore::from_str(
         r#"[Raw]
 type = "t"
 "#,
     )?;
 
-    let module = RawIdents::from_store(store.clone()).await?;
+    let module = RawIdents::from_store(&store)?;
 
     {
         let guard = module.read().await;
@@ -202,11 +214,11 @@ type = "t"
         assert_eq!(guard.r#loop, 3);
     }
 
-    RawIdents::save(&module, store.clone()).await?;
+    RawIdents::save(&module, &store).await?;
 
-    assert_eq!(store.get_string("Raw", "type").await?, "t");
-    assert_eq!(store.get_integer("Raw", "loop").await?, 3);
-    assert!(store.get_value("Raw", "r#type").await.is_none());
+    assert_eq!(store.get_string("Raw", "type")?, "t");
+    assert_eq!(store.get_integer("Raw", "loop")?, 3);
+    assert!(store.get_value("Raw", "r#type").is_none());
 
     Ok(())
 }
@@ -229,9 +241,9 @@ struct NegativeDefaults {
 
 #[tokio::test]
 async fn negative_numeric_defaults() -> Result<()> {
-    let store = ConfigStore::from_string("[Negative]\n")?;
+    let store = ConfigStore::from_str("[Negative]\n")?;
 
-    let module = NegativeDefaults::from_store(store.clone()).await?;
+    let module = NegativeDefaults::from_store(&store)?;
 
     {
         let guard = module.read().await;
@@ -242,16 +254,13 @@ async fn negative_numeric_defaults() -> Result<()> {
         assert_eq!(guard.floor, Some(-7));
     }
 
-    NegativeDefaults::save(&module, store.clone()).await?;
+    NegativeDefaults::save(&module, &store).await?;
 
-    assert_eq!(store.get_integer("Negative", "offset").await?, -1);
-    assert_eq!(store.get_float("Negative", "ratio").await?, -2.5);
-    assert_eq!(store.get_float("Negative", "bias").await?, -3.0);
-    assert_eq!(
-        store.get_integer_vec("Negative", "deltas").await?,
-        vec![-1, 2]
-    );
-    assert_eq!(store.get_integer("Negative", "floor").await?, -7);
+    assert_eq!(store.get_integer("Negative", "offset")?, -1);
+    assert_eq!(store.get_float("Negative", "ratio")?, -2.5);
+    assert_eq!(store.get_float("Negative", "bias")?, -3.0);
+    assert_eq!(store.get_integer_vec("Negative", "deltas")?, vec![-1, 2]);
+    assert_eq!(store.get_integer("Negative", "floor")?, -7);
 
     Ok(())
 }
@@ -269,7 +278,7 @@ struct ConferServer {
 
 #[tokio::test]
 async fn default_section_name_strips_confer_word_only() -> Result<()> {
-    let store = ConfigStore::from_string(
+    let store = ConfigStore::from_str(
         r#"[ConferenceSettings]
 room = "A1"
 
@@ -278,8 +287,8 @@ port = 8080
 "#,
     )?;
 
-    let settings = ConferenceSettings::from_store(store.clone()).await?;
-    let server = ConferServer::from_store(store.clone()).await?;
+    let settings = ConferenceSettings::from_store(&store)?;
+    let server = ConferServer::from_store(&store)?;
 
     assert_eq!(settings.read().await.room, "A1");
     assert_eq!(server.read().await.port, 8080);
@@ -299,7 +308,7 @@ struct ScheduleDefaults {
 #[tokio::test]
 async fn datetime_defaults_preserve_omitted_seconds() -> Result<()> {
     let store = ConfigStore::new();
-    let module = ScheduleDefaults::from_store(store.clone()).await?;
+    let module = ScheduleDefaults::from_store(&store)?;
 
     {
         let guard = module.read().await;
@@ -315,9 +324,9 @@ async fn datetime_defaults_preserve_omitted_seconds() -> Result<()> {
         );
     }
 
-    ScheduleDefaults::save(&module, store.clone()).await?;
-    let restored = ConfigStore::from_string(&store.save_str().await?)?;
-    let reloaded = ScheduleDefaults::from_store(restored).await?;
+    ScheduleDefaults::save(&module, &store).await?;
+    let restored = ConfigStore::from_str(&store.save_str()?)?;
+    let reloaded = ScheduleDefaults::from_store(&restored)?;
     let original = module.read().await;
     let reloaded = reloaded.read().await;
     assert_eq!(reloaded.alarm, original.alarm);
@@ -336,14 +345,14 @@ struct Clock {
 
 #[tokio::test]
 async fn required_datetime_without_default_loads_and_saves() -> Result<()> {
-    let store = ConfigStore::from_string(
+    let store = ConfigStore::from_str(
         r#"[Clock]
 started_at = 2024-05-01T10:30:00Z
 laps = [2024-05-01T10:31:00Z]
 "#,
     )?;
 
-    let module = Clock::from_store(store.clone()).await?;
+    let module = Clock::from_store(&store)?;
 
     {
         let guard = module.read().await;
@@ -352,9 +361,9 @@ laps = [2024-05-01T10:31:00Z]
         assert_eq!(guard.laps.len(), 1);
     }
 
-    Clock::save(&module, store.clone()).await?;
-    let restored = ConfigStore::from_string(&store.save_str().await?)?;
-    let reloaded = Clock::from_store(restored).await?;
+    Clock::save(&module, &store).await?;
+    let restored = ConfigStore::from_str(&store.save_str()?)?;
+    let reloaded = Clock::from_store(&restored)?;
     assert_eq!(
         reloaded.read().await.started_at,
         module.read().await.started_at
@@ -365,10 +374,9 @@ laps = [2024-05-01T10:31:00Z]
 
 #[tokio::test]
 async fn required_datetime_without_default_reports_missing_key() -> Result<()> {
-    let store = ConfigStore::from_string("[Clock]\n")?;
+    let store = ConfigStore::from_str("[Clock]\n")?;
 
-    let err = Clock::from_store(store)
-        .await
+    let err = Clock::from_store(&store)
         .err()
         .expect("a missing required key must fail");
 
@@ -405,42 +413,39 @@ struct TrackedModule {
 #[tokio::test]
 async fn ignored_fields_are_initialized_once_after_conversion_succeeds() -> Result<()> {
     // A required key is missing.
-    let store = ConfigStore::from_string("[Tracked]\nretries = 1\n")?;
-    let err = TrackedModule::from_store(store)
-        .await
+    let store = ConfigStore::from_str("[Tracked]\nretries = 1\n")?;
+    let err = TrackedModule::from_store(&store)
         .err()
         .expect("a missing required key must fail");
     assert!(matches!(&err, Error::MissingKey { key, .. } if key == "port"));
     assert_eq!(TRACKED_DEFAULTS.load(Ordering::SeqCst), 0);
 
     // A later field is out of range, and the first error wins in declaration order.
-    let store = ConfigStore::from_string("[Tracked]\nport = 80\nretries = 300\n")?;
-    let err = TrackedModule::from_store(store)
-        .await
+    let store = ConfigStore::from_str("[Tracked]\nport = 80\nretries = 300\n")?;
+    let err = TrackedModule::from_store(&store)
         .err()
         .expect("an out-of-range value must fail");
     assert!(matches!(&err, Error::ValueParse { key, .. } if key == "retries"));
-    let store = ConfigStore::from_string("[Tracked]\nretries = 300\n")?;
-    let err = TrackedModule::from_store(store)
-        .await
+    let store = ConfigStore::from_str("[Tracked]\nretries = 300\n")?;
+    let err = TrackedModule::from_store(&store)
         .err()
         .expect("a missing required key must fail");
     assert!(matches!(&err, Error::MissingKey { key, .. } if key == "port"));
     assert_eq!(TRACKED_DEFAULTS.load(Ordering::SeqCst), 0);
 
     // Success initializes the ignored field exactly once; load and save leave it alone.
-    let store = ConfigStore::from_string("[Tracked]\nport = 80\nretries = 3\n")?;
-    let module = TrackedModule::from_store(store.clone()).await?;
+    let store = ConfigStore::from_str("[Tracked]\nport = 80\nretries = 3\n")?;
+    let module = TrackedModule::from_store(&store)?;
     assert_eq!(TRACKED_DEFAULTS.load(Ordering::SeqCst), 1);
     assert_eq!(module.read().await.state.0, 7);
 
     module.write().await.state = Tracked(42);
-    TrackedModule::load(&module, store.clone()).await?;
-    TrackedModule::save(&module, store.clone()).await?;
+    TrackedModule::load(&module, &store).await?;
+    TrackedModule::save(&module, &store).await?;
     assert_eq!(TRACKED_DEFAULTS.load(Ordering::SeqCst), 1);
     assert_eq!(module.read().await.state.0, 42);
 
-    let mut keys = store.list_keys("Tracked").await?;
+    let mut keys = store.list_keys("Tracked")?;
     keys.sort();
     assert_eq!(keys, ["port", "retries"]);
 
@@ -460,7 +465,7 @@ struct RuntimeOnly {
 #[tokio::test]
 async fn module_without_loaded_fields_is_constructed_directly() -> Result<()> {
     let store = ConfigStore::new();
-    let module = RuntimeOnly::from_store(store.clone()).await?;
+    let module = RuntimeOnly::from_store(&store)?;
 
     {
         let guard = module.read().await;
@@ -469,11 +474,11 @@ async fn module_without_loaded_fields_is_constructed_directly() -> Result<()> {
     }
 
     module.write().await.counter = 5;
-    RuntimeOnly::load(&module, store.clone()).await?;
+    RuntimeOnly::load(&module, &store).await?;
     assert_eq!(module.read().await.counter, 5);
 
-    RuntimeOnly::save(&module, store.clone()).await?;
-    assert!(store.list_keys("Runtime").await?.is_empty());
+    RuntimeOnly::save(&module, &store).await?;
+    assert!(store.list_keys("Runtime")?.is_empty());
 
     Ok(())
 }
@@ -501,14 +506,14 @@ struct Workers {
 
 #[tokio::test]
 async fn ignore_expression_fields_ignore_the_file_and_survive_load_and_save() -> Result<()> {
-    let store = ConfigStore::from_string(
+    let store = ConfigStore::from_str(
         r#"[Workers]
 threads = 2
 ids = [9]
 "#,
     )?;
 
-    let module = Workers::from_store(store.clone()).await?;
+    let module = Workers::from_store(&store)?;
 
     {
         let guard = module.read().await;
@@ -523,7 +528,7 @@ ids = [9]
         guard.ids.push(4);
     }
 
-    Workers::load(&module, store.clone()).await?;
+    Workers::load(&module, &store).await?;
     {
         let guard = module.read().await;
         assert_eq!(guard.pool.size, 8);
@@ -532,8 +537,8 @@ ids = [9]
 
     // An ignored field has no TOML key, so `save` writes none and treats a stray one like any
     // other unknown key.
-    Workers::save(&module, store.clone()).await?;
-    assert_eq!(store.list_keys("Workers").await?, ["threads"]);
+    Workers::save(&module, &store).await?;
+    assert_eq!(store.list_keys("Workers")?, ["threads"]);
 
     Ok(())
 }
@@ -550,8 +555,8 @@ struct KeyCollision {
 
 #[tokio::test]
 async fn ignored_field_may_share_its_name_with_the_key_of_another_field() -> Result<()> {
-    let store = ConfigStore::from_string("[Collision]\nname = \"widget\"\n")?;
-    let module = KeyCollision::from_store(store.clone()).await?;
+    let store = ConfigStore::from_str("[Collision]\nname = \"widget\"\n")?;
+    let module = KeyCollision::from_store(&store)?;
 
     {
         let guard = module.read().await;
@@ -560,8 +565,8 @@ async fn ignored_field_may_share_its_name_with_the_key_of_another_field() -> Res
     }
 
     module.write().await.title = "gadget".into();
-    KeyCollision::save(&module, store.clone()).await?;
-    assert_eq!(store.get_string("Collision", "name").await?, "gadget");
+    KeyCollision::save(&module, &store).await?;
+    assert_eq!(store.get_string("Collision", "name")?, "gadget");
 
     Ok(())
 }
@@ -585,23 +590,22 @@ struct Ticketed {
 /// One test owns the counter, because tests in this file run in parallel.
 #[tokio::test]
 async fn ignore_expressions_run_once_in_declaration_order_after_conversion() -> Result<()> {
-    let store = ConfigStore::from_string("[Ticketed]\nport = \"eighty\"\n")?;
-    let err = Ticketed::from_store(store)
-        .await
+    let store = ConfigStore::from_str("[Ticketed]\nport = \"eighty\"\n")?;
+    let err = Ticketed::from_store(&store)
         .err()
         .expect("a mistyped value must fail");
     assert!(matches!(&err, Error::TypeMismatch { key, .. } if key == "port"));
     assert_eq!(TICKETS.load(Ordering::SeqCst), 0);
 
-    let store = ConfigStore::from_string("[Ticketed]\nport = 80\n")?;
-    let module = Ticketed::from_store(store.clone()).await?;
+    let store = ConfigStore::from_str("[Ticketed]\nport = 80\n")?;
+    let module = Ticketed::from_store(&store)?;
     {
         let guard = module.read().await;
         assert_eq!((guard.before, guard.after), (0, 1));
     }
 
-    Ticketed::load(&module, store.clone()).await?;
-    Ticketed::save(&module, store).await?;
+    Ticketed::load(&module, &store).await?;
+    Ticketed::save(&module, &store).await?;
     assert_eq!(TICKETS.load(Ordering::SeqCst), 2);
 
     Ok(())
@@ -628,7 +632,7 @@ struct Closures {
 
 #[tokio::test]
 async fn ignore_expressions_cannot_return_from_from_store() -> Result<()> {
-    let module = Closures::from_store(ConfigStore::new()).await?;
+    let module = Closures::from_store(&ConfigStore::new())?;
 
     let guard = module.read().await;
     assert_eq!(guard.parsed, Some(7));
