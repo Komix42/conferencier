@@ -2,6 +2,8 @@
 
 A minimal, easy-to-use TOML configuration library for Tokio applications. Each part of an application describes its configuration section as a typed Rust struct; conferencier loads the struct from TOML and lets async tasks share it.
 
+A **scope** is one component's configuration and runtime state, shared through a `SharedScope<T>` handle. Its loaded fields own one top-level TOML section; its ignored fields hold state that stays out of the file. The store and each scope are separate values, synchronized only by explicit `load` and `save` calls.
+
 The crate does this one job and deliberately stays small instead of becoming a general-purpose configuration framework (see [Scope](#scope)).
 
 ## Highlights
@@ -26,7 +28,7 @@ If you need any of these, a general-purpose configuration crate is a better fit.
 
 ## Quick start
 
-1. Add the crate to your `Cargo.toml` (the `derive` feature providing `#[derive(ConfigScope)]` is enabled by default):
+1. Add the crate to your `Cargo.toml` (the `derive` feature providing both derive macros is enabled by default):
 
    ```toml
    [dependencies]
@@ -67,9 +69,17 @@ If you need any of these, a general-purpose configuration crate is a better fit.
 
 3. Nothing is synchronized in the background: `load` refreshes a scope from the store and `save` writes it into the store. `ConfigStore::save_file` writes the store to a file, and `ConfigStore::load_file` replaces the store with the content of a file (see [Reloading configuration](#reloading-configuration)).
 
+### Features
+
+The default `derive` feature re-exports `#[derive(ConfigScope)]` and `#[derive(ConfigTable)]` alongside the traits. Disable it with `conferencier = { version = "0.0.5", default-features = false }` when you only need store access or manual trait implementations. `ConfigStore`, both traits, `SharedScope`, `Error`, `Result` and the TOML types remain available; Tokio is still used for file I/O and scope locks.
+
+Migrating from 0.0.4: the feature formerly named `with-derive` is now `derive`. The [changelog](CHANGELOG.md) lists the API and signature changes.
+
 ## Derive attributes
 
 The `#[derive(ConfigScope)]` macro understands a small set of field/struct attributes that control how data is mapped to TOML. `#[derive(ConfigTable)]` accepts the same field attributes (see [Nested tables](#nested-tables)).
+
+`#[confer(...)]` is the crate-specific derive helper attribute: `confer` abbreviates *conferencier*, like `serde` in `#[serde(...)]`. It is not a required prefix for struct names, and the attribute is not renamed with the public types.
 
 - `#[confer(section = "Name")]` on the struct sets the TOML section name. If omitted, the section is the full struct name: `AppConfig` owns `[AppConfig]` (a raw identifier such as `r#AppConfig` too).
     - Until version 0.0.4, a leading `Confer` word was stripped from the default (`ConferApp` → `[App]`). To keep existing configuration files from silently moving to another section, a `ConfigScope` named `Confer` followed by an uppercase letter, such as `ConferApp`, does not compile without an explicit section: write `#[confer(section = "App")]` to keep the old section or `#[confer(section = "ConferApp")]` to use the full name. Names such as `ConferenceSettings` are not affected.
@@ -121,6 +131,7 @@ TOML 1.1 times may omit seconds (for example `07:30`, also accepted as a datetim
 - "unsupported field type" → use one of the supported scalar/container combinations above; for a struct, derive `ConfigTable` on it and add `#[confer(table)]` to the field.
 - "cannot be used as a nested configuration table" → the type of a `#[confer(table)]` field must implement `ConfigTable`; derive it, or remove `#[confer(table)]` from a scalar field.
 - "duplicate TOML key" → two loaded fields map to the same key; rename one via `#[confer(rename = ...)]`.
+- "`ConferApp` needs an explicit section" → choose `#[confer(section = "App")]` to keep the old section, or `#[confer(section = "ConferApp")]` and update the TOML section to use the full name. The compiler cannot check that your choice matches an existing file.
 - "`#[confer(init)]` was removed" → for an ignored field write `#[confer(ignore = <expr>)]` (no quotes); on a loaded field delete `init`, and add `#[confer(default = ...)]` only if a missing key should fall back to a value.
 - "cannot be combined with `#[confer(ignore)]`" → an ignored field has no TOML key; use `#[confer(ignore = <expr>)]` instead of `default`, and drop `rename`.
 - Defaults must have the right literal form (e.g., `"string"`, `[1, 2]`, or RFC 3339 for datetimes).
@@ -206,19 +217,20 @@ use std::path::Path;
 
 use conferencier::{ConfigScope, ConfigStore, SharedScope};
 
-async fn reload<M: ConfigScope>(
+async fn reload<S: ConfigScope>(
     store: &ConfigStore,
-    scope: &SharedScope<M>,
+    scope: &SharedScope<S>,
     path: &Path,
 ) -> conferencier::Result<()> {
     store.load_file(path).await?;
-    M::load(scope, &store).await
+    S::load(scope, store).await
 }
 ```
 
 - `ConfigStore::load_file` and `ConfigStore::load_str` replace the whole store, including sections that no scope owns and values saved into the store but not yet written to a file. If the new document cannot be read or parsed, the store keeps its previous content.
 - `load` updates a scope only if all its loaded fields convert successfully; otherwise it returns the error and the scope keeps its previous values. Ignored fields of the scope keep their values in both cases.
 - A scope that is not reloaded keeps its previous values, even though the store has changed.
+- Reloading several scopes is not one transaction: if a later scope fails to load, the store and scopes already reloaded keep their new values.
 
 ## Configuration and runtime state
 
@@ -268,6 +280,7 @@ Conferencier is primarily meant for reading configuration. Saving works, but it 
 
 - `ConfigStore::save_str` and `ConfigStore::save_file` regenerate the whole document from the stored values. Comments are lost, keys may be reordered, inline tables become `[section.table]` headers, and values are written in canonical notation (for example `0x1F90` becomes `8080` and `'text'` becomes `"text"`).
 - A scope's `save` owns its section, including all tables nested in it: it removes every key and sub-table that is not mapped to a non-ignored field, at any depth (also inside tables mapped with `#[confer(table)]`). A misspelled key such as `prot = 9090` is therefore ignored on load (`port` falls back to its default) and deleted by the next save. Other sections are not changed; keep data that no scope owns in a separate section.
+- Serialize saves to the same file, even through cloned stores: `save_file` currently uses a fixed `<filename>.tmp` sibling, so overlapping calls can interfere. Replacement and durability limitations are described in the [API reference](https://docs.rs/conferencier/latest/conferencier/struct.ConfigStore.html#method.save_file).
 
 If people edit the configuration file by hand, prefer to only load it, and use saving mainly to generate an initial configuration file.
 

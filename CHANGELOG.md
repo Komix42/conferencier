@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+- Expanded rustdoc for the complete public API, with examples, conversion and error semantics, snapshot behavior, scope lock guidance and the current file-write limitations. The READMEs explain scopes, the `derive` feature and `#[confer(...)]`, and include the updated reload examples.
+
 ### Changed
 - **Breaking:** Renamed the public API to `ConfigStore`, `ConfigScope`, `SharedScope`, `ConfigTable` and `Error`; `from_confer` is now `from_store`, the derive feature is `derive`, and the old public modules and `value_parse_owned` helper are removed. See [RFC-0005](docs/RFC-0005_api_redesign.md) for the full migration.
 - **Breaking:** `ConfigStore` is a cloneable handle whose clones share one document; `SharedConfer` is gone. Its in-memory methods are synchronous (no `.await`), and only `from_file`, `load_file` and `save_file` stay async. The store uses `std::sync::RwLock` and recovers from a poisoned lock.
@@ -13,6 +16,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Breaking:** `ConfigScope::from_store` is synchronous, and `from_store`, `load` and `save` borrow the store (`&ConfigStore`) instead of taking it by value.
 - **Breaking:** `ConfigScope` no longer uses `#[async_trait]`: `load` and `save` return `impl Future<Output = Result<()>> + Send`, so generic code can spawn them. Manual implementations drop `#[async_trait]` and keep `async fn load`/`async fn save`. The `async-trait` dependency is removed.
 - **Breaking:** The default section name is the full struct name; a leading `Confer` word is no longer stripped. A `ConfigScope` such as `ConferApp` without `#[confer(section = ...)]` fails to compile with a message naming both choices: `section = "App"` keeps the 0.0.4 section, `section = "ConferApp"` uses the full name. This check stays through 0.1.x and is removed in 0.2.0, so upgrade from 0.0.4 through a 0.1.x release, or add an explicit section before upgrading to 0.2.0 directly.
+
+#### Migration from 0.0.4
+
+| 0.0.4 | 0.0.5 |
+| --- | --- |
+| `Confer` | `ConfigStore` |
+| `SharedConfer` (`Arc<Confer>`) | `ConfigStore` |
+| `Confer::new()` | `ConfigStore::new()` |
+| `Confer::from_string(source)?` | `ConfigStore::from_str(source)?` or `source.parse::<ConfigStore>()?` |
+| `Confer::from_file(path)?` (blocking) | `ConfigStore::from_file(path).await?`; outside a runtime `ConfigStore::from_str(&std::fs::read_to_string(path)?)?` |
+| `Confer::from_file_async(path).await?` | `ConfigStore::from_file(path).await?` |
+| `store.get_section_table(section).await` | `store.get_section(section)` |
+| `store.set_section_table(section, table).await?` | `store.set_section(section, table)?` |
+| `store.section_exists(section).await` | `store.has_section(section)` |
+| `store.add_section(section).await?` | `store.ensure_section(section)?` |
+| `store.remove_section(section).await?` | `store.remove_section(section)` — returns `()` |
+| other in-memory methods, e.g. `store.get_integer(section, key).await?` | the same name without `.await`: `store.get_integer(section, key)?` |
+| `store.load_file(path).await?`, `store.save_file(path).await?` | unchanged |
+| `ConferModule` (trait and derive) | `ConfigScope` |
+| `SharedConferModule<T>` | `SharedScope<T>` |
+| `T::from_confer(store.clone()).await?` | `T::from_store(&store)?` |
+| `T::load(&module, store.clone()).await?` | `T::load(&scope, &store).await?` |
+| `T::save(&module, store.clone()).await?` | `T::save(&scope, &store).await?` |
+| `ConferTable` (trait and derive) | `ConfigTable` |
+| `ConferError` | `Error` |
+| `ConferError::value_parse_owned(...)` | `Error::value_parse(...)` |
+| paths through `conferencier::confer_module`, `conferencier::confer_table`, `conferencier::error` | the crate root, e.g. `conferencier::ConfigScope` |
+| feature `with-derive` | feature `derive` |
+| struct `ConferApp` relying on the default section `[App]` | add `#[confer(section = "App")]` to keep it, or add `#[confer(section = "ConferApp")]` and rename the TOML section to `[ConferApp]` |
+
+Manual scope implementations drop `#[async_trait]`, make `from_store` synchronous, borrow `&ConfigStore`, and keep `async fn load` and `async fn save`. Manual table implementations only need the new names. Existing helper attributes keep the `#[confer(...)]` name. See [RFC-0005](docs/RFC-0005_api_redesign.md) for the full rationale.
 
 ## [0.0.4] - 2026-11-11
 

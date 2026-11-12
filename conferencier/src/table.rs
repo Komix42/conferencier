@@ -9,10 +9,29 @@ use crate::Result;
 /// Unlike [`ConfigScope`](crate::ConfigScope), a table has no section or lock of
 /// its own. `path` identifies its location in diagnostics, not a store address.
 /// Errors for keys in this table use `path` as their section; nested errors use
-/// the nested path. Unknown keys may be ignored when loading.
+/// the nested path, for example `App.upstream[1]`. A dot in `path` does not cause
+/// a store lookup, and these functions never read or write a file.
 ///
-/// Manual implementations are supported. This trait's signature, including its
-/// TOML types, may change before version 0.1.
+/// # Derived tables
+///
+/// With the default `derive` feature, `#[derive(ConfigTable)]` supports the same
+/// field attributes as [`ConfigScope`](crate::ConfigScope): `rename`, `default`,
+/// `ignore` and `table`. A table-only derive does not accept `section`.
+/// Mark an owning field `#[confer(table)]` and use `T`, `Option<T>` or `Vec<T>`
+/// to represent a table, an optional table or an array of tables respectively.
+/// Unknown keys are ignored on load and are not returned on save.
+///
+/// Tables are plain values, not shared scope handles. Loading a scope rebuilds
+/// its nested tables, so ignored fields of a table are initialized on every
+/// successful construction, unlike ignored fields directly in a scope.
+/// Keep runtime state that must survive reloads in the scope itself.
+///
+/// # Manual implementations
+///
+/// Implementations own the input table and can move values out instead of cloning
+/// them. Use [`Error`](crate::Error)'s constructors to attach `path` and the failing
+/// key to conversion errors. Return a complete table from `to_table`, not a patch.
+/// These signatures and their TOML types may change while the API is in alpha.
 ///
 /// # Example
 ///
@@ -58,12 +77,37 @@ use crate::Result;
     note = "derive it with `#[derive(ConfigTable)]` or implement `ConfigTable` manually"
 )]
 pub trait ConfigTable: Sized {
-    /// Constructs a value from an owned snapshot, allowing values to be moved out.
+    /// Constructs a value from an owned table, using `path` for error reporting.
+    ///
+    /// The derived implementation applies defaults to absent keys, uses `None`
+    /// for optional fields without defaults and ignores unknown keys. An empty
+    /// table is a valid input, but required fields without defaults still fail.
+    ///
+    /// Ignored fields are initialized after this table's loaded fields convert.
+    /// Each call creates a fresh value; initializer side effects that have already
+    /// occurred, including in nested tables, are not undone if a later conversion fails.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::MissingKey`](crate::Error::MissingKey),
+    /// [`Error::TypeMismatch`](crate::Error::TypeMismatch) or
+    /// [`Error::ValueParse`](crate::Error::ValueParse) for invalid fields.
+    /// A manual implementation may return other errors as appropriate.
     fn from_table(path: &str, table: Table) -> Result<Self>;
 
-    /// Returns the complete table to persist.
+    /// Converts this value into the complete table to persist.
     ///
-    /// The owning scope replaces its section on save, removing keys not returned
-    /// here. `path` is used only for error reporting.
+    /// The derived implementation writes only loaded fields, omits absent optional
+    /// fields and empty arrays of tables, and recursively converts nested tables.
+    /// It never mutates `self`. `path` is used only for error reporting.
+    ///
+    /// The owning scope replaces its whole section on save, so keys not returned
+    /// here disappear from the persisted nested table.
+    ///
+    /// # Errors
+    ///
+    /// Returns a conversion error, such as an unsigned integer outside TOML's
+    /// signed 64-bit range, or an error from a nested table implementation.
+    /// No partial table is returned, and the caller's store is not modified.
     fn to_table(&self, path: &str) -> Result<Table>;
 }

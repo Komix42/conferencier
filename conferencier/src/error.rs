@@ -5,6 +5,9 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 /// Result type returned by conferencier operations.
+///
+/// Equivalent to `std::result::Result<T, conferencier::Error>`. Application code
+/// and manual trait implementations can use this alias to propagate errors with `?`.
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Errors returned by the [`ConfigStore`](crate::store::ConfigStore) store and by derived
@@ -13,6 +16,30 @@ pub type Result<T> = std::result::Result<T, Error>;
 ///
 /// For keys inside nested tables, `section` holds the path of the table, such as
 /// `App.upstream[1]`. When a section exists but is not a table, `key` is `<section>`.
+/// Section and key strings are diagnostic context, not a structured path API.
+///
+/// # Inspecting errors
+///
+/// This enum is non-exhaustive: match the variants relevant to your application
+/// and keep a fallback arm for future variants. [`std::error::Error::source`]
+/// exposes the underlying I/O, TOML parsing or serialization error; field errors
+/// carry their diagnostic context directly.
+///
+/// ```
+/// use conferencier::{ConfigStore, Error};
+///
+/// let error = ConfigStore::new().get_integer("App", "port").unwrap_err();
+/// match error {
+///     Error::MissingKey { section, key } => {
+///         assert_eq!((section.as_str(), key.as_str()), ("App", "port"));
+///     }
+///     other => panic!("unexpected error: {other}"),
+/// }
+/// ```
+///
+/// File methods attach the relevant path to [`Error::Io`]. Converting a plain
+/// [`std::io::Error`] with `?` or `Error::from` leaves `path` as `None`; construct
+/// the public `Io` variant to attach a path, as shown in [`ConfigStore::from_file`](crate::ConfigStore::from_file).
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum Error {
@@ -26,9 +53,13 @@ pub enum Error {
         source: std::io::Error,
     },
     /// The input is not a valid TOML document.
+    ///
+    /// The source contains the parser's location and diagnostic details.
     #[error("failed to parse TOML: {0}")]
     Parse(#[from] toml::de::Error),
-    /// The store could not be serialized to TOML.
+    /// The in-memory document could not be serialized to TOML.
+    ///
+    /// Serialization happens before file writes; this error leaves the file untouched.
     #[error("failed to serialize TOML: {0}")]
     Serialize(#[from] toml::ser::Error),
     /// A required key is absent.
@@ -71,7 +102,10 @@ impl Error {
         Self::Io { path, source }
     }
 
-    /// Convenience constructor for [`Error::MissingKey`].
+    /// Reports that `key` is required but absent from `section`.
+    ///
+    /// For a nested table, pass its diagnostic path, such as `App.server`,
+    /// as `section`. This constructs an error; it does not look in a store.
     pub fn missing_key(section: impl Into<String>, key: impl Into<String>) -> Self {
         Self::MissingKey {
             section: section.into(),
@@ -79,7 +113,11 @@ impl Error {
         }
     }
 
-    /// Convenience constructor for [`Error::TypeMismatch`].
+    /// Reports a value whose TOML type differs from the expected type.
+    ///
+    /// `expected` and `found` are type labels such as `"integer"` or `"string"`;
+    /// [`toml::Value::type_str`] supplies the latter. Pass a nested table's
+    /// diagnostic path as `section` when appropriate.
     pub fn type_mismatch(
         section: impl Into<String>,
         key: impl Into<String>,
@@ -94,7 +132,11 @@ impl Error {
         }
     }
 
-    /// Convenience constructor for [`Error::ValueParse`].
+    /// Reports a value that cannot be converted despite having an acceptable TOML type.
+    ///
+    /// Use `message` to explain the reason, for example `"value out of range for u16"`.
+    /// Both borrowed and owned strings are accepted for `section`, `key` and `message`;
+    /// a nested table's diagnostic path can be used as `section`.
     pub fn value_parse(
         section: impl Into<String>,
         key: impl Into<String>,

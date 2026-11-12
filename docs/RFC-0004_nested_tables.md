@@ -6,6 +6,7 @@ Author: Komix42 <komix[at]ignore.cz>
 Target release: 0.0.4
 Requires: [RFC-0003](./RFC-0003_field_attributes.md)
 Amends: [RFC-0001](./RFC-0001_baseline_architecture.md)
+Amended by: [RFC-0005](./RFC-0005_api_redesign.md)
 
 ## Document Scope
 

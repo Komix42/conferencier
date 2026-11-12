@@ -1,7 +1,7 @@
 # RFC-0005: Public API redesign: naming, shared store and async boundaries
 
 Date: 2026-11-12
-Status: Approved
+Status: Implemented
 Author: Komix42 <komix[at]ignore.cz>
 Target release: 0.0.5
 Amends: [RFC-0001](./RFC-0001_baseline_architecture.md), [RFC-0003](./RFC-0003_field_attributes.md), [RFC-0004](./RFC-0004_nested_tables.md)

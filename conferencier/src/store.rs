@@ -42,6 +42,26 @@ use crate::value_conversion;
 ///   [`list_keys`](Self::list_keys).
 ///
 /// `section` is always a literal top-level key, not a dotted path.
+/// `key` is literal too: use [`get_section`](Self::get_section) to inspect a nested
+/// table and [`set_section`](Self::set_section) to replace its owning section.
+///
+/// # Example
+///
+/// ```
+/// use conferencier::ConfigStore;
+///
+/// let store = ConfigStore::from_str("[App]\nport = 8080")?;
+/// let shared = store.clone();
+/// shared.set_integer("App", "port", 9090)?;
+/// assert_eq!(store.get_integer("App", "port")?, 9090);
+///
+/// let mut snapshot = store.get_section("App").expect("App is a table");
+/// snapshot.insert("enabled".into(), conferencier::toml::Value::Boolean(true));
+/// assert!(store.get_value("App", "enabled").is_none());
+/// store.set_section("App", snapshot)?;
+/// assert!(store.get_boolean("App", "enabled")?);
+/// # Ok::<(), conferencier::Error>(())
+/// ```
 ///
 /// # Locking
 ///
@@ -60,6 +80,9 @@ use crate::value_conversion;
 /// implementation and possibly the API have to be reevaluated based on measurements:
 /// switching to an async lock would not be a transparent backend change, because acquiring
 /// it has to be awaited and it would not offload the CPU work of serialization.
+///
+/// Individual calls are synchronized, not sequences of calls: a read followed by
+/// a write is not a transaction, and another task may change the document between them.
 #[derive(Clone, Debug, Default)]
 pub struct ConfigStore {
     table: Arc<RwLock<Table>>,
@@ -67,6 +90,9 @@ pub struct ConfigStore {
 
 impl ConfigStore {
     /// Creates an empty configuration store.
+    ///
+    /// Equivalent to [`Default::default`]. Each call creates an independent document;
+    /// use [`Clone::clone`] to share an existing one.
     pub fn new() -> Self {
         Self::default()
     }
@@ -74,6 +100,11 @@ impl ConfigStore {
     /// Builds a store from a TOML string.
     ///
     /// `source.parse::<ConfigStore>()` does the same through [`FromStr`].
+    /// This creates a new document without reading a file or requiring a Tokio runtime.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Parse`] when `source` is not valid TOML.
     #[allow(clippy::should_implement_trait)]
     pub fn from_str(source: &str) -> Result<Self> {
         Ok(Self::from_table(Self::parse_table(source)?))
@@ -82,10 +113,13 @@ impl ConfigStore {
     /// Reads a TOML file asynchronously and builds a store from it.
     ///
     /// A failed read returns [`Error::Io`] carrying `path`.
+    /// This uses [`tokio::fs`] and must run within a Tokio runtime.
     ///
     /// There is no blocking variant. Code that reads the configuration before the Tokio
     /// runtime starts can combine [`std::fs::read_to_string`] with
-    /// [`from_str`](Self::from_str). The standard library's error does not carry the path;
+    /// [`from_str`](Self::from_str):
+    /// `ConfigStore::from_str(&std::fs::read_to_string(path)?)?`.
+    /// The standard library's error does not carry the path;
     /// attach it through [`Error::Io`] if needed:
     ///
     /// ```no_run
@@ -102,6 +136,12 @@ impl ConfigStore {
     /// # Ok(())
     /// # }
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Io`] if the file cannot be read as UTF-8, or [`Error::Parse`]
+    /// if its contents are not valid TOML. Parse errors carry parser diagnostics,
+    /// not a separate file path.
     pub async fn from_file(path: impl AsRef<Path> + Send + Sync) -> Result<Self> {
         let contents = read_file(path.as_ref()).await?;
         Self::from_str(&contents)
@@ -109,7 +149,13 @@ impl ConfigStore {
 
     /// Replaces the in-memory document with the contents of the provided TOML string.
     ///
-    /// On a parse error the document stays unchanged.
+    /// This replaces all sections and top-level values, not just the keys in `source`.
+    /// Every clone of this handle observes the replacement; existing scopes do not
+    /// reload automatically.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Parse`] for invalid TOML, leaving the whole document unchanged.
     pub fn load_str(&self, source: &str) -> Result<()> {
         let table = Self::parse_table(source)?;
         *self.write() = table;
@@ -119,26 +165,64 @@ impl ConfigStore {
     /// Replaces the in-memory document with the contents of the TOML file at `path`.
     ///
     /// The file is read and parsed before the document is replaced; on error the document
-    /// stays unchanged.
+    /// stays unchanged. All clones see the replacement, but existing scopes must be
+    /// reloaded separately with [`ConfigScope::load`](crate::ConfigScope::load).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Io`] carrying `path` if reading fails, or [`Error::Parse`]
+    /// for invalid TOML.
     pub async fn load_file(&self, path: impl AsRef<Path> + Send + Sync) -> Result<()> {
         let contents = read_file(path.as_ref()).await?;
         self.load_str(&contents)
     }
 
     /// Serializes the current document to a TOML string.
+    ///
+    /// This captures one consistent document while holding a read lock. It does not
+    /// modify the store or include unsaved changes in a scope. Comments, formatting,
+    /// key order and original value notation are not preserved.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Serialize`] if the in-memory values cannot be encoded as TOML.
     pub fn save_str(&self) -> Result<String> {
         toml::to_string(&*self.read()).map_err(Error::from)
     }
 
-    /// Serializes the current document and writes it atomically to the specified file.
+    /// Writes a serialized snapshot of the document using a temporary sibling file.
     ///
-    /// The document is serialized first; the lock is not held while the file is written.
+    /// The document is serialized first; the store lock is not held during file I/O.
+    /// Changes made after serialization are not part of this snapshot. The target
+    /// is replaced rather than edited, so comments and formatting are lost as with
+    /// [`save_str`](Self::save_str). Parent directories are not created.
+    ///
+    /// # Write coordination and replacement
+    ///
+    /// Serialize calls that save to the same target, including calls through cloned
+    /// handles: the current implementation uses a fixed `<filename>.tmp` sibling,
+    /// so overlapping writes can interfere. Do not use that sibling for another file.
+    ///
+    /// Replacement uses a rename. If the platform reports that the target already
+    /// exists, it is removed before retrying the rename; atomic replacement is
+    /// therefore not guaranteed on that path. This method does not promise crash
+    /// durability, and an I/O failure can leave a temporary file behind.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Serialize`] before any file is written if serialization fails.
+    /// Write or replacement failures return [`Error::Io`] with the relevant target
+    /// or temporary path. An I/O failure does not change the in-memory store.
     pub async fn save_file(&self, path: impl AsRef<Path> + Send + Sync) -> Result<()> {
         let serialized = self.save_str()?;
         write_atomic(path.as_ref(), serialized.as_bytes()).await
     }
 
-    /// Returns the raw TOML value stored under `section.key`, if present.
+    /// Returns an owned snapshot of the raw TOML value at `section` and `key`.
+    ///
+    /// Both arguments name literal keys, not dotted paths. A missing section, a
+    /// non-table section or a missing key returns `None`. Changing the returned
+    /// value does not change the store; use [`set_value`](Self::set_value) to write it.
     pub fn get_value(&self, section: &str, key: &str) -> Option<Value> {
         section_table(&self.read(), section)
             .and_then(|table| table.get(key))
@@ -146,6 +230,10 @@ impl ConfigStore {
     }
 
     /// Returns a cloned snapshot of the table stored at `section`, if it exists.
+    ///
+    /// Missing or non-table top-level entries return `None`. The snapshot includes
+    /// nested tables and unknown keys; edits to it do not affect the store until
+    /// passed to [`set_section`](Self::set_section).
     pub fn get_section(&self, section: &str) -> Option<Table> {
         section_table(&self.read(), section).cloned()
     }
@@ -163,6 +251,11 @@ impl ConfigStore {
     ///
     /// Unknown keys in the old section are removed. If the section holds a
     /// non-table value, returns a type mismatch and leaves the store unchanged.
+    /// Other sections are not changed. `section` is a literal top-level key.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::TypeMismatch`] with key `<section>` when the entry is not a table.
     pub fn set_section(&self, section: &str, table: Table) -> Result<()> {
         let mut guard = self.write();
         match guard.entry(section.to_owned()) {
@@ -181,6 +274,15 @@ impl ConfigStore {
     }
 
     /// Inserts `value` at `section.key`, creating the section if necessary.
+    ///
+    /// Both arguments name literal keys. An existing value at the key is replaced,
+    /// regardless of its type; all other keys are left unchanged. Tables and arrays
+    /// are accepted as raw values too.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::TypeMismatch`] if the top-level entry named `section` is not
+    /// a table, leaving the document unchanged.
     pub fn set_value(&self, section: &str, key: &str, value: Value) -> Result<()> {
         let mut guard = self.write();
         match guard.entry(section.to_owned()) {
@@ -201,6 +303,9 @@ impl ConfigStore {
     }
 
     /// Returns `true` when the store contains a table for `section`.
+    ///
+    /// An empty table counts as present. Missing entries and entries of any other
+    /// TOML type return `false`.
     pub fn has_section(&self, section: &str) -> bool {
         matches!(self.read().get(section), Some(Value::Table(_)))
     }
@@ -210,6 +315,10 @@ impl ConfigStore {
     /// An existing table is left unchanged, so the call is idempotent; unlike
     /// [`set_section`](Self::set_section), it never replaces a section. A non-table entry
     /// named `section` returns a type mismatch.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::TypeMismatch`] for a non-table entry without modifying it.
     pub fn ensure_section(&self, section: &str) -> Result<()> {
         let mut guard = self.write();
         match guard.entry(section.to_owned()) {
@@ -225,6 +334,13 @@ impl ConfigStore {
     }
 
     /// Removes `key` from `section`, ignoring missing keys or sections.
+    ///
+    /// Removing the last key leaves an empty section in place. To remove the
+    /// top-level entry as well, use [`remove_section`](Self::remove_section).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::TypeMismatch`] if `section` exists but is not a table.
     pub fn remove_key(&self, section: &str, key: &str) -> Result<()> {
         match self.write().get_mut(section) {
             Some(Value::Table(inner)) => {
@@ -237,11 +353,17 @@ impl ConfigStore {
     }
 
     /// Removes the top-level entry `section` from the store, ignoring missing sections.
+    ///
+    /// Removes the whole entry, including nested tables, even if it is not a table.
+    /// Unlike [`remove_key`](Self::remove_key), this operation has no error result.
     pub fn remove_section(&self, section: &str) {
         self.write().remove(section);
     }
 
     /// Lists all sections currently backed by a TOML table.
+    ///
+    /// Empty tables are included; top-level scalar and array entries are not.
+    /// The returned names are owned snapshots, with no promised ordering.
     pub fn list_sections(&self) -> Vec<String> {
         self.read()
             .iter()
@@ -250,6 +372,13 @@ impl ConfigStore {
     }
 
     /// Lists the keys contained in `section`, or an empty vector when the section is absent.
+    ///
+    /// Lists immediate keys only, including those holding tables or arrays; it does
+    /// not walk nested tables. The returned names have no promised ordering.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::TypeMismatch`] if `section` exists but is not a table.
     pub fn list_keys(&self, section: &str) -> Result<Vec<String>> {
         match self.read().get(section) {
             Some(Value::Table(table)) => Ok(table.keys().cloned().collect()),
@@ -259,115 +388,224 @@ impl ConfigStore {
     }
 
     /// Retrieves a string value stored at `section.key`.
+    ///
+    /// Returns an owned string. Numbers, booleans and datetimes are not coerced to strings.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::MissingKey`] for a missing section or key, or
+    /// [`Error::TypeMismatch`] for a non-table section or a non-string value.
     pub fn get_string(&self, section: &str, key: &str) -> Result<String> {
         let value = self.fetch_value(section, key)?;
         value_conversion::string(section, key, value)
     }
 
     /// Retrieves an integer value stored at `section.key`.
+    ///
+    /// TOML integers are signed 64-bit values. Floats and numeric strings are not converted.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::MissingKey`] for a missing section or key, or
+    /// [`Error::TypeMismatch`] for a non-table section or a non-integer value.
     pub fn get_integer(&self, section: &str, key: &str) -> Result<i64> {
         let value = self.fetch_value(section, key)?;
         value_conversion::integer(section, key, value)
     }
 
     /// Retrieves a floating-point value stored at `section.key`.
+    ///
+    /// Accepts TOML floats and integers. Integer-to-`f64` conversion may lose precision
+    /// for large integers; numeric strings are not parsed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::MissingKey`] for a missing section or key, or
+    /// [`Error::TypeMismatch`] for a non-table section or an incompatible value.
     pub fn get_float(&self, section: &str, key: &str) -> Result<f64> {
         let value = self.fetch_value(section, key)?;
         value_conversion::float(section, key, value)
     }
 
     /// Retrieves a boolean value stored at `section.key`.
+    ///
+    /// Accepts only a TOML boolean, not integers or strings such as `"true"`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::MissingKey`] for a missing section or key, or
+    /// [`Error::TypeMismatch`] for a non-table section or a non-boolean value.
     pub fn get_boolean(&self, section: &str, key: &str) -> Result<bool> {
         let value = self.fetch_value(section, key)?;
         value_conversion::boolean(section, key, value)
     }
 
     /// Retrieves a [`Datetime`] value stored at `section.key`, parsing strings when necessary.
+    ///
+    /// Accepts TOML date, time and datetime values, or strings in a form understood
+    /// by [`Datetime`]. It does not supply a timezone or normalize omitted components.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::MissingKey`] for absence, [`Error::TypeMismatch`] for a
+    /// non-table section or an incompatible type, or [`Error::ValueParse`] for
+    /// a string that cannot be parsed as a TOML datetime.
     pub fn get_datetime(&self, section: &str, key: &str) -> Result<Datetime> {
         let value = self.fetch_value(section, key)?;
         value_conversion::datetime(section, key, value)
     }
 
     /// Retrieves a string array stored at `section.key`.
+    ///
+    /// Returns an owned vector; an empty TOML array produces an empty vector.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::MissingKey`] for absence or [`Error::TypeMismatch`] if the
+    /// section is not a table or the value is not an array. A non-string element
+    /// produces [`Error::ValueParse`] naming its zero-based index.
     pub fn get_string_vec(&self, section: &str, key: &str) -> Result<Vec<String>> {
         let value = self.fetch_value(section, key)?;
         value_conversion::string_vec(section, key, value)
     }
 
     /// Retrieves an integer array stored at `section.key`.
+    ///
+    /// Every element must be a TOML integer; floats and numeric strings are not converted.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::MissingKey`] for absence or [`Error::TypeMismatch`] for a
+    /// non-table section or non-array value. An incompatible element produces
+    /// [`Error::ValueParse`] naming its zero-based index.
     pub fn get_integer_vec(&self, section: &str, key: &str) -> Result<Vec<i64>> {
         let value = self.fetch_value(section, key)?;
         value_conversion::integer_vec(section, key, value)
     }
 
     /// Retrieves a floating-point array stored at `section.key`.
+    ///
+    /// Accepts both float and integer elements, including mixed numeric arrays.
+    /// Integer-to-`f64` conversion can lose precision.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::MissingKey`] for absence or [`Error::TypeMismatch`] for a
+    /// non-table section or non-array value. An incompatible element produces
+    /// [`Error::ValueParse`] naming its zero-based index.
     pub fn get_float_vec(&self, section: &str, key: &str) -> Result<Vec<f64>> {
         let value = self.fetch_value(section, key)?;
         value_conversion::float_vec(section, key, value)
     }
 
     /// Retrieves a boolean array stored at `section.key`.
+    ///
+    /// Every element must be a TOML boolean; strings and numbers are not converted.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::MissingKey`] for absence or [`Error::TypeMismatch`] for a
+    /// non-table section or non-array value. An incompatible element produces
+    /// [`Error::ValueParse`] naming its zero-based index.
     pub fn get_boolean_vec(&self, section: &str, key: &str) -> Result<Vec<bool>> {
         let value = self.fetch_value(section, key)?;
         value_conversion::boolean_vec(section, key, value)
     }
 
     /// Retrieves a [`Datetime`] array stored at `section.key`, parsing string values when necessary.
+    ///
+    /// Elements may be TOML datetime values or strings parsed as [`Datetime`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::MissingKey`] for absence or [`Error::TypeMismatch`] for a
+    /// non-table section or non-array value. An incompatible or invalid element
+    /// produces [`Error::ValueParse`] naming its zero-based index.
     pub fn get_datetime_vec(&self, section: &str, key: &str) -> Result<Vec<Datetime>> {
         let value = self.fetch_value(section, key)?;
         value_conversion::datetime_vec(section, key, value)
     }
 
     /// Stores a string at `section.key`, creating the section if needed.
+    ///
+    /// Replaces the key's previous value. Section validation and errors are the
+    /// same as [`set_value`](Self::set_value); other keys are unchanged.
     pub fn set_string(&self, section: &str, key: &str, value: String) -> Result<()> {
         self.set_value(section, key, Value::String(value))
     }
 
     /// Stores an integer at `section.key`, creating the section if needed.
+    ///
+    /// Writes a TOML signed 64-bit integer. Replacement and section errors follow
+    /// [`set_value`](Self::set_value).
     pub fn set_integer(&self, section: &str, key: &str, value: i64) -> Result<()> {
         self.set_value(section, key, Value::Integer(value))
     }
 
     /// Stores a floating-point number at `section.key`, creating the section if needed.
+    ///
+    /// Writes a TOML float without integer coercion. Replacement and section errors
+    /// follow [`set_value`](Self::set_value).
     pub fn set_float(&self, section: &str, key: &str, value: f64) -> Result<()> {
         self.set_value(section, key, Value::Float(value))
     }
 
     /// Stores a boolean at `section.key`, creating the section if needed.
+    ///
+    /// Replaces the key's previous value. Section validation and errors follow
+    /// [`set_value`](Self::set_value).
     pub fn set_boolean(&self, section: &str, key: &str, value: bool) -> Result<()> {
         self.set_value(section, key, Value::Boolean(value))
     }
 
     /// Stores a TOML [`Datetime`] at `section.key`, creating the section if needed.
+    ///
+    /// Writes a datetime value, not a quoted string. Replacement and section errors
+    /// follow [`set_value`](Self::set_value).
     pub fn set_datetime(&self, section: &str, key: &str, value: Datetime) -> Result<()> {
         self.set_value(section, key, Value::Datetime(value))
     }
 
     /// Stores a string array at `section.key`, creating the section if needed.
+    ///
+    /// Replaces the complete array; an empty vector is written as `[]`, not removed.
+    /// Section validation and errors follow [`set_value`](Self::set_value).
     pub fn set_string_vec(&self, section: &str, key: &str, value: Vec<String>) -> Result<()> {
         let array = value.into_iter().map(Value::String).collect();
         self.set_value(section, key, Value::Array(array))
     }
 
     /// Stores an integer array at `section.key`, creating the section if needed.
+    ///
+    /// Replaces the complete array with TOML signed 64-bit integers. An empty vector
+    /// is written as `[]`. Section validation and errors follow [`set_value`](Self::set_value).
     pub fn set_integer_vec(&self, section: &str, key: &str, value: Vec<i64>) -> Result<()> {
         let array = value.into_iter().map(Value::Integer).collect();
         self.set_value(section, key, Value::Array(array))
     }
 
     /// Stores a floating-point array at `section.key`, creating the section if needed.
+    ///
+    /// Replaces the complete array with TOML floats; an empty vector is written as `[]`.
+    /// Section validation and errors follow [`set_value`](Self::set_value).
     pub fn set_float_vec(&self, section: &str, key: &str, value: Vec<f64>) -> Result<()> {
         let array = value.into_iter().map(Value::Float).collect();
         self.set_value(section, key, Value::Array(array))
     }
 
     /// Stores a boolean array at `section.key`, creating the section if needed.
+    ///
+    /// Replaces the complete array; an empty vector is written as `[]`, not removed.
+    /// Section validation and errors follow [`set_value`](Self::set_value).
     pub fn set_boolean_vec(&self, section: &str, key: &str, value: Vec<bool>) -> Result<()> {
         let array = value.into_iter().map(Value::Boolean).collect();
         self.set_value(section, key, Value::Array(array))
     }
 
     /// Stores a [`Datetime`] array at `section.key`, creating the section if needed.
+    ///
+    /// Writes datetime values, not quoted strings. An empty vector is written as `[]`.
+    /// Section validation and errors follow [`set_value`](Self::set_value).
     pub fn set_datetime_vec(&self, section: &str, key: &str, value: Vec<Datetime>) -> Result<()> {
         let array = value.into_iter().map(Value::Datetime).collect();
         self.set_value(section, key, Value::Array(array))
@@ -413,6 +651,7 @@ impl ConfigStore {
 impl FromStr for ConfigStore {
     type Err = Error;
 
+    /// Parses a new store with the same behavior and errors as [`ConfigStore::from_str`].
     fn from_str(source: &str) -> Result<Self> {
         ConfigStore::from_str(source)
     }
