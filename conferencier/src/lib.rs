@@ -31,7 +31,6 @@ pub use conferencier_derive::{ConfigScope, ConfigTable};
 
 #[doc(hidden)]
 pub mod __private {
-    pub use async_trait::async_trait;
     pub use std::sync::Arc;
     pub use tokio::sync::RwLock;
 

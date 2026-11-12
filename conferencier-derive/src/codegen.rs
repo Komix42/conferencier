@@ -75,7 +75,6 @@ pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
     };
 
     Ok(quote! {
-        #[#crate_private::async_trait]
         impl #impl_generics #crate_path::ConfigScope for #ident #ty_generics #where_clause {
             fn from_store(#store: &#store_type) -> #result_type<#shared_scope> {
                 #snapshot

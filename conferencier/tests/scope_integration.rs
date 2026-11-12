@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use conferencier::{ConfigScope, ConfigStore, Datetime, Error, Result};
+use conferencier::{ConfigScope, ConfigStore, Datetime, Error, Result, SharedScope};
 
 #[derive(ConfigScope)]
 #[confer(section = "Srv")]
@@ -74,6 +74,23 @@ notes = "temp"
     assert!(store.get_value("Srv", "endpoint").is_none());
     assert!(store.get_value("Srv", "notes").is_none());
     assert!(store.get_value("Srv", "extra").is_none());
+    Ok(())
+}
+
+async fn reload_in_task<D: ConfigScope>(scope: SharedScope<D>, store: ConfigStore) -> Result<()> {
+    tokio::spawn(async move { D::load(&scope, &store).await })
+        .await
+        .expect("reload task panicked")
+}
+
+#[tokio::test]
+async fn generic_code_can_spawn_load() -> Result<()> {
+    let store = ConfigStore::from_str("[Srv]\np = 8080")?;
+    let module = Server::from_store(&store)?;
+    store.set_integer("Srv", "p", 9090)?;
+
+    reload_in_task(module.clone(), store.clone()).await?;
+    assert_eq!(module.read().await.port, 9090);
     Ok(())
 }
 

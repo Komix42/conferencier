@@ -1,8 +1,8 @@
 //! The [`ConfigScope`] trait and the [`SharedScope`] handle it works with.
 
+use std::future::Future;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use tokio::sync::RwLock;
 
 use crate::error::Result;
@@ -12,7 +12,9 @@ use crate::store::ConfigStore;
 pub type SharedScope<T> = Arc<RwLock<T>>;
 
 /// Trait implemented by structs annotated with `#[derive(ConfigScope)]`.
-#[async_trait]
+///
+/// Manual implementations can write `async fn load` and `async fn save`; the compiler
+/// checks that the returned futures are `Send`, so generic code can spawn them on Tokio tasks.
 pub trait ConfigScope: Send + Sync + Sized + 'static {
     /// Instantiates the scope from the provided [`ConfigStore`], performing an initial load.
     ///
@@ -26,7 +28,10 @@ pub trait ConfigScope: Send + Sync + Sized + 'static {
     ///
     /// This locks `scope` for writing, so it never completes while the calling task
     /// holds a guard of `scope`.
-    async fn load(scope: &SharedScope<Self>, store: &ConfigStore) -> Result<()>;
+    fn load(
+        scope: &SharedScope<Self>,
+        store: &ConfigStore,
+    ) -> impl Future<Output = Result<()>> + Send;
     /// Writes the loaded fields into the store, replacing the scope's whole section.
     ///
     /// Keys in the section that no loaded field maps to are removed. This updates only
@@ -34,5 +39,8 @@ pub trait ConfigScope: Send + Sync + Sized + 'static {
     ///
     /// This locks `scope` for reading, so it may never complete while the calling task
     /// holds a guard of `scope` (see [`tokio::sync::RwLock`] for its fairness rules).
-    async fn save(scope: &SharedScope<Self>, store: &ConfigStore) -> Result<()>;
+    fn save(
+        scope: &SharedScope<Self>,
+        store: &ConfigStore,
+    ) -> impl Future<Output = Result<()>> + Send;
 }

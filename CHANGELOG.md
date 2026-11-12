@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Breaking:** `ConfigStore` is a cloneable handle whose clones share one document; `SharedConfer` is gone. Its in-memory methods are synchronous (no `.await`), and only `from_file`, `load_file` and `save_file` stay async. The store uses `std::sync::RwLock` and recovers from a poisoned lock.
 - **Breaking:** `from_string` is now `from_str` (`ConfigStore` also implements `FromStr`), `from_file` is async and replaces `from_file_async`, and there is no blocking file constructor. `get_section_table`, `set_section_table`, `section_exists` and `add_section` are now `get_section`, `set_section`, `has_section` and `ensure_section`; `remove_section` returns `()`.
 - **Breaking:** `ConfigScope::from_store` is synchronous, and `from_store`, `load` and `save` borrow the store (`&ConfigStore`) instead of taking it by value.
+- **Breaking:** `ConfigScope` no longer uses `#[async_trait]`: `load` and `save` return `impl Future<Output = Result<()>> + Send`, so generic code can spawn them. Manual implementations drop `#[async_trait]` and keep `async fn load`/`async fn save`. The `async-trait` dependency is removed.
 
 ## [0.0.4] - 2026-11-11
 
