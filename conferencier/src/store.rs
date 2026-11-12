@@ -530,6 +530,11 @@ impl ConfigStore {
     ///
     /// Replaces the key's previous value. Section validation and errors are the
     /// same as [`set_value`](Self::set_value); other keys are unchanged.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::TypeMismatch`] if the top-level entry named `section` is not a
+    /// table, leaving the document unchanged.
     pub fn set_string(&self, section: &str, key: &str, value: String) -> Result<()> {
         self.set_value(section, key, Value::String(value))
     }
@@ -538,6 +543,11 @@ impl ConfigStore {
     ///
     /// Writes a TOML signed 64-bit integer. Replacement and section errors follow
     /// [`set_value`](Self::set_value).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::TypeMismatch`] if the top-level entry named `section` is not a
+    /// table, leaving the document unchanged.
     pub fn set_integer(&self, section: &str, key: &str, value: i64) -> Result<()> {
         self.set_value(section, key, Value::Integer(value))
     }
@@ -546,6 +556,11 @@ impl ConfigStore {
     ///
     /// Writes a TOML float without integer coercion. Replacement and section errors
     /// follow [`set_value`](Self::set_value).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::TypeMismatch`] if the top-level entry named `section` is not a
+    /// table, leaving the document unchanged.
     pub fn set_float(&self, section: &str, key: &str, value: f64) -> Result<()> {
         self.set_value(section, key, Value::Float(value))
     }
@@ -554,6 +569,11 @@ impl ConfigStore {
     ///
     /// Replaces the key's previous value. Section validation and errors follow
     /// [`set_value`](Self::set_value).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::TypeMismatch`] if the top-level entry named `section` is not a
+    /// table, leaving the document unchanged.
     pub fn set_boolean(&self, section: &str, key: &str, value: bool) -> Result<()> {
         self.set_value(section, key, Value::Boolean(value))
     }
@@ -562,6 +582,11 @@ impl ConfigStore {
     ///
     /// Writes a datetime value, not a quoted string. Replacement and section errors
     /// follow [`set_value`](Self::set_value).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::TypeMismatch`] if the top-level entry named `section` is not a
+    /// table, leaving the document unchanged.
     pub fn set_datetime(&self, section: &str, key: &str, value: Datetime) -> Result<()> {
         self.set_value(section, key, Value::Datetime(value))
     }
@@ -570,6 +595,11 @@ impl ConfigStore {
     ///
     /// Replaces the complete array; an empty vector is written as `[]`, not removed.
     /// Section validation and errors follow [`set_value`](Self::set_value).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::TypeMismatch`] if the top-level entry named `section` is not a
+    /// table, leaving the document unchanged.
     pub fn set_string_vec(&self, section: &str, key: &str, value: Vec<String>) -> Result<()> {
         let array = value.into_iter().map(Value::String).collect();
         self.set_value(section, key, Value::Array(array))
@@ -579,6 +609,11 @@ impl ConfigStore {
     ///
     /// Replaces the complete array with TOML signed 64-bit integers. An empty vector
     /// is written as `[]`. Section validation and errors follow [`set_value`](Self::set_value).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::TypeMismatch`] if the top-level entry named `section` is not a
+    /// table, leaving the document unchanged.
     pub fn set_integer_vec(&self, section: &str, key: &str, value: Vec<i64>) -> Result<()> {
         let array = value.into_iter().map(Value::Integer).collect();
         self.set_value(section, key, Value::Array(array))
@@ -588,6 +623,11 @@ impl ConfigStore {
     ///
     /// Replaces the complete array with TOML floats; an empty vector is written as `[]`.
     /// Section validation and errors follow [`set_value`](Self::set_value).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::TypeMismatch`] if the top-level entry named `section` is not a
+    /// table, leaving the document unchanged.
     pub fn set_float_vec(&self, section: &str, key: &str, value: Vec<f64>) -> Result<()> {
         let array = value.into_iter().map(Value::Float).collect();
         self.set_value(section, key, Value::Array(array))
@@ -597,6 +637,11 @@ impl ConfigStore {
     ///
     /// Replaces the complete array; an empty vector is written as `[]`, not removed.
     /// Section validation and errors follow [`set_value`](Self::set_value).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::TypeMismatch`] if the top-level entry named `section` is not a
+    /// table, leaving the document unchanged.
     pub fn set_boolean_vec(&self, section: &str, key: &str, value: Vec<bool>) -> Result<()> {
         let array = value.into_iter().map(Value::Boolean).collect();
         self.set_value(section, key, Value::Array(array))
@@ -606,6 +651,11 @@ impl ConfigStore {
     ///
     /// Writes datetime values, not quoted strings. An empty vector is written as `[]`.
     /// Section validation and errors follow [`set_value`](Self::set_value).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::TypeMismatch`] if the top-level entry named `section` is not a
+    /// table, leaving the document unchanged.
     pub fn set_datetime_vec(&self, section: &str, key: &str, value: Vec<Datetime>) -> Result<()> {
         let array = value.into_iter().map(Value::Datetime).collect();
         self.set_value(section, key, Value::Array(array))

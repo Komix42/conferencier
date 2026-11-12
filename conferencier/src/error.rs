@@ -10,7 +10,7 @@ use thiserror::Error;
 /// and manual trait implementations can use this alias to propagate errors with `?`.
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Errors returned by the [`ConfigStore`](crate::store::ConfigStore) store and by derived
+/// Errors returned by [`ConfigStore`](crate::ConfigStore) and by derived
 /// [`ConfigScope`](crate::ConfigScope) and [`ConfigTable`](crate::ConfigTable)
 /// implementations.
 ///
