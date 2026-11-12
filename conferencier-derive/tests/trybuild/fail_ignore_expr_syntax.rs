@@ -1,4 +1,4 @@
-#[derive(conferencier_derive::ConferModule)]
+#[derive(conferencier_derive::ConfigScope)]
 struct MissingExpression {
     #[confer(ignore = )]
     value: i32,

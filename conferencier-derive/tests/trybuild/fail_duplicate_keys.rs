@@ -1,4 +1,4 @@
-#[derive(conferencier_derive::ConferModule)]
+#[derive(conferencier_derive::ConfigScope)]
 struct DuplicateKeys {
     one: i32,
     #[confer(rename = "one")]

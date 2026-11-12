@@ -1,8 +1,8 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use conferencier::{Confer, ConferError, ConferModule, Datetime, Result};
+use conferencier::{ConfigScope, ConfigStore, Datetime, Error, Result};
 
-#[derive(ConferModule)]
+#[derive(ConfigScope)]
 #[confer(section = "Srv")]
 struct Server {
     #[confer(rename = "p")]
@@ -23,8 +23,8 @@ struct Server {
 }
 
 #[tokio::test]
-async fn module_from_confer_loads_defaults_and_values() -> Result<()> {
-    let store = Confer::from_string(
+async fn module_from_store_loads_defaults_and_values() -> Result<()> {
+    let store = ConfigStore::from_string(
         r#"[Srv]
 extra = 7
 p = 8080
@@ -32,7 +32,7 @@ notes = "temp"
 "#,
     )?;
 
-    let module = Server::from_confer(store.clone()).await?;
+    let module = Server::from_store(store.clone()).await?;
 
     {
         let guard = module.read().await;
@@ -77,7 +77,7 @@ notes = "temp"
     Ok(())
 }
 
-#[derive(ConferModule)]
+#[derive(ConfigScope)]
 #[confer(section = "Nested")]
 struct NestedModule {
     #[confer(default = [1, 2, 3])]
@@ -91,13 +91,13 @@ struct NestedModule {
 
 #[tokio::test]
 async fn option_vec_fields_load_modify_and_save() -> Result<()> {
-    let store = Confer::from_string(
+    let store = ConfigStore::from_string(
         r#"[Nested]
 counters = [10, 20]
 "#,
     )?;
 
-    let module = NestedModule::from_confer(store.clone()).await?;
+    let module = NestedModule::from_store(store.clone()).await?;
 
     {
         let guard = module.read().await;
@@ -132,7 +132,7 @@ counters = [10, 20]
 }
 
 /// Field names matching identifiers used inside the generated code.
-#[derive(ConferModule)]
+#[derive(ConfigScope)]
 #[confer(section = "Hygiene")]
 struct Hygiene {
     store: String,
@@ -144,7 +144,7 @@ struct Hygiene {
 
 #[tokio::test]
 async fn field_names_do_not_collide_with_generated_locals() -> Result<()> {
-    let store = Confer::from_string(
+    let store = ConfigStore::from_string(
         r#"[Hygiene]
 store = "s"
 module = "m"
@@ -154,7 +154,7 @@ key = ["k"]
 "#,
     )?;
 
-    let module = Hygiene::from_confer(store.clone()).await?;
+    let module = Hygiene::from_store(store.clone()).await?;
 
     {
         let mut guard = module.write().await;
@@ -178,7 +178,7 @@ key = ["k"]
 }
 
 /// Raw identifiers map to TOML keys without the `r#` prefix.
-#[derive(ConferModule)]
+#[derive(ConfigScope)]
 #[confer(section = "Raw")]
 struct RawIdents {
     r#type: String,
@@ -188,13 +188,13 @@ struct RawIdents {
 
 #[tokio::test]
 async fn raw_identifier_fields_use_unprefixed_keys() -> Result<()> {
-    let store = Confer::from_string(
+    let store = ConfigStore::from_string(
         r#"[Raw]
 type = "t"
 "#,
     )?;
 
-    let module = RawIdents::from_confer(store.clone()).await?;
+    let module = RawIdents::from_store(store.clone()).await?;
 
     {
         let guard = module.read().await;
@@ -212,7 +212,7 @@ type = "t"
 }
 
 /// Negative numeric literals are accepted as defaults.
-#[derive(ConferModule)]
+#[derive(ConfigScope)]
 #[confer(section = "Negative")]
 struct NegativeDefaults {
     #[confer(default = -1)]
@@ -229,9 +229,9 @@ struct NegativeDefaults {
 
 #[tokio::test]
 async fn negative_numeric_defaults() -> Result<()> {
-    let store = Confer::from_string("[Negative]\n")?;
+    let store = ConfigStore::from_string("[Negative]\n")?;
 
-    let module = NegativeDefaults::from_confer(store.clone()).await?;
+    let module = NegativeDefaults::from_store(store.clone()).await?;
 
     {
         let guard = module.read().await;
@@ -256,20 +256,20 @@ async fn negative_numeric_defaults() -> Result<()> {
     Ok(())
 }
 
-/// Default section names strip a leading `Confer` word only.
-#[derive(ConferModule)]
+/// Default section names strip a leading `ConfigStore` word only.
+#[derive(ConfigScope)]
 struct ConferenceSettings {
     room: String,
 }
 
-#[derive(ConferModule)]
+#[derive(ConfigScope)]
 struct ConferServer {
     port: u16,
 }
 
 #[tokio::test]
 async fn default_section_name_strips_confer_word_only() -> Result<()> {
-    let store = Confer::from_string(
+    let store = ConfigStore::from_string(
         r#"[ConferenceSettings]
 room = "A1"
 
@@ -278,8 +278,8 @@ port = 8080
 "#,
     )?;
 
-    let settings = ConferenceSettings::from_confer(store.clone()).await?;
-    let server = ConferServer::from_confer(store.clone()).await?;
+    let settings = ConferenceSettings::from_store(store.clone()).await?;
+    let server = ConferServer::from_store(store.clone()).await?;
 
     assert_eq!(settings.read().await.room, "A1");
     assert_eq!(server.read().await.port, 8080);
@@ -287,7 +287,7 @@ port = 8080
     Ok(())
 }
 
-#[derive(ConferModule)]
+#[derive(ConfigScope)]
 #[confer(section = "Schedule")]
 struct ScheduleDefaults {
     #[confer(default = "07:30")]
@@ -298,8 +298,8 @@ struct ScheduleDefaults {
 
 #[tokio::test]
 async fn datetime_defaults_preserve_omitted_seconds() -> Result<()> {
-    let store = Confer::new();
-    let module = ScheduleDefaults::from_confer(store.clone()).await?;
+    let store = ConfigStore::new();
+    let module = ScheduleDefaults::from_store(store.clone()).await?;
 
     {
         let guard = module.read().await;
@@ -316,8 +316,8 @@ async fn datetime_defaults_preserve_omitted_seconds() -> Result<()> {
     }
 
     ScheduleDefaults::save(&module, store.clone()).await?;
-    let restored = Confer::from_string(&store.save_str().await?)?;
-    let reloaded = ScheduleDefaults::from_confer(restored).await?;
+    let restored = ConfigStore::from_string(&store.save_str().await?)?;
+    let reloaded = ScheduleDefaults::from_store(restored).await?;
     let original = module.read().await;
     let reloaded = reloaded.read().await;
     assert_eq!(reloaded.alarm, original.alarm);
@@ -326,7 +326,7 @@ async fn datetime_defaults_preserve_omitted_seconds() -> Result<()> {
 }
 
 /// `Datetime` has no `Default` value; a required field of that type is built directly.
-#[derive(ConferModule)]
+#[derive(ConfigScope)]
 #[confer(section = "Clock")]
 struct Clock {
     started_at: Datetime,
@@ -336,14 +336,14 @@ struct Clock {
 
 #[tokio::test]
 async fn required_datetime_without_default_loads_and_saves() -> Result<()> {
-    let store = Confer::from_string(
+    let store = ConfigStore::from_string(
         r#"[Clock]
 started_at = 2024-05-01T10:30:00Z
 laps = [2024-05-01T10:31:00Z]
 "#,
     )?;
 
-    let module = Clock::from_confer(store.clone()).await?;
+    let module = Clock::from_store(store.clone()).await?;
 
     {
         let guard = module.read().await;
@@ -353,8 +353,8 @@ laps = [2024-05-01T10:31:00Z]
     }
 
     Clock::save(&module, store.clone()).await?;
-    let restored = Confer::from_string(&store.save_str().await?)?;
-    let reloaded = Clock::from_confer(restored).await?;
+    let restored = ConfigStore::from_string(&store.save_str().await?)?;
+    let reloaded = Clock::from_store(restored).await?;
     assert_eq!(
         reloaded.read().await.started_at,
         module.read().await.started_at
@@ -365,15 +365,15 @@ laps = [2024-05-01T10:31:00Z]
 
 #[tokio::test]
 async fn required_datetime_without_default_reports_missing_key() -> Result<()> {
-    let store = Confer::from_string("[Clock]\n")?;
+    let store = ConfigStore::from_string("[Clock]\n")?;
 
-    let err = Clock::from_confer(store)
+    let err = Clock::from_store(store)
         .await
         .err()
         .expect("a missing required key must fail");
 
     assert!(
-        matches!(&err, ConferError::MissingKey { section, key } if section == "Clock" && key == "started_at"),
+        matches!(&err, Error::MissingKey { section, key } if section == "Clock" && key == "started_at"),
         "unexpected error: {err}"
     );
 
@@ -392,7 +392,7 @@ impl Default for Tracked {
     }
 }
 
-#[derive(ConferModule)]
+#[derive(ConfigScope)]
 #[confer(section = "Tracked")]
 struct TrackedModule {
     port: u16,
@@ -405,32 +405,32 @@ struct TrackedModule {
 #[tokio::test]
 async fn ignored_fields_are_initialized_once_after_conversion_succeeds() -> Result<()> {
     // A required key is missing.
-    let store = Confer::from_string("[Tracked]\nretries = 1\n")?;
-    let err = TrackedModule::from_confer(store)
+    let store = ConfigStore::from_string("[Tracked]\nretries = 1\n")?;
+    let err = TrackedModule::from_store(store)
         .await
         .err()
         .expect("a missing required key must fail");
-    assert!(matches!(&err, ConferError::MissingKey { key, .. } if key == "port"));
+    assert!(matches!(&err, Error::MissingKey { key, .. } if key == "port"));
     assert_eq!(TRACKED_DEFAULTS.load(Ordering::SeqCst), 0);
 
     // A later field is out of range, and the first error wins in declaration order.
-    let store = Confer::from_string("[Tracked]\nport = 80\nretries = 300\n")?;
-    let err = TrackedModule::from_confer(store)
+    let store = ConfigStore::from_string("[Tracked]\nport = 80\nretries = 300\n")?;
+    let err = TrackedModule::from_store(store)
         .await
         .err()
         .expect("an out-of-range value must fail");
-    assert!(matches!(&err, ConferError::ValueParse { key, .. } if key == "retries"));
-    let store = Confer::from_string("[Tracked]\nretries = 300\n")?;
-    let err = TrackedModule::from_confer(store)
+    assert!(matches!(&err, Error::ValueParse { key, .. } if key == "retries"));
+    let store = ConfigStore::from_string("[Tracked]\nretries = 300\n")?;
+    let err = TrackedModule::from_store(store)
         .await
         .err()
         .expect("a missing required key must fail");
-    assert!(matches!(&err, ConferError::MissingKey { key, .. } if key == "port"));
+    assert!(matches!(&err, Error::MissingKey { key, .. } if key == "port"));
     assert_eq!(TRACKED_DEFAULTS.load(Ordering::SeqCst), 0);
 
     // Success initializes the ignored field exactly once; load and save leave it alone.
-    let store = Confer::from_string("[Tracked]\nport = 80\nretries = 3\n")?;
-    let module = TrackedModule::from_confer(store.clone()).await?;
+    let store = ConfigStore::from_string("[Tracked]\nport = 80\nretries = 3\n")?;
+    let module = TrackedModule::from_store(store.clone()).await?;
     assert_eq!(TRACKED_DEFAULTS.load(Ordering::SeqCst), 1);
     assert_eq!(module.read().await.state.0, 7);
 
@@ -448,7 +448,7 @@ async fn ignored_fields_are_initialized_once_after_conversion_succeeds() -> Resu
 }
 
 /// A module without loaded fields needs nothing from the store.
-#[derive(ConferModule)]
+#[derive(ConfigScope)]
 #[confer(section = "Runtime")]
 struct RuntimeOnly {
     #[confer(ignore)]
@@ -459,8 +459,8 @@ struct RuntimeOnly {
 
 #[tokio::test]
 async fn module_without_loaded_fields_is_constructed_directly() -> Result<()> {
-    let store = Confer::new();
-    let module = RuntimeOnly::from_confer(store.clone()).await?;
+    let store = ConfigStore::new();
+    let module = RuntimeOnly::from_store(store.clone()).await?;
 
     {
         let guard = module.read().await;
@@ -489,7 +489,7 @@ impl Pool {
     }
 }
 
-#[derive(ConferModule)]
+#[derive(ConfigScope)]
 #[confer(section = "Workers")]
 struct Workers {
     threads: u32,
@@ -501,14 +501,14 @@ struct Workers {
 
 #[tokio::test]
 async fn ignore_expression_fields_ignore_the_file_and_survive_load_and_save() -> Result<()> {
-    let store = Confer::from_string(
+    let store = ConfigStore::from_string(
         r#"[Workers]
 threads = 2
 ids = [9]
 "#,
     )?;
 
-    let module = Workers::from_confer(store.clone()).await?;
+    let module = Workers::from_store(store.clone()).await?;
 
     {
         let guard = module.read().await;
@@ -539,7 +539,7 @@ ids = [9]
 }
 
 /// An ignored field has no TOML key, so its name may equal the key of another field.
-#[derive(ConferModule)]
+#[derive(ConfigScope)]
 #[confer(section = "Collision")]
 struct KeyCollision {
     #[confer(rename = "name")]
@@ -550,8 +550,8 @@ struct KeyCollision {
 
 #[tokio::test]
 async fn ignored_field_may_share_its_name_with_the_key_of_another_field() -> Result<()> {
-    let store = Confer::from_string("[Collision]\nname = \"widget\"\n")?;
-    let module = KeyCollision::from_confer(store.clone()).await?;
+    let store = ConfigStore::from_string("[Collision]\nname = \"widget\"\n")?;
+    let module = KeyCollision::from_store(store.clone()).await?;
 
     {
         let guard = module.read().await;
@@ -572,7 +572,7 @@ fn next_ticket() -> usize {
     TICKETS.fetch_add(1, Ordering::SeqCst)
 }
 
-#[derive(ConferModule)]
+#[derive(ConfigScope)]
 #[confer(section = "Ticketed")]
 struct Ticketed {
     #[confer(ignore = next_ticket())]
@@ -585,16 +585,16 @@ struct Ticketed {
 /// One test owns the counter, because tests in this file run in parallel.
 #[tokio::test]
 async fn ignore_expressions_run_once_in_declaration_order_after_conversion() -> Result<()> {
-    let store = Confer::from_string("[Ticketed]\nport = \"eighty\"\n")?;
-    let err = Ticketed::from_confer(store)
+    let store = ConfigStore::from_string("[Ticketed]\nport = \"eighty\"\n")?;
+    let err = Ticketed::from_store(store)
         .await
         .err()
         .expect("a mistyped value must fail");
-    assert!(matches!(&err, ConferError::TypeMismatch { key, .. } if key == "port"));
+    assert!(matches!(&err, Error::TypeMismatch { key, .. } if key == "port"));
     assert_eq!(TICKETS.load(Ordering::SeqCst), 0);
 
-    let store = Confer::from_string("[Ticketed]\nport = 80\n")?;
-    let module = Ticketed::from_confer(store.clone()).await?;
+    let store = ConfigStore::from_string("[Ticketed]\nport = 80\n")?;
+    let module = Ticketed::from_store(store.clone()).await?;
     {
         let guard = module.read().await;
         assert_eq!((guard.before, guard.after), (0, 1));
@@ -607,8 +607,8 @@ async fn ignore_expressions_run_once_in_declaration_order_after_conversion() -> 
     Ok(())
 }
 
-/// Initializers run in closures: `return` and `?` end the initializer, not `from_confer`.
-#[derive(ConferModule)]
+/// Initializers run in closures: `return` and `?` end the initializer, not `from_store`.
+#[derive(ConfigScope)]
 #[confer(section = "Closures")]
 struct Closures {
     #[confer(ignore = {
@@ -627,8 +627,8 @@ struct Closures {
 }
 
 #[tokio::test]
-async fn ignore_expressions_cannot_return_from_from_confer() -> Result<()> {
-    let module = Closures::from_confer(Confer::new()).await?;
+async fn ignore_expressions_cannot_return_from_from_store() -> Result<()> {
+    let module = Closures::from_store(ConfigStore::new()).await?;
 
     let guard = module.read().await;
     assert_eq!(guard.parsed, Some(7));

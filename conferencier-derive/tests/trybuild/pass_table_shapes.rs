@@ -1,8 +1,8 @@
-use conferencier::ConferTable;
-use conferencier_derive::{ConferModule, ConferTable};
+use conferencier::ConfigTable;
+use conferencier_derive::{ConfigScope, ConfigTable};
 
 #[allow(dead_code)]
-#[derive(ConferTable)]
+#[derive(ConfigTable)]
 struct Limits {
     #[confer(default = 10)]
     burst: u32,
@@ -10,7 +10,7 @@ struct Limits {
 }
 
 #[allow(dead_code)]
-#[derive(ConferTable)]
+#[derive(ConfigTable)]
 struct Endpoint {
     url: String,
     #[confer(table)]
@@ -22,7 +22,7 @@ struct Endpoint {
 }
 
 #[allow(dead_code)]
-#[derive(ConferTable)]
+#[derive(ConfigTable)]
 struct Node {
     name: String,
     #[confer(table)]
@@ -30,12 +30,12 @@ struct Node {
 }
 
 #[allow(dead_code)]
-#[derive(ConferTable)]
+#[derive(ConfigTable)]
 struct Empty {}
 
 // Saving these types cannot fail, so the generated `to_table` leaves its path unnamed.
 #[allow(dead_code)]
-#[derive(ConferTable)]
+#[derive(ConfigTable)]
 struct Scalars {
     text: String,
     flag: bool,
@@ -52,7 +52,7 @@ struct Scalars {
 
 // One struct can be both a module and a table; `section` only affects the module.
 #[allow(dead_code)]
-#[derive(ConferModule, ConferTable)]
+#[derive(ConfigScope, ConfigTable)]
 #[confer(section = "Shared")]
 struct Shared {
     #[confer(default = true)]
@@ -60,7 +60,7 @@ struct Shared {
 }
 
 #[allow(dead_code)]
-#[derive(ConferModule)]
+#[derive(ConfigScope)]
 struct App {
     #[confer(table)]
     primary: Endpoint,
@@ -81,7 +81,7 @@ struct App {
 }
 
 fn main() {
-    fn assert_table<T: ConferTable>() {}
+    fn assert_table<T: ConfigTable>() {}
     assert_table::<Endpoint>();
     assert_table::<Shared>();
 }

@@ -10,8 +10,8 @@ use syn::{
 };
 
 use crate::model::{
-    ContainerKind, DeriveKind, Field, FieldKind, FieldType, FloatKind, IntegerKind, Module,
-    ScalarKind, TableContainer, TableType,
+    ContainerKind, DeriveKind, Field, FieldKind, FieldType, FloatKind, IntegerKind, ScalarKind,
+    Scope, TableContainer, TableType,
 };
 
 /// Error reported for any use of the removed `#[confer(init)]` attribute.
@@ -20,8 +20,8 @@ const INIT_REMOVED: &str = "#[confer(init)] was removed in 0.0.4; use #[confer(i
 /// Error reported for a `#[confer(table)]` field of an unsupported container shape.
 const TABLE_SHAPE: &str = "#[confer(table)] supports T, Option<T> and Vec<T>";
 
-/// Parses the derive input into the intermediate `Module` representation.
-pub fn parse_module(input: DeriveInput, derive: DeriveKind) -> Result<Module> {
+/// Parses the derive input into the intermediate `Scope` representation.
+pub fn parse_scope(input: DeriveInput, derive: DeriveKind) -> Result<Scope> {
     let DeriveInput {
         attrs,
         ident,
@@ -62,7 +62,7 @@ pub fn parse_module(input: DeriveInput, derive: DeriveKind) -> Result<Module> {
         result_fields.push(parse_field(&field, &mut seen_keys, derive)?);
     }
 
-    Ok(Module {
+    Ok(Scope {
         ident,
         generics,
         section,
@@ -72,7 +72,7 @@ pub fn parse_module(input: DeriveInput, derive: DeriveKind) -> Result<Module> {
 
 /// Extracts the TOML section name from the `#[confer(...)]` attributes or generates a default.
 ///
-/// `ConferTable` accepts and validates `section` but does not use it, so one struct can derive
+/// `ConfigTable` accepts and validates `section` but does not use it, so one struct can derive
 /// both macros.
 fn parse_section_name(
     attrs: &[Attribute],
@@ -276,7 +276,7 @@ fn classify_type(ty: &Type, derive: DeriveKind) -> Result<FieldType> {
 /// Classifies the type of a `#[confer(table)]` field into its container and inner type.
 ///
 /// Only syntactically recognizable shapes are rejected; whether the inner type implements
-/// `ConferTable` is checked by the compiler on the generated code.
+/// `ConfigTable` is checked by the compiler on the generated code.
 fn classify_table(ty: &Type) -> Result<TableType> {
     let ty = ungroup(ty);
     let (container, inner) = if let Some(inner) = match_outer_type(ty, "Option") {
@@ -360,7 +360,7 @@ fn classify_scalar(ty: &Type, derive: DeriveKind) -> Result<ScalarKind> {
         other => Err(syn::Error::new(
             ty.span(),
             format!(
-                "unsupported field type `{}`; nested structs require #[confer(table)] on the field and #[derive(ConferTable)] on the type",
+                "unsupported field type `{}`; nested structs require #[confer(table)] on the field and #[derive(ConfigTable)] on the type",
                 other
             ),
         )),

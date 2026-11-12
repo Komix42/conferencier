@@ -4,7 +4,7 @@ use syn::{Ident, Type};
 /// Derive macro being expanded; selects error messages and the generated trait.
 #[derive(Debug, Clone, Copy)]
 pub enum DeriveKind {
-    Module,
+    Scope,
     Table,
 }
 
@@ -12,19 +12,19 @@ impl DeriveKind {
     /// Name of the derive macro, used in error messages.
     pub fn name(self) -> &'static str {
         match self {
-            Self::Module => "ConferModule",
-            Self::Table => "ConferTable",
+            Self::Scope => "ConfigScope",
+            Self::Table => "ConfigTable",
         }
     }
 }
 
-/// Intermediate representation of a struct annotated with `#[derive(ConferModule)]` or
-/// `#[derive(ConferTable)]`.
+/// Intermediate representation of a struct annotated with `#[derive(ConfigScope)]` or
+/// `#[derive(ConfigTable)]`.
 #[derive(Debug, Clone)]
-pub struct Module {
+pub struct Scope {
     pub ident: Ident,
     pub generics: syn::Generics,
-    /// TOML section of a module; validated but unused for tables.
+    /// TOML section of a scope; validated but unused for tables.
     pub section: String,
     pub fields: Vec<Field>,
 }
@@ -60,7 +60,7 @@ pub struct FieldType {
     pub scalar: ScalarKind,
 }
 
-/// Type of a `#[confer(table)]` field: a container around a type implementing `ConferTable`.
+/// Type of a `#[confer(table)]` field: a container around a type implementing `ConfigTable`.
 #[derive(Debug, Clone)]
 pub struct TableType {
     pub container: TableContainer,

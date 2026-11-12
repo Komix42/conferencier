@@ -5,10 +5,10 @@
 //! cargo run --example nested_tables
 //! ```
 
-use conferencier::{Confer, ConferModule, ConferTable, Result};
+use conferencier::{ConfigScope, ConfigStore, ConfigTable, Result};
 
 /// The `[App.server]` table. All fields have defaults, so the table may be omitted.
-#[derive(ConferTable)]
+#[derive(ConfigTable)]
 struct Server {
     #[confer(default = "localhost")]
     host: String,
@@ -17,14 +17,14 @@ struct Server {
 }
 
 /// One `[[App.upstream]]` entry.
-#[derive(ConferTable)]
+#[derive(ConfigTable)]
 struct Upstream {
     url: String,
     #[confer(default = 1)]
     weight: u32,
 }
 
-#[derive(ConferModule)]
+#[derive(ConfigScope)]
 #[confer(section = "App")]
 struct AppSettings {
     name: String,
@@ -38,7 +38,7 @@ struct AppSettings {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let store = Confer::from_string(
+    let store = ConfigStore::from_string(
         r#"[App]
 name = "gateway"
 server = { port = 9000 }
@@ -52,9 +52,9 @@ weight = 3
 "#,
     )?;
 
-    let module = AppSettings::from_confer(store.clone()).await?;
+    let scope = AppSettings::from_store(store.clone()).await?;
     {
-        let guard = module.read().await;
+        let guard = scope.read().await;
         println!(
             "{} listens on {}:{}",
             guard.name, guard.server.host, guard.server.port
@@ -64,18 +64,18 @@ weight = 3
         }
     }
 
-    module.write().await.upstream.push(Upstream {
+    scope.write().await.upstream.push(Upstream {
         url: "http://10.0.0.3".into(),
         weight: 2,
     });
-    AppSettings::save(&module, store.clone()).await?;
+    AppSettings::save(&scope, store.clone()).await?;
     println!("Updated TOML:\n{}", store.save_str().await?);
 
     // Errors name the full path of the failing key.
     store
         .load_str("[App]\nname = \"gateway\"\n\n[[App.upstream]]\nurl = \"http://10.0.0.1\"\nweight = -1\n")
         .await?;
-    if let Err(error) = AppSettings::load(&module, store.clone()).await {
+    if let Err(error) = AppSettings::load(&scope, store.clone()).await {
         println!("Load failed: {error}");
     }
 

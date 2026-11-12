@@ -7,53 +7,52 @@ use tokio::sync::RwLock;
 use toml::value::Datetime;
 use toml::{Table, Value};
 
-use crate::error::{ConferError, Result};
+use crate::error::{Error, Result};
 use crate::value_conversion;
 
 /// In-memory TOML-backed configuration store guarded by an asynchronous `RwLock`.
-#[derive(Debug, Default)]
-pub struct Confer {
-    table: RwLock<Table>,
+///
+/// Clones share the same document; they do not copy it.
+#[derive(Clone, Debug, Default)]
+pub struct ConfigStore {
+    table: Arc<RwLock<Table>>,
 }
 
-/// Shared reference-counted handle to a [`Confer`] instance.
-pub type SharedConfer = Arc<Confer>;
-
-impl Confer {
-    /// Creates an empty configuration store wrapped in [`SharedConfer`].
-    pub fn new() -> SharedConfer {
-        Arc::new(Self::default())
+impl ConfigStore {
+    /// Creates an empty configuration store.
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    /// Builds a store from a TOML string, returning a shared handle on success.
-    pub fn from_string(source: &str) -> Result<SharedConfer> {
+    /// Builds a store from a TOML string.
+    pub fn from_string(source: &str) -> Result<Self> {
         let table = Self::parse_table(source)?;
-        Ok(Arc::new(Self {
-            table: RwLock::new(table),
-        }))
+        Ok(Self {
+            table: Arc::new(RwLock::new(table)),
+        })
     }
 
-    /// Synchronously reads a TOML file from disk and constructs the shared store.
-    pub fn from_file(path: impl AsRef<Path>) -> Result<SharedConfer> {
+    /// Synchronously reads a TOML file from disk and constructs the store.
+    pub fn from_file(path: impl AsRef<Path>) -> Result<Self> {
         let path_buf = path.as_ref().to_path_buf();
         let contents = std::fs::read_to_string(&path_buf)
-            .map_err(|err| ConferError::io_error(Some(path_buf.clone()), err))?;
+            .map_err(|err| Error::io_error(Some(path_buf.clone()), err))?;
         let table = Self::parse_table(&contents)?;
-        Ok(Arc::new(Self {
-            table: RwLock::new(table),
-        }))
+        Ok(Self {
+            table: Arc::new(RwLock::new(table)),
+        })
     }
 
-    /// Asynchronously reads a TOML file from disk and constructs the shared store.
-    pub async fn from_file_async(path: impl AsRef<Path> + Send + Sync) -> Result<SharedConfer> {
+    /// Asynchronously reads a TOML file from disk and constructs the store.
+    pub async fn from_file_async(path: impl AsRef<Path> + Send + Sync) -> Result<Self> {
         let path_buf = path.as_ref().to_path_buf();
         let contents = fs::read_to_string(&path_buf)
             .await
-            .map_err(|err| ConferError::io_error(Some(path_buf.clone()), err))?;
+            .map_err(|err| Error::io_error(Some(path_buf.clone()), err))?;
         let table = Self::parse_table(&contents)?;
-        Ok(Arc::new(Self {
-            table: RwLock::new(table),
-        }))
+        Ok(Self {
+            table: Arc::new(RwLock::new(table)),
+        })
     }
 
     /// Replaces the in-memory table with the contents of the provided TOML string.
@@ -69,14 +68,14 @@ impl Confer {
         let path_buf = path.as_ref().to_path_buf();
         let contents = fs::read_to_string(&path_buf)
             .await
-            .map_err(|err| ConferError::io_error(Some(path_buf.clone()), err))?;
+            .map_err(|err| Error::io_error(Some(path_buf.clone()), err))?;
         self.load_str(&contents).await
     }
 
     /// Serializes the current table to a TOML string.
     pub async fn save_str(&self) -> Result<String> {
         let guard = self.table.read().await;
-        toml::to_string(&*guard).map_err(ConferError::from)
+        toml::to_string(&*guard).map_err(Error::from)
     }
 
     /// Serializes the current table and writes it atomically to the specified file.
@@ -104,7 +103,7 @@ impl Confer {
         let guard = self.table.read().await;
         match guard.get(section) {
             Some(Value::Table(table)) => Ok(table.clone()),
-            Some(other) => Err(ConferError::type_mismatch(
+            Some(other) => Err(Error::type_mismatch(
                 section,
                 "<section>",
                 "table",
@@ -127,7 +126,7 @@ impl Confer {
                     *inner = table;
                     Ok(())
                 }
-                other => Err(ConferError::type_mismatch(
+                other => Err(Error::type_mismatch(
                     section,
                     "<section>",
                     "table",
@@ -150,7 +149,7 @@ impl Confer {
                     inner.insert(key.to_owned(), value);
                     Ok(())
                 } else {
-                    Err(ConferError::type_mismatch(
+                    Err(Error::type_mismatch(
                         section,
                         "<section>",
                         "table",
@@ -181,7 +180,7 @@ impl Confer {
                 if entry.get().is_table() {
                     Ok(())
                 } else {
-                    Err(ConferError::type_mismatch(
+                    Err(Error::type_mismatch(
                         section,
                         "<section>",
                         "table",
@@ -204,7 +203,7 @@ impl Confer {
                 inner.remove(key);
                 Ok(())
             } else {
-                Err(ConferError::type_mismatch(
+                Err(Error::type_mismatch(
                     section,
                     "<section>",
                     "table",
@@ -239,7 +238,7 @@ impl Confer {
             Some(table) => Ok(table.keys().cloned().collect()),
             None => {
                 if guard.contains_key(section) {
-                    Err(ConferError::type_mismatch(
+                    Err(Error::type_mismatch(
                         section,
                         "<section>",
                         "table",
@@ -377,9 +376,9 @@ impl Confer {
         let guard = self.table.read().await;
         let section_value = guard
             .get(section)
-            .ok_or_else(|| ConferError::missing_key(section, key))?;
+            .ok_or_else(|| Error::missing_key(section, key))?;
         let table = section_value.as_table().ok_or_else(|| {
-            ConferError::type_mismatch(
+            Error::type_mismatch(
                 section,
                 "<section>",
                 "table",
@@ -389,12 +388,12 @@ impl Confer {
         table
             .get(key)
             .cloned()
-            .ok_or_else(|| ConferError::missing_key(section, key))
+            .ok_or_else(|| Error::missing_key(section, key))
     }
 
-    /// Parses a TOML table from `source`, mapping parsing failures into [`ConferError`].
+    /// Parses a TOML table from `source`, mapping parsing failures into [`Error`].
     fn parse_table(source: &str) -> Result<Table> {
-        toml::from_str(source).map_err(ConferError::from)
+        toml::from_str(source).map_err(Error::from)
     }
 }
 
@@ -408,21 +407,21 @@ async fn write_atomic(path: &Path, contents: &[u8]) -> Result<()> {
     let tmp_path = temporary_path(path);
     fs::write(&tmp_path, contents)
         .await
-        .map_err(|err| ConferError::io_error(Some(tmp_path.clone()), err))?;
+        .map_err(|err| Error::io_error(Some(tmp_path.clone()), err))?;
 
     match fs::rename(&tmp_path, path).await {
         Ok(()) => Ok(()),
         Err(err) if err.kind() == ErrorKind::AlreadyExists => {
-            fs::remove_file(path).await.map_err(|remove_err| {
-                ConferError::io_error(Some(path.to_path_buf()), remove_err)
-            })?;
+            fs::remove_file(path)
+                .await
+                .map_err(|remove_err| Error::io_error(Some(path.to_path_buf()), remove_err))?;
             fs::rename(&tmp_path, path)
                 .await
-                .map_err(|err| ConferError::io_error(Some(path.to_path_buf()), err))
+                .map_err(|err| Error::io_error(Some(path.to_path_buf()), err))
         }
         Err(err) => {
             let _ = fs::remove_file(&tmp_path).await;
-            Err(ConferError::io_error(Some(path.to_path_buf()), err))
+            Err(Error::io_error(Some(path.to_path_buf()), err))
         }
     }
 }
@@ -441,19 +440,34 @@ fn temporary_path(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::{ConferError, Result};
+    use crate::error::{Error, Result};
 
     use tempfile::NamedTempFile;
 
     #[tokio::test]
     async fn new_store_is_empty() {
-        let store = Confer::new();
+        let store = ConfigStore::new();
         assert!(store.list_sections().await.is_empty());
     }
 
     #[tokio::test]
+    async fn clones_share_store_data() -> Result<()> {
+        let store = ConfigStore::new();
+        let clone = store.clone();
+
+        clone
+            .set_string("App", "name", String::from("shared"))
+            .await?;
+        assert_eq!(store.get_string("App", "name").await?, "shared");
+
+        clone.load_str("[App]\nname = \"reloaded\"").await?;
+        assert_eq!(store.get_string("App", "name").await?, "reloaded");
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn section_tables_create_replace_and_snapshot() -> Result<()> {
-        let store = Confer::from_string("[Other]\nkeep = 1")?;
+        let store = ConfigStore::from_string("[Other]\nkeep = 1")?;
         assert!(store.read_section_table("App").await?.is_empty());
         let first: Table = "old = 1\nnested = { stale = true }".parse().unwrap();
         store.set_section_table("App", first.clone()).await?;
@@ -476,7 +490,7 @@ mod tests {
 
     #[tokio::test]
     async fn strict_section_operations_reject_non_tables_without_changes() -> Result<()> {
-        let store = Confer::from_string("App = 7\n[Other]\nkeep = true")?;
+        let store = ConfigStore::from_string("App = 7\n[Other]\nkeep = true")?;
         let before = store.save_str().await?;
         for error in [
             store.read_section_table("App").await.unwrap_err(),
@@ -487,7 +501,7 @@ mod tests {
         ] {
             assert!(matches!(
                 &error,
-                ConferError::TypeMismatch { section, key, expected: "table", found: "integer" }
+                Error::TypeMismatch { section, key, expected: "table", found: "integer" }
                     if section == "App" && key == "<section>"
             ));
             assert_eq!(
@@ -501,7 +515,7 @@ mod tests {
 
     #[tokio::test]
     async fn set_and_get_string_roundtrip() -> Result<()> {
-        let store = Confer::new();
+        let store = ConfigStore::new();
         store.set_string("App", "name", "demo".into()).await?;
         assert_eq!(store.get_string("App", "name").await?, "demo");
         assert_eq!(
@@ -513,7 +527,7 @@ mod tests {
 
     #[tokio::test]
     async fn datetime_fallback_from_string() -> Result<()> {
-        let store = Confer::new();
+        let store = ConfigStore::new();
         store
             .set_string("Build", "time", "2024-01-01T00:00:00Z".into())
             .await?;
@@ -524,7 +538,7 @@ mod tests {
 
     #[tokio::test]
     async fn float_vec_accepts_integers() -> Result<()> {
-        let store = Confer::new();
+        let store = ConfigStore::new();
         store
             .set_value(
                 "App",
@@ -539,14 +553,14 @@ mod tests {
 
     #[tokio::test]
     async fn missing_key_yields_error() {
-        let store = Confer::new();
+        let store = ConfigStore::new();
         let err = store.get_string("Missing", "key").await.unwrap_err();
-        assert!(matches!(err, ConferError::MissingKey { .. }));
+        assert!(matches!(err, Error::MissingKey { .. }));
     }
 
     #[tokio::test]
     async fn load_str_replaces_content() -> Result<()> {
-        let store = Confer::new();
+        let store = ConfigStore::new();
         store.set_string("App", "name", "demo".into()).await?;
         store.load_str("[Srv]\nport = 8080\n").await?;
 
@@ -557,14 +571,14 @@ mod tests {
 
     #[tokio::test]
     async fn list_keys_missing_section_empty() -> Result<()> {
-        let store = Confer::new();
+        let store = ConfigStore::new();
         assert!(store.list_keys("Unknown").await?.is_empty());
         Ok(())
     }
 
     #[tokio::test]
     async fn add_section_is_idempotent() -> Result<()> {
-        let store = Confer::new();
+        let store = ConfigStore::new();
         store.add_section("Srv").await?;
         store.add_section("Srv").await?;
         assert!(store.section_exists("Srv").await);
@@ -573,7 +587,7 @@ mod tests {
 
     #[tokio::test]
     async fn remove_key_missing_is_ok() -> Result<()> {
-        let store = Confer::new();
+        let store = ConfigStore::new();
         store.remove_key("Srv", "unknown").await?;
         store.add_section("Srv").await?;
         store.remove_key("Srv", "missing").await?;
@@ -582,7 +596,7 @@ mod tests {
 
     #[tokio::test]
     async fn save_and_load_file_roundtrip() -> Result<()> {
-        let store = Confer::new();
+        let store = ConfigStore::new();
         store.set_string("App", "name", "demo".into()).await?;
         store.set_integer("App", "port", 3000).await?;
 
@@ -590,7 +604,7 @@ mod tests {
         let path_buf = temp.path().to_path_buf();
         store.save_file(&path_buf).await?;
 
-        let restored = Confer::from_file(&path_buf)?;
+        let restored = ConfigStore::from_file(&path_buf)?;
         assert_eq!(restored.get_string("App", "name").await?, "demo");
         assert_eq!(restored.get_integer("App", "port").await?, 3000);
         Ok(())
@@ -598,7 +612,7 @@ mod tests {
 
     #[tokio::test]
     async fn save_file_overwrites_existing() -> Result<()> {
-        let store = Confer::new();
+        let store = ConfigStore::new();
         store.set_boolean("Flags", "enabled", true).await?;
         let temp = NamedTempFile::new().expect("temp file");
         let path_buf = temp.path().to_path_buf();

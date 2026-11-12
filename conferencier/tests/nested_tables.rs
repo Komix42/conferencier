@@ -3,9 +3,9 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use conferencier::toml::{Table, Value};
-use conferencier::{Confer, ConferError, ConferModule, ConferTable, Result, SharedConfer};
+use conferencier::{ConfigScope, ConfigStore, ConfigTable, Error, Result};
 
-fn error_of<T>(result: Result<T>) -> ConferError {
+fn error_of<T>(result: Result<T>) -> Error {
     match result {
         Ok(_) => panic!("expected an error"),
         Err(error) => error,
@@ -13,9 +13,9 @@ fn error_of<T>(result: Result<T>) -> ConferError {
 }
 
 /// Saves `store` as TOML text and loads a fresh module from the text.
-async fn reloaded<M: ConferModule + Clone>(store: &SharedConfer) -> Result<M> {
+async fn reloaded<M: ConfigScope + Clone>(store: &ConfigStore) -> Result<M> {
     let text = store.save_str().await?;
-    let module = M::from_confer(Confer::from_string(&text)?).await?;
+    let module = M::from_store(ConfigStore::from_string(&text)?).await?;
     let value = module.read().await.clone();
     Ok(value)
 }
@@ -33,12 +33,12 @@ fn sub_table<'a>(table: &'a Table, key: &str) -> &'a Table {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, ConferTable)]
+#[derive(Debug, Clone, PartialEq, ConfigTable)]
 struct Window {
     seconds: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, ConferTable)]
+#[derive(Debug, Clone, PartialEq, ConfigTable)]
 struct Limits {
     #[confer(default = 10)]
     burst: u32,
@@ -47,7 +47,7 @@ struct Limits {
     window: Option<Window>,
 }
 
-#[derive(Debug, Clone, PartialEq, ConferTable)]
+#[derive(Debug, Clone, PartialEq, ConfigTable)]
 struct Server {
     #[confer(default = "localhost")]
     host: String,
@@ -57,13 +57,13 @@ struct Server {
     limits: Limits,
 }
 
-#[derive(Debug, Clone, PartialEq, ConferTable)]
+#[derive(Debug, Clone, PartialEq, ConfigTable)]
 struct Tls {
     cert: String,
     key: String,
 }
 
-#[derive(Debug, Clone, PartialEq, ConferTable)]
+#[derive(Debug, Clone, PartialEq, ConfigTable)]
 struct Upstream {
     url: String,
     #[confer(default = 1)]
@@ -71,7 +71,7 @@ struct Upstream {
     tags: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone, PartialEq, ConferModule)]
+#[derive(Debug, Clone, PartialEq, ConfigScope)]
 #[confer(section = "App")]
 struct App {
     name: String,
@@ -144,11 +144,11 @@ fn full_app() -> App {
 
 #[tokio::test]
 async fn all_shapes_roundtrip_through_three_levels() -> Result<()> {
-    let store = Confer::from_string(FULL)?;
-    let module = App::from_confer(store.clone()).await?;
+    let store = ConfigStore::from_string(FULL)?;
+    let module = App::from_store(store.clone()).await?;
     assert_eq!(*module.read().await, full_app());
 
-    let saved = Confer::new();
+    let saved = ConfigStore::new();
     App::save(&module, saved.clone()).await?;
     let section = saved.get_section_table("App").await.expect("saved section");
     assert_eq!(
@@ -168,7 +168,7 @@ async fn all_shapes_roundtrip_through_three_levels() -> Result<()> {
 
 #[tokio::test]
 async fn multi_line_inline_tables_load_and_roundtrip() -> Result<()> {
-    let store = Confer::from_string(
+    let store = ConfigStore::from_string(
         r#"
 [App]
 name = "demo"
@@ -188,7 +188,7 @@ upstream = [
 ]
 "#,
     )?;
-    let module = App::from_confer(store.clone()).await?;
+    let module = App::from_store(store.clone()).await?;
     assert_eq!(*module.read().await, full_app());
 
     App::save(&module, store.clone()).await?;
@@ -196,7 +196,7 @@ upstream = [
     Ok(())
 }
 
-#[derive(Debug, ConferModule)]
+#[derive(Debug, ConfigScope)]
 #[confer(section = "Strict")]
 struct Strict {
     #[confer(table)]
@@ -205,7 +205,7 @@ struct Strict {
 
 #[tokio::test]
 async fn absent_tables_follow_their_shape() -> Result<()> {
-    let module = App::from_confer(Confer::from_string("[App]\nname = \"demo\"")?).await?;
+    let module = App::from_store(ConfigStore::from_string("[App]\nname = \"demo\"")?).await?;
     let app = module.read().await;
     assert_eq!(
         app.server,
@@ -222,9 +222,9 @@ async fn absent_tables_follow_their_shape() -> Result<()> {
     assert_eq!(app.tls, None);
     assert!(app.upstream.is_empty());
 
-    let error = error_of(Strict::from_confer(Confer::from_string("[Strict]")?).await);
+    let error = error_of(Strict::from_store(ConfigStore::from_string("[Strict]")?).await);
     assert!(
-        matches!(&error, ConferError::MissingKey { section, key }
+        matches!(&error, Error::MissingKey { section, key }
             if section == "Strict.tls" && key == "cert"),
         "unexpected error: {error:?}"
     );
@@ -232,12 +232,12 @@ async fn absent_tables_follow_their_shape() -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug, ConferTable)]
+#[derive(Debug, ConfigTable)]
 struct Extras {
     note: Option<String>,
 }
 
-#[derive(Debug, ConferModule)]
+#[derive(Debug, ConfigScope)]
 #[confer(section = "Sparse")]
 struct Sparse {
     #[confer(table)]
@@ -246,7 +246,7 @@ struct Sparse {
 
 #[tokio::test]
 async fn save_writes_owned_data_only() -> Result<()> {
-    let store = Confer::from_string(
+    let store = ConfigStore::from_string(
         r#"
 [App]
 name = "demo"
@@ -276,7 +276,7 @@ retired = true
 y = 2
 "#,
     )?;
-    let module = App::from_confer(store.clone()).await?;
+    let module = App::from_store(store.clone()).await?;
 
     // Unknown keys and sub-tables are removed at every level (O1–O2).
     App::save(&module, store.clone()).await?;
@@ -316,8 +316,8 @@ y = 2
     );
 
     // A plain table is always written, even when empty.
-    let store = Confer::new();
-    let module = Sparse::from_confer(store.clone()).await?;
+    let store = ConfigStore::new();
+    let module = Sparse::from_store(store.clone()).await?;
     assert_eq!(module.read().await.extras.note, None);
     Sparse::save(&module, store.clone()).await?;
     let section = store
@@ -329,18 +329,18 @@ y = 2
     Ok(())
 }
 
-#[derive(Debug, ConferTable)]
+#[derive(Debug, ConfigTable)]
 struct Endpoint {
     port: u16,
 }
 
-#[derive(Debug, ConferTable)]
+#[derive(Debug, ConfigTable)]
 struct Weighted {
     url: String,
     weight: u32,
 }
 
-#[derive(Debug, ConferModule)]
+#[derive(Debug, ConfigScope)]
 #[confer(section = "App")]
 struct Checked {
     #[confer(table)]
@@ -351,9 +351,9 @@ struct Checked {
     spaced: Option<Endpoint>,
 }
 
-async fn checked_error(source: &str) -> Result<ConferError> {
+async fn checked_error(source: &str) -> Result<Error> {
     Ok(error_of(
-        Checked::from_confer(Confer::from_string(source)?).await,
+        Checked::from_store(ConfigStore::from_string(source)?).await,
     ))
 }
 
@@ -361,7 +361,7 @@ async fn checked_error(source: &str) -> Result<ConferError> {
 async fn errors_report_nested_paths() -> Result<()> {
     let error = checked_error("[App.server]\nother = 1").await?;
     assert!(
-        matches!(&error, ConferError::MissingKey { section, key }
+        matches!(&error, Error::MissingKey { section, key }
             if section == "App.server" && key == "port"),
         "unexpected error: {error:?}"
     );
@@ -369,7 +369,7 @@ async fn errors_report_nested_paths() -> Result<()> {
 
     let error = checked_error("[App]\nserver = 5").await?;
     assert!(
-        matches!(&error, ConferError::TypeMismatch { section, key, expected: "table", found: "integer" }
+        matches!(&error, Error::TypeMismatch { section, key, expected: "table", found: "integer" }
             if section == "App" && key == "server"),
         "unexpected error: {error:?}"
     );
@@ -380,7 +380,7 @@ async fn errors_report_nested_paths() -> Result<()> {
 
     let error = checked_error("[App.upstream]\nurl = \"a\"\nweight = 1").await?;
     assert!(
-        matches!(&error, ConferError::TypeMismatch { section, key, expected: "array", found: "table" }
+        matches!(&error, Error::TypeMismatch { section, key, expected: "array", found: "table" }
             if section == "App" && key == "upstream"),
         "unexpected error: {error:?}"
     );
@@ -391,7 +391,7 @@ async fn errors_report_nested_paths() -> Result<()> {
 
     let error = checked_error("[App]\nupstream = [{ url = \"a\", weight = 1 }, \"b\"]").await?;
     assert!(
-        matches!(&error, ConferError::ValueParse { section, key, message }
+        matches!(&error, Error::ValueParse { section, key, message }
             if section == "App"
                 && key == "upstream"
                 && message == "expected array elements of type table, found string (at index 1)"),
@@ -407,7 +407,7 @@ async fn errors_report_nested_paths() -> Result<()> {
     )
     .await?;
     assert!(
-        matches!(&error, ConferError::ValueParse { section, key, message }
+        matches!(&error, Error::ValueParse { section, key, message }
             if section == "App.upstream[1]"
                 && key == "weight"
                 && message == "value out of range for u32"),
@@ -420,7 +420,7 @@ async fn errors_report_nested_paths() -> Result<()> {
 
     let error = checked_error("[App]\n\"my key\" = { port = \"bad\" }").await?;
     assert!(
-        matches!(&error, ConferError::TypeMismatch { section, key, expected: "integer", found: "string" }
+        matches!(&error, Error::TypeMismatch { section, key, expected: "integer", found: "string" }
             if section == "App.\"my key\"" && key == "port"),
         "unexpected error: {error:?}"
     );
@@ -436,7 +436,7 @@ async fn array_elements_are_converted_depth_first() -> Result<()> {
     // The first element misses a required key and the second is not a table (L5).
     let error = checked_error("[App]\nupstream = [{ url = \"a\" }, \"b\"]").await?;
     assert!(
-        matches!(&error, ConferError::MissingKey { section, key }
+        matches!(&error, Error::MissingKey { section, key }
             if section == "App.upstream[0]" && key == "weight"),
         "unexpected error: {error:?}"
     );
@@ -449,7 +449,7 @@ fn next_token() -> u32 {
     TOKENS.fetch_add(1, Ordering::SeqCst) + 1
 }
 
-#[derive(Debug, ConferTable)]
+#[derive(Debug, ConfigTable)]
 struct Session {
     id: String,
     #[confer(ignore = next_token())]
@@ -458,7 +458,7 @@ struct Session {
     hits: u32,
 }
 
-#[derive(Debug, ConferModule)]
+#[derive(Debug, ConfigScope)]
 #[confer(section = "Sessions")]
 struct Sessions {
     #[confer(table)]
@@ -472,8 +472,8 @@ struct Sessions {
 
 #[tokio::test]
 async fn ignored_fields_follow_value_semantics() -> Result<()> {
-    let store = Confer::from_string("[Sessions]\nport = 1\n[Sessions.main]\nid = \"a\"")?;
-    let module = Sessions::from_confer(store.clone()).await?;
+    let store = ConfigStore::from_string("[Sessions]\nport = 1\n[Sessions.main]\nid = \"a\"")?;
+    let module = Sessions::from_store(store.clone()).await?;
     {
         let mut guard = module.write().await;
         assert_eq!(guard.local, 100);
@@ -528,12 +528,12 @@ async fn ignored_fields_follow_value_semantics() -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug, ConferTable)]
+#[derive(Debug, ConfigTable)]
 struct Counter {
     total: u64,
 }
 
-#[derive(Debug, ConferModule)]
+#[derive(Debug, ConfigScope)]
 #[confer(section = "Stats")]
 struct Stats {
     label: String,
@@ -543,8 +543,8 @@ struct Stats {
 
 #[tokio::test]
 async fn nested_save_errors_leave_the_store_unchanged() -> Result<()> {
-    let store = Confer::from_string("[Stats]\nlabel = \"a\"\n[[Stats.counters]]\ntotal = 1")?;
-    let module = Stats::from_confer(store.clone()).await?;
+    let store = ConfigStore::from_string("[Stats]\nlabel = \"a\"\n[[Stats.counters]]\ntotal = 1")?;
+    let module = Stats::from_store(store.clone()).await?;
     {
         let mut guard = module.write().await;
         guard.label = "b".into();
@@ -554,7 +554,7 @@ async fn nested_save_errors_leave_the_store_unchanged() -> Result<()> {
     let before = store.get_section_table("Stats").await;
     let error = error_of(Stats::save(&module, store.clone()).await);
     assert!(
-        matches!(&error, ConferError::ValueParse { section, key, .. }
+        matches!(&error, Error::ValueParse { section, key, .. }
             if section == "Stats.counters[1]" && key == "total"),
         "unexpected error: {error:?}"
     );
@@ -569,14 +569,14 @@ async fn nested_save_errors_leave_the_store_unchanged() -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug, Clone, PartialEq, ConferTable)]
+#[derive(Debug, Clone, PartialEq, ConfigTable)]
 struct TreeNode {
     name: String,
     #[confer(table)]
     children: Vec<TreeNode>,
 }
 
-#[derive(Debug, Clone, PartialEq, ConferModule)]
+#[derive(Debug, Clone, PartialEq, ConfigScope)]
 #[confer(section = "Tree")]
 struct Tree {
     #[confer(table)]
@@ -592,8 +592,8 @@ fn node(name: &str, children: Vec<TreeNode>) -> TreeNode {
 
 #[tokio::test]
 async fn recursive_tables_roundtrip() -> Result<()> {
-    let store = Confer::from_string("[Tree.root]\nname = \"root\"")?;
-    let module = Tree::from_confer(store.clone()).await?;
+    let store = ConfigStore::from_string("[Tree.root]\nname = \"root\"")?;
+    let module = Tree::from_store(store.clone()).await?;
     assert_eq!(module.read().await.root, node("root", vec![]));
 
     let expected = node(
@@ -608,7 +608,7 @@ async fn recursive_tables_roundtrip() -> Result<()> {
     assert_eq!(reloaded::<Tree>(&store).await?.root, expected);
 
     let error = error_of(
-        Tree::from_confer(Confer::from_string(
+        Tree::from_store(ConfigStore::from_string(
             "[Tree.root]\nname = \"root\"\n[[Tree.root.children]]\nname = \"a\"\n[[Tree.root.children.children]]\nname = 5",
         )?)
         .await,
@@ -621,14 +621,14 @@ async fn recursive_tables_roundtrip() -> Result<()> {
 }
 
 /// Neither `Default` nor `Clone` is required by either derive.
-#[derive(ConferTable)]
+#[derive(ConfigTable)]
 struct Bare {
     id: String,
     #[confer(table)]
     window: Option<Window>,
 }
 
-#[derive(ConferModule)]
+#[derive(ConfigScope)]
 #[confer(section = "Bare")]
 struct BareHolder {
     #[confer(table)]
@@ -639,14 +639,15 @@ struct BareHolder {
 
 #[tokio::test]
 async fn tables_need_neither_default_nor_clone() -> Result<()> {
-    let store = Confer::from_string(
+    let store = ConfigStore::from_string(
         "[Bare.one]\nid = \"one\"\n[Bare.one.window]\nseconds = 5\n[[Bare.many]]\nid = \"m\"",
     )?;
-    let module = BareHolder::from_confer(store.clone()).await?;
-    let saved = Confer::new();
+    let module = BareHolder::from_store(store.clone()).await?;
+    let saved = ConfigStore::new();
     BareHolder::save(&module, saved.clone()).await?;
 
-    let module = BareHolder::from_confer(Confer::from_string(&saved.save_str().await?)?).await?;
+    let module =
+        BareHolder::from_store(ConfigStore::from_string(&saved.save_str().await?)?).await?;
     let guard = module.read().await;
     assert_eq!(guard.one.id, "one");
     assert_eq!(guard.one.window, Some(Window { seconds: 5 }));
@@ -656,7 +657,7 @@ async fn tables_need_neither_default_nor_clone() -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug, Clone, PartialEq, ConferModule, ConferTable)]
+#[derive(Debug, Clone, PartialEq, ConfigScope, ConfigTable)]
 #[confer(section = "Database")]
 struct Database {
     url: String,
@@ -664,13 +665,13 @@ struct Database {
     pool: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, ConferModule, ConferTable)]
+#[derive(Debug, Clone, PartialEq, ConfigScope, ConfigTable)]
 struct ConferCache {
     #[confer(default = 64)]
     size: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, ConferModule)]
+#[derive(Debug, Clone, PartialEq, ConfigScope)]
 #[confer(section = "Services")]
 struct Services {
     #[confer(table)]
@@ -683,7 +684,7 @@ struct Services {
 
 #[tokio::test]
 async fn one_struct_can_derive_both_traits() -> Result<()> {
-    let store = Confer::from_string(
+    let store = ConfigStore::from_string(
         r#"
 [Database]
 url = "top"
@@ -703,7 +704,7 @@ size = 32
 "#,
     )?;
 
-    let database = Database::from_confer(store.clone()).await?;
+    let database = Database::from_store(store.clone()).await?;
     assert_eq!(
         *database.read().await,
         Database {
@@ -711,7 +712,7 @@ size = 32
             pool: 4,
         }
     );
-    let cache = ConferCache::from_confer(store.clone()).await?;
+    let cache = ConferCache::from_store(store.clone()).await?;
     assert_eq!(cache.read().await.size, 128);
 
     let expected = Services {
@@ -725,10 +726,10 @@ size = 32
         }],
         cache: Some(ConferCache { size: 32 }),
     };
-    let services = Services::from_confer(store.clone()).await?;
+    let services = Services::from_store(store.clone()).await?;
     assert_eq!(*services.read().await, expected);
 
-    let saved = Confer::new();
+    let saved = ConfigStore::new();
     Services::save(&services, saved.clone()).await?;
     assert_eq!(saved.list_sections().await, ["Services"]);
     assert_eq!(reloaded::<Services>(&saved).await?, expected);
@@ -742,26 +743,26 @@ struct Address {
     port: u16,
 }
 
-impl ConferTable for Address {
+impl ConfigTable for Address {
     fn from_table(path: &str, mut table: Table) -> Result<Self> {
         let raw = match table.remove("address") {
             Some(Value::String(raw)) => raw,
             Some(other) => {
-                return Err(ConferError::type_mismatch(
+                return Err(Error::type_mismatch(
                     path,
                     "address",
                     "string",
                     other.type_str(),
                 ));
             }
-            None => return Err(ConferError::missing_key(path, "address")),
+            None => return Err(Error::missing_key(path, "address")),
         };
         let (host, port) = raw
             .rsplit_once(':')
-            .ok_or_else(|| ConferError::value_parse(path, "address", "expected host:port"))?;
+            .ok_or_else(|| Error::value_parse(path, "address", "expected host:port"))?;
         let port = port
             .parse()
-            .map_err(|_| ConferError::value_parse(path, "address", "invalid port"))?;
+            .map_err(|_| Error::value_parse(path, "address", "invalid port"))?;
         Ok(Self {
             host: host.into(),
             port,
@@ -778,7 +779,7 @@ impl ConferTable for Address {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, ConferModule)]
+#[derive(Debug, Clone, PartialEq, ConfigScope)]
 #[confer(section = "Net")]
 struct Net {
     #[confer(table)]
@@ -789,10 +790,10 @@ struct Net {
 
 #[tokio::test]
 async fn manual_implementations_can_be_table_fields() -> Result<()> {
-    let store = Confer::from_string(
+    let store = ConfigStore::from_string(
         "[Net.listen]\naddress = \"0.0.0.0:80\"\n[[Net.peers]]\naddress = \"a:1\"\n[[Net.peers]]\naddress = \"b:2\"",
     )?;
-    let module = Net::from_confer(store.clone()).await?;
+    let module = Net::from_store(store.clone()).await?;
     let expected = Net {
         listen: Address {
             host: "0.0.0.0".into(),
@@ -826,13 +827,13 @@ async fn manual_implementations_can_be_table_fields() -> Result<()> {
 }
 
 mod hygiene {
-    use conferencier::{Confer, ConferModule, ConferTable, Result};
+    use conferencier::{ConfigScope, ConfigStore, ConfigTable, Result};
 
     // A local `toml` module must not shadow the TOML types used by generated code.
     mod toml {}
 
     /// Field names matching identifiers used inside the generated code.
-    #[derive(Debug, Clone, PartialEq, ConferTable)]
+    #[derive(Debug, Clone, PartialEq, ConfigTable)]
     struct Names {
         path: String,
         table: i64,
@@ -845,7 +846,7 @@ mod hygiene {
         index: Vec<Names>,
     }
 
-    #[derive(Debug, Clone, PartialEq, ConferModule)]
+    #[derive(Debug, Clone, PartialEq, ConfigScope)]
     #[confer(section = "Hygiene")]
     struct HygieneModule {
         path: String,
@@ -863,7 +864,7 @@ mod hygiene {
 
     #[tokio::test]
     async fn field_names_do_not_collide_with_generated_code() -> Result<()> {
-        let store = Confer::from_string(
+        let store = ConfigStore::from_string(
             r#"
 [Hygiene]
 path = "p"
@@ -899,7 +900,7 @@ value = 2.5
 key = 6
 "#,
         )?;
-        let module = HygieneModule::from_confer(store.clone()).await?;
+        let module = HygieneModule::from_store(store.clone()).await?;
         let loaded = module.read().await.clone();
         assert_eq!(loaded.path, "p");
         assert_eq!(loaded.names.table, 3);
@@ -908,7 +909,7 @@ key = 6
 
         HygieneModule::save(&module, store.clone()).await?;
         let text = store.save_str().await?;
-        let reloaded = HygieneModule::from_confer(Confer::from_string(&text)?).await?;
+        let reloaded = HygieneModule::from_store(ConfigStore::from_string(&text)?).await?;
         assert_eq!(*reloaded.read().await, loaded);
         Ok(())
     }

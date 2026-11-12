@@ -4,21 +4,21 @@ use syn::spanned::Spanned;
 use syn::{Ident, LitStr, Result};
 
 use crate::model::{
-    ContainerKind, Field, FieldKind, FieldType, FloatKind, IntegerKind, Module, ScalarKind,
+    ContainerKind, Field, FieldKind, FieldType, FloatKind, IntegerKind, ScalarKind, Scope,
     TableContainer, TableType,
 };
 
-/// Produces the async load/save implementation for a parsed module description.
+/// Produces the async load/save implementation for a parsed scope description.
 ///
 /// Loading converts a snapshot of the whole section and saving replaces the whole section, so
 /// both operations are atomic with respect to the store (RFC-0004 R1–R5).
-pub fn generate(module: Module, crate_path: syn::Path) -> Result<TokenStream> {
-    let Module {
+pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
+    let Scope {
         ident,
         generics,
         section,
         fields,
-    } = module;
+    } = scope;
 
     let section_lit = LitStr::new(&section, Span::call_site());
     let path = quote! { #section_lit };
@@ -39,8 +39,8 @@ pub fn generate(module: Module, crate_path: syn::Path) -> Result<TokenStream> {
     let struct_fields = struct_fields(&fields);
 
     let crate_private = quote! { #crate_path::__private };
-    let shared_confer = quote! { #crate_path::SharedConfer };
-    let shared_module = quote! { #crate_path::confer_module::SharedConferModule<Self> };
+    let shared_store = quote! { #crate_path::ConfigStore };
+    let shared_scope = quote! { #crate_path::SharedScope<Self> };
     let result_type = quote! { #crate_path::Result };
     let table_type = quote! { #crate_path::toml::Table };
 
@@ -56,7 +56,7 @@ pub fn generate(module: Module, crate_path: syn::Path) -> Result<TokenStream> {
         TokenStream::new()
     } else {
         quote! {
-            let mut #guard = module.write().await;
+            let mut #guard = scope.write().await;
             #( #guard.#loaded_idents = #loaded_locals; )*
         }
     };
@@ -66,7 +66,7 @@ pub fn generate(module: Module, crate_path: syn::Path) -> Result<TokenStream> {
     } else {
         quote! {
             {
-                let #guard = module.read().await;
+                let #guard = scope.read().await;
                 let mut #table = #table_type::new();
                 #( #store_statements )*
                 #table
@@ -76,22 +76,22 @@ pub fn generate(module: Module, crate_path: syn::Path) -> Result<TokenStream> {
 
     Ok(quote! {
         #[#crate_private::async_trait]
-        impl #impl_generics #crate_path::confer_module::ConferModule for #ident #ty_generics #where_clause {
-            async fn from_confer(#store: #shared_confer) -> #result_type<#shared_module> {
+        impl #impl_generics #crate_path::ConfigScope for #ident #ty_generics #where_clause {
+            async fn from_store(#store: #shared_store) -> #result_type<#shared_scope> {
                 #snapshot
                 #( #load_statements )*
                 let value = Self { #(#struct_fields),* };
-                Ok(#crate_private::new_shared_module(value))
+                Ok(#crate_private::new_shared_scope(value))
             }
 
-            async fn load(module: &#shared_module, #store: #shared_confer) -> #result_type<()> {
+            async fn load(scope: &#shared_scope, #store: #shared_store) -> #result_type<()> {
                 #snapshot
                 #( #load_statements )*
                 #assign
                 Ok(())
             }
 
-            async fn save(module: &#shared_module, #store: #shared_confer) -> #result_type<()> {
+            async fn save(scope: &#shared_scope, #store: #shared_store) -> #result_type<()> {
                 let #table = #section_table;
                 #store.set_section_table(#section_lit, #table).await
             }
@@ -99,17 +99,17 @@ pub fn generate(module: Module, crate_path: syn::Path) -> Result<TokenStream> {
     })
 }
 
-/// Produces the synchronous `ConferTable` implementation for a parsed struct description.
+/// Produces the synchronous `ConfigTable` implementation for a parsed struct description.
 ///
-/// It uses the same field conversions as `ConferModule`, with the `path` argument in place of
+/// It uses the same field conversions as `ConfigScope`, with the `path` argument in place of
 /// the section name.
-pub fn generate_table(module: Module, crate_path: syn::Path) -> Result<TokenStream> {
-    let Module {
+pub fn generate_table(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
+    let Scope {
         ident,
         generics,
         fields,
         ..
-    } = module;
+    } = scope;
 
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
     let path = generated_local("path");
@@ -149,7 +149,7 @@ pub fn generate_table(module: Module, crate_path: syn::Path) -> Result<TokenStre
     };
 
     Ok(quote! {
-        impl #impl_generics #crate_path::confer_table::ConferTable for #ident #ty_generics #where_clause {
+        impl #impl_generics #crate_path::ConfigTable for #ident #ty_generics #where_clause {
             fn from_table(#from_params) -> #result_type<Self> {
                 #( #load_statements )*
                 Ok(Self { #(#struct_fields),* })
@@ -194,7 +194,7 @@ fn store_uses_path(kind: &FieldKind) -> bool {
 
 /// Name of the local holding a field's value inside the generated functions.
 ///
-/// The prefix keeps user field names (e.g. `store`, `module`) from shadowing the identifiers
+/// The prefix keeps user field names (e.g. `store`, `scope`) from shadowing the identifiers
 /// used by the generated code. The mixed-site span additionally hides the local from user
 /// expressions, which carry call-site spans.
 fn field_local(ident: &Ident) -> Ident {
@@ -330,14 +330,14 @@ fn scalar_insert(
     }
 }
 
-/// Path to a `ConferTable` method of the field's inner type.
+/// Path to a `ConfigTable` method of the field's inner type.
 ///
 /// The call carries the span of the inner type, so a missing implementation is reported there.
 fn table_method(table_type: &TableType, method: &str, crate_path: &syn::Path) -> TokenStream {
     let inner = &table_type.inner;
     let method = Ident::new(method, Span::call_site());
     quote_spanned! { inner.span() =>
-        <#inner as #crate_path::confer_table::ConferTable>::#method
+        <#inner as #crate_path::ConfigTable>::#method
     }
 }
 
@@ -472,7 +472,7 @@ fn absent_value(
     match (kind.container, default) {
         (_, Some(default)) => quote! { #default },
         (ContainerKind::Plain | ContainerKind::Vec, None) => {
-            quote! { return Err(#crate_path::ConferError::missing_key(#path, #key)) }
+            quote! { return Err(#crate_path::Error::missing_key(#path, #key)) }
         }
         (ContainerKind::Option | ContainerKind::OptionVec, None) => {
             quote! { ::core::option::Option::None }
@@ -581,13 +581,13 @@ fn integer_from_store(
     key: &LitStr,
     crate_path: &syn::Path,
 ) -> TokenStream {
-    let err = quote! { #crate_path::ConferError };
+    let err = quote! { #crate_path::Error };
     let ty = kind.type_tokens();
     quote! {
         match <#ty as ::core::convert::TryFrom<i64>>::try_from(value) {
             Ok(v) => v,
             Err(_) => {
-                return Err(#err::value_parse_owned(#path, #key, format!("value out of range for {}", stringify!(#ty))));
+                return Err(#err::value_parse(#path, #key, format!("value out of range for {}", stringify!(#ty))));
             }
         }
     }
@@ -603,15 +603,15 @@ fn float_from_store(
     match kind {
         FloatKind::F64 => quote! { value },
         FloatKind::F32 => {
-            let err = quote! { #crate_path::ConferError };
+            let err = quote! { #crate_path::Error };
             quote! {
                 {
                     let raw = value;
                     if !raw.is_finite() {
-                        return Err(#err::value_parse_owned(#path, #key, String::from("non-finite float")));
+                        return Err(#err::value_parse(#path, #key, String::from("non-finite float")));
                     }
                     if raw < f32::MIN as f64 || raw > f32::MAX as f64 {
-                        return Err(#err::value_parse_owned(#path, #key, String::from("value out of range for f32")));
+                        return Err(#err::value_parse(#path, #key, String::from("value out of range for f32")));
                     }
                     raw as f32
                 }
@@ -627,7 +627,7 @@ fn integer_vec_from_store(
     key: &LitStr,
     crate_path: &syn::Path,
 ) -> TokenStream {
-    let err = quote! { #crate_path::ConferError };
+    let err = quote! { #crate_path::Error };
     let scalar = kind.type_tokens();
     quote! {
         {
@@ -636,7 +636,7 @@ fn integer_vec_from_store(
                 match <#scalar as ::core::convert::TryFrom<i64>>::try_from(raw) {
                     Ok(v) => out.push(v),
                     Err(_) => {
-                        return Err(#err::value_parse_owned(#path, #key, format!("value out of range for {}", stringify!(#scalar))));
+                        return Err(#err::value_parse(#path, #key, format!("value out of range for {}", stringify!(#scalar))));
                     }
                 }
             }
@@ -655,16 +655,16 @@ fn float_vec_from_store(
     match kind {
         FloatKind::F64 => quote! { value },
         FloatKind::F32 => {
-            let err = quote! { #crate_path::ConferError };
+            let err = quote! { #crate_path::Error };
             quote! {
                 {
                     let mut out = Vec::with_capacity(value.len());
                     for raw in value.into_iter() {
                         if !raw.is_finite() {
-                            return Err(#err::value_parse_owned(#path, #key, String::from("non-finite float")));
+                            return Err(#err::value_parse(#path, #key, String::from("non-finite float")));
                         }
                         if raw < f32::MIN as f64 || raw > f32::MAX as f64 {
-                            return Err(#err::value_parse_owned(#path, #key, String::from("value out of range for f32")));
+                            return Err(#err::value_parse(#path, #key, String::from("value out of range for f32")));
                         }
                         out.push(raw as f32);
                     }
@@ -683,7 +683,7 @@ fn integer_to_store(
     key: &LitStr,
     crate_path: &syn::Path,
 ) -> TokenStream {
-    let err = quote! { #crate_path::ConferError };
+    let err = quote! { #crate_path::Error };
     match kind {
         IntegerKind::I64 | IntegerKind::Isize => quote! { #value as i64 },
         IntegerKind::I8 | IntegerKind::I16 | IntegerKind::I32 => quote! { i64::from(#value) },
@@ -693,7 +693,7 @@ fn integer_to_store(
                 {
                     let raw = #value as u64;
                     if raw > i64::MAX as u64 {
-                        return Err(#err::value_parse_owned(#path, #key, format!("value `{}` out of range for TOML integer", raw)));
+                        return Err(#err::value_parse(#path, #key, format!("value `{}` out of range for TOML integer", raw)));
                     }
                     raw as i64
                 }

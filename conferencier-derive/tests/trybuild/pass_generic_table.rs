@@ -1,13 +1,13 @@
 use std::marker::PhantomData;
 
-use conferencier::ConferTable;
+use conferencier::ConfigTable;
 
 #[allow(dead_code)]
-#[derive(conferencier_derive::ConferTable)]
+#[derive(conferencier_derive::ConfigTable)]
 struct Wrapper<T, U>
 where
-    T: ConferTable,
-    U: ConferTable,
+    T: ConfigTable,
+    U: ConfigTable,
 {
     #[confer(table)]
     inner: T,
@@ -20,13 +20,13 @@ where
 }
 
 #[allow(dead_code)]
-#[derive(conferencier_derive::ConferTable)]
+#[derive(conferencier_derive::ConfigTable)]
 struct Leaf {
     value: i64,
 }
 
 #[allow(dead_code)]
-#[derive(conferencier_derive::ConferModule)]
+#[derive(conferencier_derive::ConfigScope)]
 struct App {
     #[confer(table)]
     wrapped: Wrapper<Leaf, Leaf>,

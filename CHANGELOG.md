@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+- **Breaking:** Renamed the public API to `ConfigStore`, `ConfigScope`, `SharedScope`, `ConfigTable` and `Error`; `from_confer` is now `from_store`, the derive feature is `derive`, and the old public modules and `value_parse_owned` helper are removed. See [RFC-0005](docs/RFC-0005_api_redesign.md) for the full migration.
+
 ## [0.0.4] - 2026-11-11
 
 ### Added

@@ -2,7 +2,7 @@ async fn make() -> Vec<u8> {
     Vec::new()
 }
 
-#[derive(conferencier_derive::ConferModule)]
+#[derive(conferencier_derive::ConfigScope)]
 struct UsesAwait {
     #[confer(ignore = make().await)]
     buffer: Vec<u8>,

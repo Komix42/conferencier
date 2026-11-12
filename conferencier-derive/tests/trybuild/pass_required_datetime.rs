@@ -1,5 +1,5 @@
 // `Datetime` has no `Default` value; loaded fields of that type need none.
-#[derive(conferencier_derive::ConferModule)]
+#[derive(conferencier_derive::ConfigScope)]
 #[confer(section = "Clock")]
 struct Clock {
     started: conferencier::Datetime,

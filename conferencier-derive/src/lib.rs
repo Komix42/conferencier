@@ -1,8 +1,8 @@
-//! Derive macros `ConferModule` and `ConferTable` for
+//! Derive macros `ConfigScope` and `ConfigTable` for
 //! [conferencier](https://docs.rs/conferencier).
 //!
 //! Applications normally use these macros through `conferencier`, which re-exports them
-//! with its default `with-derive` feature. The generated code calls into `conferencier`,
+//! with its default `derive` feature. The generated code calls into `conferencier`,
 //! so it is always a dependency. The attribute reference is in the `conferencier`
 //! documentation.
 
@@ -16,15 +16,15 @@ use syn::DeriveInput;
 
 use crate::model::DeriveKind;
 
-/// Expands `#[derive(ConferModule)]` into load/save implementations driven by TOML metadata.
-#[proc_macro_derive(ConferModule, attributes(confer))]
-pub fn confer_module_derive(input: TokenStream) -> TokenStream {
-    expand(input, DeriveKind::Module)
+/// Expands `#[derive(ConfigScope)]` into load/save implementations driven by TOML metadata.
+#[proc_macro_derive(ConfigScope, attributes(confer))]
+pub fn scope_derive(input: TokenStream) -> TokenStream {
+    expand(input, DeriveKind::Scope)
 }
 
-/// Expands `#[derive(ConferTable)]` into conversions between the struct and a nested TOML table.
-#[proc_macro_derive(ConferTable, attributes(confer))]
-pub fn confer_table_derive(input: TokenStream) -> TokenStream {
+/// Expands `#[derive(ConfigTable)]` into conversions between the struct and a nested TOML table.
+#[proc_macro_derive(ConfigTable, attributes(confer))]
+pub fn table_derive(input: TokenStream) -> TokenStream {
     expand(input, DeriveKind::Table)
 }
 
@@ -39,11 +39,11 @@ fn expand(input: TokenStream, derive: DeriveKind) -> TokenStream {
 /// Parses the derive input and produces the final token stream.
 fn try_expand(input: TokenStream, derive: DeriveKind) -> syn::Result<TokenStream> {
     let input: DeriveInput = syn::parse(input)?;
-    let module = parser::parse_module(input, derive)?;
+    let scope = parser::parse_scope(input, derive)?;
     let crate_path = crate_path::conferencier_path()?;
     let tokens = match derive {
-        DeriveKind::Module => codegen::generate(module, crate_path)?,
-        DeriveKind::Table => codegen::generate_table(module, crate_path)?,
+        DeriveKind::Scope => codegen::generate(scope, crate_path)?,
+        DeriveKind::Table => codegen::generate_table(scope, crate_path)?,
     };
     Ok(tokens.into())
 }

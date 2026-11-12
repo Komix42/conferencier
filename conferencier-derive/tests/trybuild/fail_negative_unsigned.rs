@@ -1,4 +1,4 @@
-#[derive(conferencier_derive::ConferModule)]
+#[derive(conferencier_derive::ConfigScope)]
 struct NegativeUnsigned {
     #[confer(default = -1)]
     retries: u32,

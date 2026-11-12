@@ -6,7 +6,7 @@ fn trybuild_suite() {
     t.pass("tests/trybuild/pass_required_datetime.rs");
     t.pass("tests/trybuild/pass_ignore_expr.rs");
     t.pass("tests/trybuild/pass_ignored_key_collision.rs");
-    t.pass("tests/trybuild/pass_generic_module.rs");
+    t.pass("tests/trybuild/pass_generic_scope.rs");
     t.pass("tests/trybuild/pass_table_shapes.rs");
     t.pass("tests/trybuild/pass_generic_table.rs");
     t.compile_fail("tests/trybuild/fail_duplicate_keys.rs");

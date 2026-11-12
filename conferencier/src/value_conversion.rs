@@ -5,7 +5,7 @@ use std::str::FromStr;
 use toml::value::Datetime;
 use toml::{Table, Value};
 
-use crate::error::{ConferError, Result};
+use crate::error::{Error, Result};
 
 /// Human-readable description of a TOML [`Value`] type.
 pub fn describe(value: &Value) -> &'static str {
@@ -24,7 +24,7 @@ pub fn describe(value: &Value) -> &'static str {
 pub fn string(section: &str, key: &str, value: Value) -> Result<String> {
     match value {
         Value::String(s) => Ok(s),
-        other => Err(ConferError::type_mismatch(
+        other => Err(Error::type_mismatch(
             section,
             key,
             "string",
@@ -37,7 +37,7 @@ pub fn string(section: &str, key: &str, value: Value) -> Result<String> {
 pub fn integer(section: &str, key: &str, value: Value) -> Result<i64> {
     match value {
         Value::Integer(v) => Ok(v),
-        other => Err(ConferError::type_mismatch(
+        other => Err(Error::type_mismatch(
             section,
             key,
             "integer",
@@ -51,7 +51,7 @@ pub fn float(section: &str, key: &str, value: Value) -> Result<f64> {
     match value {
         Value::Float(v) => Ok(v),
         Value::Integer(v) => Ok(v as f64),
-        other => Err(ConferError::type_mismatch(
+        other => Err(Error::type_mismatch(
             section,
             key,
             "float",
@@ -64,7 +64,7 @@ pub fn float(section: &str, key: &str, value: Value) -> Result<f64> {
 pub fn boolean(section: &str, key: &str, value: Value) -> Result<bool> {
     match value {
         Value::Boolean(v) => Ok(v),
-        other => Err(ConferError::type_mismatch(
+        other => Err(Error::type_mismatch(
             section,
             key,
             "boolean",
@@ -78,7 +78,7 @@ pub fn datetime(section: &str, key: &str, value: Value) -> Result<Datetime> {
     match value {
         Value::Datetime(dt) => Ok(dt),
         Value::String(s) => parse_datetime(section, key, &s),
-        other => Err(ConferError::type_mismatch(
+        other => Err(Error::type_mismatch(
             section,
             key,
             "datetime",
@@ -91,7 +91,7 @@ pub fn datetime(section: &str, key: &str, value: Value) -> Result<Datetime> {
 pub fn table(section: &str, key: &str, value: Value) -> Result<Table> {
     match value {
         Value::Table(table) => Ok(table),
-        other => Err(ConferError::type_mismatch(
+        other => Err(Error::type_mismatch(
             section,
             key,
             "table",
@@ -104,7 +104,7 @@ pub fn table(section: &str, key: &str, value: Value) -> Result<Table> {
 pub fn array(section: &str, key: &str, value: Value) -> Result<Vec<Value>> {
     match value {
         Value::Array(items) => Ok(items),
-        other => Err(ConferError::type_mismatch(
+        other => Err(Error::type_mismatch(
             section,
             key,
             "array",
@@ -168,9 +168,8 @@ pub fn datetime_vec(section: &str, key: &str, value: Value) -> Result<Vec<Dateti
 
 /// Parses a TOML datetime from `raw`, annotating errors with section/key context.
 fn parse_datetime(section: &str, key: &str, raw: &str) -> Result<Datetime> {
-    Datetime::from_str(raw).map_err(|err| {
-        ConferError::value_parse(section, key, format!("failed to parse datetime: {err}"))
-    })
+    Datetime::from_str(raw)
+        .map_err(|err| Error::value_parse(section, key, format!("failed to parse datetime: {err}")))
 }
 
 /// Converts a TOML array to `Vec<T>` using the provided element conversion callback.
@@ -186,7 +185,7 @@ where
                     Ok(v) => out.push(v),
                     Err(err) => {
                         return Err(match err {
-                            ConferError::TypeMismatch { .. } | ConferError::ValueParse { .. } => {
+                            Error::TypeMismatch { .. } | Error::ValueParse { .. } => {
                                 annotate_with_index(err, index)
                             }
                             other => other,
@@ -196,7 +195,7 @@ where
             }
             Ok(out)
         }
-        other => Err(ConferError::type_mismatch(
+        other => Err(Error::type_mismatch(
             section,
             key,
             "array",
@@ -205,14 +204,9 @@ where
     }
 }
 
-/// Builds a [`ConferError::ValueParse`] describing an invalid array element type.
-fn element_mismatch(
-    section: &str,
-    key: &str,
-    expected: &'static str,
-    value: &Value,
-) -> ConferError {
-    ConferError::value_parse(
+/// Builds a [`Error::ValueParse`] describing an invalid array element type.
+fn element_mismatch(section: &str, key: &str, expected: &'static str, value: &Value) -> Error {
+    Error::value_parse(
         section,
         key,
         format!(
@@ -223,23 +217,23 @@ fn element_mismatch(
 }
 
 /// Adds index context to element-related errors to aid debugging.
-fn annotate_with_index(error: ConferError, index: usize) -> ConferError {
+fn annotate_with_index(error: Error, index: usize) -> Error {
     match error {
-        ConferError::ValueParse {
+        Error::ValueParse {
             section,
             key,
             message,
-        } => ConferError::ValueParse {
+        } => Error::ValueParse {
             section,
             key,
             message: format!("{message} (at index {index})"),
         },
-        ConferError::TypeMismatch {
+        Error::TypeMismatch {
             section,
             key,
             expected,
             found,
-        } => ConferError::TypeMismatch {
+        } => Error::TypeMismatch {
             section,
             key,
             expected,

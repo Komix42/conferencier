@@ -1,21 +1,21 @@
-//! The [`ConferError`] type and the [`Result`] alias used throughout the crate.
+//! The [`Error`] type and the [`Result`] alias used throughout the crate.
 
 use std::path::PathBuf;
 
 use thiserror::Error;
 
 /// Result type returned by conferencier operations.
-pub type Result<T> = std::result::Result<T, ConferError>;
+pub type Result<T> = std::result::Result<T, Error>;
 
-/// Errors returned by the [`Confer`](crate::store::Confer) store and by derived
-/// [`ConferModule`](crate::ConferModule) and [`ConferTable`](crate::ConferTable)
+/// Errors returned by the [`ConfigStore`](crate::store::ConfigStore) store and by derived
+/// [`ConfigScope`](crate::ConfigScope) and [`ConfigTable`](crate::ConfigTable)
 /// implementations.
 ///
 /// For keys inside nested tables, `section` holds the path of the table, such as
 /// `App.upstream[1]`. When a section exists but is not a table, `key` is `<section>`.
 #[derive(Debug, Error)]
 #[non_exhaustive]
-pub enum ConferError {
+pub enum Error {
     /// Reading or writing a file failed.
     #[error("I/O error (path: {path:?}): {source}")]
     Io {
@@ -65,13 +65,13 @@ pub enum ConferError {
     },
 }
 
-impl ConferError {
-    /// Creates a [`ConferError::Io`] with the provided optional path context.
+impl Error {
+    /// Creates a [`Error::Io`] with the provided optional path context.
     pub(crate) fn io_error(path: Option<PathBuf>, source: std::io::Error) -> Self {
         Self::Io { path, source }
     }
 
-    /// Convenience constructor for [`ConferError::MissingKey`].
+    /// Convenience constructor for [`Error::MissingKey`].
     pub fn missing_key(section: impl Into<String>, key: impl Into<String>) -> Self {
         Self::MissingKey {
             section: section.into(),
@@ -79,7 +79,7 @@ impl ConferError {
         }
     }
 
-    /// Convenience constructor for [`ConferError::TypeMismatch`].
+    /// Convenience constructor for [`Error::TypeMismatch`].
     pub fn type_mismatch(
         section: impl Into<String>,
         key: impl Into<String>,
@@ -94,31 +94,22 @@ impl ConferError {
         }
     }
 
-    /// Convenience constructor for [`ConferError::ValueParse`].
+    /// Convenience constructor for [`Error::ValueParse`].
     pub fn value_parse(
         section: impl Into<String>,
         key: impl Into<String>,
         message: impl Into<String>,
     ) -> Self {
-        Self::value_parse_owned(section, key, message.into())
-    }
-
-    /// Variant of [`ConferError::value_parse`] that accepts an owned [`String`].
-    pub fn value_parse_owned(
-        section: impl Into<String>,
-        key: impl Into<String>,
-        message: String,
-    ) -> Self {
         Self::ValueParse {
             section: section.into(),
             key: key.into(),
-            message,
+            message: message.into(),
         }
     }
 }
 
-impl From<std::io::Error> for ConferError {
-    /// Converts a plain [`std::io::Error`] into [`ConferError::Io`] without path context.
+impl From<std::io::Error> for Error {
+    /// Converts a plain [`std::io::Error`] into [`Error::Io`] without path context.
     fn from(source: std::io::Error) -> Self {
         Self::Io { path: None, source }
     }
@@ -127,23 +118,20 @@ impl From<std::io::Error> for ConferError {
 #[cfg(test)]
 mod tests {
     use std::error::Error as _;
-    use std::io::{Error, ErrorKind};
+    use std::io::{Error as IoError, ErrorKind};
 
     use super::*;
 
     #[test]
     fn value_errors_preserve_messages_and_have_no_source() {
         let cases = [
+            (Error::missing_key("App", "port"), "missing key App.port"),
             (
-                ConferError::missing_key("App", "port"),
-                "missing key App.port",
-            ),
-            (
-                ConferError::type_mismatch("App", "port", "integer", "string"),
+                Error::type_mismatch("App", "port", "integer", "string"),
                 "expected integer at App.port but found string",
             ),
             (
-                ConferError::value_parse("App", "port", "out of range"),
+                Error::value_parse("App", "port", "out of range"),
                 "invalid value at App.port: out of range",
             ),
         ];
@@ -157,15 +145,15 @@ mod tests {
     #[test]
     fn io_errors_preserve_path_and_source() {
         for path in [None, Some(PathBuf::from("config.toml"))] {
-            let source = Error::new(ErrorKind::NotFound, "missing config");
+            let source = IoError::new(ErrorKind::NotFound, "missing config");
             let expected = format!("I/O error (path: {path:?}): missing config");
             let error = match path {
-                Some(path) => ConferError::io_error(Some(path), source),
-                None => ConferError::from(source),
+                Some(path) => Error::io_error(Some(path), source),
+                None => Error::from(source),
             };
 
             assert_eq!(error.to_string(), expected);
-            let source = error.source().unwrap().downcast_ref::<Error>().unwrap();
+            let source = error.source().unwrap().downcast_ref::<IoError>().unwrap();
             assert_eq!(source.kind(), ErrorKind::NotFound);
             assert_eq!(source.to_string(), "missing config");
         }
@@ -175,9 +163,9 @@ mod tests {
     fn parse_error_conversion_preserves_source() {
         let source = toml::from_str::<toml::Table>("[broken").unwrap_err();
         let message = source.to_string();
-        let error = ConferError::from(source);
+        let error = Error::from(source);
 
-        assert!(matches!(error, ConferError::Parse(_)));
+        assert!(matches!(error, Error::Parse(_)));
         assert_eq!(
             error.to_string(),
             format!("failed to parse TOML: {message}")
@@ -189,9 +177,9 @@ mod tests {
     fn serialize_error_conversion_preserves_source() {
         let source = toml::to_string(&"not a table").unwrap_err();
         let message = source.to_string();
-        let error = ConferError::from(source);
+        let error = Error::from(source);
 
-        assert!(matches!(error, ConferError::Serialize(_)));
+        assert!(matches!(error, Error::Serialize(_)));
         assert_eq!(
             error.to_string(),
             format!("failed to serialize TOML: {message}")

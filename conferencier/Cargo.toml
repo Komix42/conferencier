@@ -12,8 +12,8 @@ keywords = ["configuration", "toml", "async", "tokio", "derive"]
 categories = ["config", "asynchronous", "data-structures"]
 
 [features]
-default = ["with-derive"]
-with-derive = ["conferencier-derive"]
+default = ["derive"]
+derive = ["dep:conferencier-derive"]
 
 [dependencies]
 async-trait = "0.1"
@@ -30,24 +30,24 @@ tokio = { version = "1.39", features = ["macros", "rt", "rt-multi-thread"] }
 
 [[example]]
 name = "basic_usage"
-required-features = ["with-derive"]
+required-features = ["derive"]
 
 [[example]]
 name = "advanced_usage"
-required-features = ["with-derive"]
+required-features = ["derive"]
 
 [[example]]
 name = "nested_tables"
-required-features = ["with-derive"]
+required-features = ["derive"]
 
 [[test]]
-name = "module_integration"
-required-features = ["with-derive"]
+name = "scope_integration"
+required-features = ["derive"]
 
 [[test]]
-name = "module_snapshots"
-required-features = ["with-derive"]
+name = "scope_snapshots"
+required-features = ["derive"]
 
 [[test]]
 name = "nested_tables"
-required-features = ["with-derive"]
+required-features = ["derive"]

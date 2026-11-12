@@ -1,4 +1,4 @@
-#[derive(conferencier_derive::ConferModule)]
+#[derive(conferencier_derive::ConfigScope)]
 struct ConflictingAttrs {
     #[confer(default = 5, init = "Default::default()")]
     value: i32,

@@ -1,28 +1,28 @@
-error: unsupported attribute on struct for #[derive(ConferTable)]
+error: unsupported attribute on struct for #[derive(ConfigTable)]
  --> tests/trybuild/fail_table_struct.rs:2:10
   |
 2 | #[confer(rename = "Other")]
   |          ^^^^^^
 
-error: #[derive(ConferTable)] can only be applied to structs
+error: #[derive(ConfigTable)] can only be applied to structs
  --> tests/trybuild/fail_table_struct.rs:8:6
   |
 8 | enum Enum {
   |      ^^^^
 
-error: #[derive(ConferTable)] requires named fields
+error: #[derive(ConfigTable)] requires named fields
   --> tests/trybuild/fail_table_struct.rs:13:8
    |
 13 | struct Tuple(i32);
    |        ^^^^^
 
-error: #[derive(ConferTable)] requires named fields
+error: #[derive(ConfigTable)] requires named fields
   --> tests/trybuild/fail_table_struct.rs:16:8
    |
 16 | struct Unit;
    |        ^^^^
 
-error: unsupported attribute for #[derive(ConferTable)]
+error: unsupported attribute for #[derive(ConfigTable)]
   --> tests/trybuild/fail_table_struct.rs:20:14
    |
 20 |     #[confer(flatten)]

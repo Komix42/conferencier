@@ -1,9 +1,9 @@
 use conferencier::toml::{Table, Value};
-use conferencier::{Confer, ConferError, Result};
+use conferencier::{ConfigStore, Error, Result};
 
 #[tokio::test]
 async fn load_and_save_roundtrip() -> Result<()> {
-    let store = Confer::from_string("[App]\nname = \"demo\"\n")?;
+    let store = ConfigStore::from_string("[App]\nname = \"demo\"\n")?;
     assert_eq!(store.get_string("App", "name").await?, "demo");
 
     store.set_integer("App", "port", 8080).await?;
@@ -20,7 +20,7 @@ async fn load_and_save_roundtrip() -> Result<()> {
 
 #[tokio::test]
 async fn legacy_toml_values_and_raw_api_roundtrip() -> Result<()> {
-    let store = Confer::from_string(
+    let store = ConfigStore::from_string(
         r#"[App]
 name = "demo"
 minimum = -9223372036854775808
@@ -46,7 +46,7 @@ nested = { host = "localhost", port = 8080 }
 
     let before: Table = store.get_section_table("App").await.unwrap();
     let serialized = store.save_str().await?;
-    let restored = Confer::from_string(&serialized)?;
+    let restored = ConfigStore::from_string(&serialized)?;
 
     assert_eq!(restored.get_section_table("App").await, Some(before));
     Ok(())
@@ -54,7 +54,7 @@ nested = { host = "localhost", port = 8080 }
 
 #[tokio::test]
 async fn toml_1_1_datetimes_preserve_omitted_components() -> Result<()> {
-    let store = Confer::from_string(
+    let store = ConfigStore::from_string(
         r#"[Schedule]
 minute = 07:30
 second = 07:30:00
@@ -88,7 +88,7 @@ times = ["07:30", 08:45:00.125]
         vec!["07:30", "08:45:00.125"]
     );
 
-    let restored = Confer::from_string(&store.save_str().await?)?;
+    let restored = ConfigStore::from_string(&store.save_str().await?)?;
     assert_eq!(
         restored.get_section_table("Schedule").await,
         store.get_section_table("Schedule").await
@@ -101,7 +101,7 @@ fn malformed_radix_numbers_return_parse_errors() {
     for literal in ["0x_g", "0b_2", "0o_8"] {
         let source = format!("[App]\nvalue = {literal}\n");
         assert!(
-            matches!(Confer::from_string(&source), Err(ConferError::Parse(_))),
+            matches!(ConfigStore::from_string(&source), Err(Error::Parse(_))),
             "expected a parse error for {literal}"
         );
     }
@@ -109,7 +109,7 @@ fn malformed_radix_numbers_return_parse_errors() {
 
 #[tokio::test]
 async fn concurrent_readers_and_writer() -> Result<()> {
-    let store = Confer::new();
+    let store = ConfigStore::new();
     store.add_section("Metrics").await?;
 
     let writer = store.clone();

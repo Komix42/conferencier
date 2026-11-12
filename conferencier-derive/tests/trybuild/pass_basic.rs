@@ -1,4 +1,4 @@
-#[derive(conferencier_derive::ConferModule)]
+#[derive(conferencier_derive::ConfigScope)]
 #[confer(section = "Auth")]
 struct AuthConfig {
     #[confer(default = "admin")]

@@ -7,9 +7,9 @@ error[E0425]: cannot find value `table` in this scope
 help: an identifier with the same name is defined here, but is not accessible due to macro hygiene
  --> tests/trybuild/fail_table_ignore_expr_scope.rs:2:10
   |
-2 | #[derive(conferencier_derive::ConferTable)]
+2 | #[derive(conferencier_derive::ConfigTable)]
   |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  = note: this error originates in the derive macro `conferencier_derive::ConferTable` (in Nightly builds, run with -Z macro-backtrace for more info)
+  = note: this error originates in the derive macro `conferencier_derive::ConfigTable` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error[E0423]: cannot find value `path` in this scope
   --> tests/trybuild/fail_table_ignore_expr_scope.rs:12:23
@@ -28,6 +28,6 @@ error[E0425]: cannot find value `__confer_port` in this scope
 help: an identifier with the same name is defined here, but is not accessible due to macro hygiene
   --> tests/trybuild/fail_table_ignore_expr_scope.rs:16:10
    |
-16 | #[derive(conferencier_derive::ConferTable)]
+16 | #[derive(conferencier_derive::ConfigTable)]
    |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-   = note: this error originates in the derive macro `conferencier_derive::ConferTable` (in Nightly builds, run with -Z macro-backtrace for more info)
+   = note: this error originates in the derive macro `conferencier_derive::ConfigTable` (in Nightly builds, run with -Z macro-backtrace for more info)

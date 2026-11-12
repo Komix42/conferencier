@@ -2,7 +2,7 @@
 // so users don't need `toml` as a direct dependency.
 mod toml {}
 
-#[derive(conferencier_derive::ConferModule)]
+#[derive(conferencier_derive::ConfigScope)]
 #[confer(section = "Schedule")]
 struct Schedule {
     #[confer(default = "2024-02-03T00:00:00Z")]
