@@ -1,7 +1,7 @@
 # RFC-0005: Public API redesign: naming, shared store and async boundaries
 
 Date: 2026-11-12
-Status: Draft
+Status: Approved
 Author: Komix42 <komix[at]ignore.cz>
 Target release: 0.0.5
 Amends: [RFC-0001](./RFC-0001_baseline_architecture.md), [RFC-0003](./RFC-0003_field_attributes.md), [RFC-0004](./RFC-0004_nested_tables.md)
@@ -152,9 +152,9 @@ Non-goals:
   - The attribute `#[confer(...)]` and all its arguments. It is the crate-specific derive helper attribute. Like `#[serde(...)]`, it abbreviates the crate name, while a generic name such as `#[config(...)]` could be read by another derive on the same struct.
   - `Result`, `load`, `save`, `from_table`, `to_table`, the typed getters and setters, and the error constructors listed in N3.
 - **N7 — The default section name is the struct name.** Without `section`, `ConfigScope` uses the full struct identifier as the section name, without a raw identifier's `r#` prefix: `AppConfig` owns `[AppConfig]`. An explicit `section` is used as written. The old rule that stripped a leading `Confer` word is removed.
-  - **Temporary migration guard.** From 0.0.5 through the remaining 0.0.x releases, `#[derive(ConfigScope)]` rejects an implicit section if the unraw'd struct name starts with `Confer` immediately followed by an uppercase Unicode character. This is exactly the old stripping condition: `ConferApp` and `r#ConferApp` are affected; `ConferenceSettings`, `Confer` and `Confer_App` are not. An explicit `#[confer(section = "...")]` is accepted for any struct name. The guard applies only to `ConfigScope`, not to a `ConfigTable`-only derive.
+Ok  - **Temporary migration guard.** From 0.0.5 through the last 0.1.x release, `#[derive(ConfigScope)]` rejects an implicit section if the unraw'd struct name starts with `Confer` immediately followed by an uppercase Unicode character. This is exactly the old stripping condition: `ConferApp` and `r#ConferApp` are affected; `ConferenceSettings`, `Confer` and `Confer_App` are not. An explicit `#[confer(section = "...")]` is accepted for any struct name. The guard applies only to `ConfigScope`, not to a `ConfigTable`-only derive.
   - The compile error explains the old and new names and asks the user to select a section explicitly: for `ConferApp`, `#[confer(section = "App")]` preserves the old mapping, while `#[confer(section = "ConferApp")]` selects the full name.
-  - The guard is removed in 0.1.0. After its removal, `ConferApp` without an explicit section uses `[ConferApp]`. The 0.1.0 migration notes must warn that an upgrade directly from 0.0.4 bypasses the guard; users who need the old mapping must add an explicit section.
+  - The guard is removed in 0.2.0, so it covers both the remaining 0.0.x releases and the whole 0.1.x series, including users who migrate only once 0.1.0 is out. After its removal, `ConferApp` without an explicit section uses `[ConferApp]`. The 0.2.0 migration notes must warn that an upgrade directly from 0.0.4 bypasses the guard; users who need the old mapping must add an explicit section.
 
 The documentation uses "scope" instead of "module" throughout, including the messages of the derive.
 
@@ -240,7 +240,7 @@ The documentation uses "scope" instead of "module" throughout, including the mes
 | struct `ConferApp` relying on the default section `[App]` | add `#[confer(section = "App")]` to keep it, or add `#[confer(section = "ConferApp")]` and rename the TOML section to `[ConferApp]` (N7) |
 
 - Existing `#[confer(...)]` attributes and TOML files need no changes unless a scope is affected by N7. For such a scope, explicitly choosing the old name preserves its TOML section; choosing the full struct name instead also requires updating the TOML file.
-- Removed names, changed signatures and an affected `ConfigScope` derive without an explicit section cause errors until migrated. The guard cannot check whether a chosen section matches the actual TOML file. It does not apply to manual trait implementations and, once removed in 0.1.0, will not protect an upgrade that skips the guarded releases.
+- Removed names, changed signatures and an affected `ConfigScope` derive without an explicit section cause errors until migrated. The guard cannot check whether a chosen section matches the actual TOML file. It does not apply to manual trait implementations and, once removed in 0.2.0, will not protect an upgrade that skips the guarded releases.
 - A manual `ConferTable` implementation only needs the new names. A manual `ConferModule` implementation drops `#[async_trait]`, makes `from_store` synchronous and keeps `async fn` for `load` and `save`.
 
 ## Compile-time diagnostics
@@ -274,7 +274,7 @@ The exact wording is fixed by the `trybuild` snapshots.
 ## Compatibility
 
 - **Breaking** for users of the renamed items and changed signatures, listed as **Breaking:** in the changelog with the table from [Migration](#migration).
-- During the guarded 0.0.x releases, affected derives must select a section explicitly instead of silently adopting the new name. The compiler cannot validate the choice against an existing TOML document. The changelog calls N7 out as its own **Breaking:** entry, including the risk of bypassing the guard when upgrading directly to 0.1.0.
+- During the guarded 0.0.x and 0.1.x releases, affected derives must select a section explicitly instead of silently adopting the new name. The compiler cannot validate the choice against an existing TOML document. The changelog calls N7 out as its own **Breaking:** entry, including the risk of bypassing the guard when upgrading directly to 0.2.0 or later.
 - Unchanged: TOML files and section names (N7 aside), the field mapping, the semantics of `load` and `save` (RFC-0004 R1–R7), the attributes, the error variants and messages, and the MSRV (1.85).
 - Applications that disable the default features and enable `with-derive` explicitly rename it to `derive`. Users who depend on `conferencier-derive` directly change only the macro names.
 - Dependencies: `async-trait` is removed. Tokio is still required, for the scope lock and for file I/O.
@@ -330,7 +330,7 @@ All milestones land in 0.0.5; RFC-0006 and RFC-0007 follow on top of them.
 
 - Root `README.md` and `conferencier/README.md` (which runs as a doctest):
   - The new names and the term "scope" throughout, including the highlights, the quick start, the derive attributes and troubleshooting.
-  - The default section name and temporary migration guard, with both explicit section choices and the planned removal in 0.1.0 (N7).
+  - The default section name and temporary migration guard, with both explicit section choices and the planned removal in 0.2.0 (N7).
   - "Reloading configuration": the example takes `&ConfigStore` and `&SharedScope<D>`.
   - "Configuration and runtime state": the example and the paragraph about guards of the scope lock. The store hands out no guards, so the paragraph needs no counterpart for the store.
   - The store as a shared handle: a clone shares the data.
@@ -339,8 +339,19 @@ All milestones land in 0.0.5; RFC-0006 and RFC-0007 follow on top of them.
 - `conferencier-derive/README.md`: the macro names and the feature.
 - Rustdoc of `ConfigStore` (handle semantics, which methods are async and why, the absence rule of S4), `ConfigScope`, `SharedScope`, `ConfigTable` and `Error`.
   - State S5's document-size, contention and fairness assumptions, including that changing to an async lock is not a transparent backend switch.
-  - In `ConfigStore::from_file`, show `ConfigStore::from_str(&std::fs::read_to_string(path)?)` as the pre-runtime loading recipe. Explain that this standard-library read does not attach the path to `Error::Io`; do not restore a blocking file constructor.
-- `CHANGELOG.md` (Unreleased): **Breaking:** entries with the table from [Migration](#migration), a separate **Breaking:** entry for N7 and its temporary guard, and the removed `async-trait` dependency. The 0.1.0 release notes must also warn users upgrading directly from 0.0.4 that the guard no longer applies and that `ConferApp` without an explicit section reads `[ConferApp]`, not `[App]`.
+  - In `ConfigStore::from_file`, show `ConfigStore::from_str(&std::fs::read_to_string(path)?)` as the pre-runtime loading recipe. Explain that this standard-library read does not attach the path to `Error::Io`, and show how to attach it through the public variant, without a new helper; do not restore a blocking file constructor:
+
+    ```rust
+    use conferencier::{ConfigStore, Error};
+
+    let path = std::path::Path::new("config.toml");
+    let source = std::fs::read_to_string(path).map_err(|source| Error::Io {
+        path: Some(path.to_path_buf()),
+        source,
+    })?;
+    let store = ConfigStore::from_str(&source)?;
+    ```
+- `CHANGELOG.md` (Unreleased): **Breaking:** entries with the table from [Migration](#migration), a separate **Breaking:** entry for N7 and its temporary guard, and the removed `async-trait` dependency. The 0.2.0 release notes must also warn users upgrading directly from 0.0.4 that the guard no longer applies and that `ConferApp` without an explicit section reads `[ConferApp]`, not `[App]`.
 - `.github/ISSUE_TEMPLATE/bug_report.yml`: the feature name in the "Features" dropdown.
 - `docs/BACKLOG.md`: the entries use the new names, and the "Public API redesign" entry moves to Done.
 - RFC-0001, RFC-0003 and RFC-0004 get RFC-0005 in their `Amended by:` header line when this RFC is marked Implemented. Their text, including the old names, stays unchanged; the amended parts are listed in [Document Scope](#document-scope) only. [IMPL-001](./IMPL_001_baseline.md) stays unchanged.
@@ -362,4 +373,4 @@ All milestones land in 0.0.5; RFC-0006 and RFC-0007 follow on top of them.
 6. **Default section name** → the stripping rule is removed (N7); without `section`, the section is the struct name, subject to the temporary migration guard. The old rule needed a word-boundary fix and edge-case notes (`ConferApp` → `App`, but `ConferenceSettings` and `Confer` stay intact). Keeping it was rejected because the naming convention it served is gone. Stripping a trailing `Config` word instead (`AppConfig` → `[App]`) was rejected because it would rebuild the same confusion and silently rename more sections.
 7. **Final naming sweep** → a review of the whole public surface against this RFC produced two changes and one written-down rule: `section_exists` became `has_section`, the only noun-first name in the verb-first section family; `remove_section` returns `()`, because it has no failure path, while `remove_key` keeps its honest `Result`; and the peek-versus-require absence rule is stated in S4 and in the rustdoc of `ConfigStore`. Subsequent feedback added `set_section` to that rule and changed `add_section` to `ensure_section` to make its idempotence explicit (S3). Checked and deliberately kept: the `_vec` suffix of the typed accessors (the value type is named after TOML — `string`, `integer`, `boolean` — and the container after Rust), `to_table` next to `save` (a pure conversion versus a write into the store), `list_sections` without a `Result` next to `list_keys` with one (sections cannot fail, keys require a table), `save_str` returning `Result<String>` (serialization can fail), and the `Error` variants `Parse` (document) versus `ValueParse` (value).
 8. **Synchronous core with shared async helpers** → not added without a concrete need to modify and save under one guard. This is separate from rejecting plain-value scopes; the trade-offs are recorded in [Alternatives considered](#alternatives-considered), item 12.
-9. **Migration guard** → require explicit section names only for derives affected by the old `Confer` prefix rule during 0.0.x, then remove the guard in 0.1.0 (N7). Requiring `section` for every scope was rejected. Direct upgrades from 0.0.4 to 0.1.0 must be warned separately because they skip the guard.
+9. **Migration guard** → require explicit section names only for derives affected by the old `Confer` prefix rule from 0.0.5 through 0.1.x, then remove the guard in 0.2.0 (N7). Review feedback asked to keep it longer than the originally planned removal in 0.1.0, so that users who migrate only to 0.1.0 are still protected; the guard costs one compile-time check. Requiring `section` for every scope was rejected. Direct upgrades from 0.0.4 to 0.2.0 or later must be warned separately because they skip the guard.
