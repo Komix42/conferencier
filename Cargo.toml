@@ -4,7 +4,7 @@ default-members = ["conferencier"]
 resolver = "3"
 
 [workspace.package]
-version = "0.0.4"
+version = "0.0.5"
 edition = "2024"
 rust-version = "1.85"
 authors = ["Komix42 <komix@ignore.cz>"]
@@ -13,5 +13,5 @@ repository = "https://github.com/Komix42/conferencier"
 
 [workspace.dependencies]
 # Keep the version in sync with `workspace.package.version`.
-conferencier-derive = { version = "0.0.4", path = "conferencier-derive" }
+conferencier-derive = { version = "0.0.5", path = "conferencier-derive" }
 toml = "1.2"

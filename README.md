@@ -30,7 +30,7 @@ If you need any of these, a general-purpose configuration crate is a better fit.
 
    ```toml
    [dependencies]
-   conferencier = "0.0.4"
+   conferencier = "0.0.5"
    tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
    ```
 

@@ -8,15 +8,15 @@ End users typically depend only on `conferencier`, which re-exports both macros 
 
 ```toml
 [dependencies]
-conferencier = "0.0.4"
+conferencier = "0.0.5"
 ```
 
 Direct use is possible if you prefer to import the macro explicitly. The generated code always calls into `conferencier`, so that crate stays a dependency (here without its default `with-derive` feature):
 
 ```toml
 [dependencies]
-conferencier = { version = "0.0.4", default-features = false }
-conferencier-derive = "0.0.4"
+conferencier = { version = "0.0.5", default-features = false }
+conferencier-derive = "0.0.5"
 ```
 
 ```rust
