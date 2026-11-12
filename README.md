@@ -280,7 +280,7 @@ Conferencier is primarily meant for reading configuration. Saving works, but it 
 
 - `ConfigStore::save_str` and `ConfigStore::save_file` regenerate the whole document from the stored values. Comments are lost, keys may be reordered, inline tables become `[section.table]` headers, and values are written in canonical notation (for example `0x1F90` becomes `8080` and `'text'` becomes `"text"`).
 - A scope's `save` owns its section, including all tables nested in it: it removes every key and sub-table that is not mapped to a non-ignored field, at any depth (also inside tables mapped with `#[confer(table)]`). A misspelled key such as `prot = 9090` is therefore ignored on load (`port` falls back to its default) and deleted by the next save. Other sections are not changed; keep data that no scope owns in a separate section.
-- Serialize saves to the same file, even through cloned stores: `save_file` currently uses a fixed `<filename>.tmp` sibling, so overlapping calls can interfere. Replacement and durability limitations are described in the [API reference](https://docs.rs/conferencier/latest/conferencier/struct.ConfigStore.html#method.save_file).
+- Concurrent `save_file` calls to the same file, even through cloned stores, are safe: each call writes its own temporary file, so each successful call installs one complete snapshot, but which call wins is unspecified. Serialize saves yourself if their order matters. Replacement and durability limitations are described in the [API reference](https://docs.rs/conferencier/latest/conferencier/struct.ConfigStore.html#method.save_file).
 
 If people edit the configuration file by hand, prefer to only load it, and use saving mainly to generate an initial configuration file.
 

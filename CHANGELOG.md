@@ -48,6 +48,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 Manual scope implementations drop `#[async_trait]`, make `from_store` synchronous, borrow `&ConfigStore`, and keep `async fn load` and `async fn save`. Manual table implementations only need the new names. Existing helper attributes keep the `#[confer(...)]` name. See [RFC-0005](docs/RFC-0005_api_redesign.md) for the full rationale.
 
+### Fixed
+- Concurrent `save_file` calls to the same path, including calls through cloned stores, no longer corrupt the file or fail. Every call writes its own uniquely named temporary file instead of a shared `<filename>.tmp`, so each successful call installs one complete snapshot; which of several concurrent calls wins is unspecified. The temporary file is also removed when the write or rename fails.
+
 ## [0.0.4] - 2026-11-11
 
 ### Added

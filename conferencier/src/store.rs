@@ -1,6 +1,7 @@
-use std::io::ErrorKind;
+use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use tokio::fs;
@@ -23,7 +24,8 @@ use crate::value_conversion;
 /// # Synchronous and asynchronous methods
 ///
 /// Only file I/O is async: [`from_file`](Self::from_file), [`load_file`](Self::load_file)
-/// and [`save_file`](Self::save_file) use [`tokio::fs`]. Every other method works only on
+/// and [`save_file`](Self::save_file) run their file operations on Tokio's blocking thread
+/// pool. Every other method works only on
 /// the in-memory document and is synchronous, so it can also be called before the runtime
 /// starts or from synchronous code on a runtime thread.
 ///
@@ -199,14 +201,17 @@ impl ConfigStore {
     ///
     /// # Write coordination and replacement
     ///
-    /// Serialize calls that save to the same target, including calls through cloned
-    /// handles: the current implementation uses a fixed `<filename>.tmp` sibling,
-    /// so overlapping writes can interfere. Do not use that sibling for another file.
+    /// Every call writes its own temporary sibling named
+    /// `<file name>.<process id>.<counter>.tmp`, so concurrent calls to the same target,
+    /// including calls through cloned handles, do not interfere: each successful call
+    /// installs one complete snapshot. Which of several concurrent calls wins is
+    /// unspecified; an application that needs an order serializes its own saves.
     ///
     /// Replacement uses a rename. If the platform reports that the target already
     /// exists, it is removed before retrying the rename; atomic replacement is
     /// therefore not guaranteed on that path. This method does not promise crash
-    /// durability, and an I/O failure can leave a temporary file behind.
+    /// durability. The temporary file is removed when a write or rename fails, but a
+    /// crash can leave it behind.
     ///
     /// # Errors
     ///
@@ -215,7 +220,7 @@ impl ConfigStore {
     /// or temporary path. An I/O failure does not change the in-memory store.
     pub async fn save_file(&self, path: impl AsRef<Path> + Send + Sync) -> Result<()> {
         let serialized = self.save_str()?;
-        write_atomic(path.as_ref(), serialized.as_bytes()).await
+        write_atomic(path.as_ref(), serialized).await
     }
 
     /// Returns an owned snapshot of the raw TOML value at `section` and `key`.
@@ -730,36 +735,79 @@ async fn read_file(path: &Path) -> Result<String> {
 }
 
 /// Atomically persists `contents` to `path`, ensuring the file is fully replaced on success.
-async fn write_atomic(path: &Path, contents: &[u8]) -> Result<()> {
-    let tmp_path = temporary_path(path);
-    fs::write(&tmp_path, contents)
+///
+/// Every call writes its own temporary sibling, so concurrent saves to the same path never
+/// share a temporary file; on error the temporary file is removed. The blocking file
+/// operations run on Tokio's blocking pool, like those of [`tokio::fs`].
+async fn write_atomic(path: &Path, contents: String) -> Result<()> {
+    let path = path.to_path_buf();
+    tokio::task::spawn_blocking(move || write_atomic_blocking(&path, contents.as_bytes()))
         .await
-        .map_err(|err| Error::io_error(Some(tmp_path.clone()), err))?;
+        .map_err(|err| Error::from(std::io::Error::other(err)))?
+}
 
-    match fs::rename(&tmp_path, path).await {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == ErrorKind::AlreadyExists => {
-            fs::remove_file(path)
-                .await
-                .map_err(|remove_err| Error::io_error(Some(path.to_path_buf()), remove_err))?;
-            fs::rename(&tmp_path, path)
-                .await
-                .map_err(|err| Error::io_error(Some(path.to_path_buf()), err))
-        }
-        Err(err) => {
-            let _ = fs::remove_file(&tmp_path).await;
-            Err(Error::io_error(Some(path.to_path_buf()), err))
+fn write_atomic_blocking(path: &Path, contents: &[u8]) -> Result<()> {
+    let (tmp_path, file) = create_temporary(path)?;
+    let result = write_and_replace(file, &tmp_path, path, contents);
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp_path);
+    }
+    result
+}
+
+/// Creates a new temporary sibling of `path`, never opening an existing file.
+fn create_temporary(path: &Path) -> Result<(PathBuf, std::fs::File)> {
+    const ATTEMPTS: usize = 16;
+    let mut attempt = 1;
+    loop {
+        let tmp_path = temporary_path(path);
+        let opened = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp_path);
+        match opened {
+            Ok(file) => return Ok((tmp_path, file)),
+            // A stale file from an earlier process can hold the name; the next name differs.
+            Err(err) if err.kind() == ErrorKind::AlreadyExists && attempt < ATTEMPTS => {
+                attempt += 1;
+            }
+            Err(err) => return Err(Error::io_error(Some(tmp_path), err)),
         }
     }
 }
 
-/// Computes a temporary sibling path used during atomic write operations.
+fn write_and_replace(
+    mut file: std::fs::File,
+    tmp_path: &Path,
+    path: &Path,
+    contents: &[u8],
+) -> Result<()> {
+    file.write_all(contents)
+        .map_err(|err| Error::io_error(Some(tmp_path.to_path_buf()), err))?;
+    // Close the handle before the rename, which Windows requires.
+    drop(file);
+
+    let path_error = |err| Error::io_error(Some(path.to_path_buf()), err);
+    match std::fs::rename(tmp_path, path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == ErrorKind::AlreadyExists => {
+            std::fs::remove_file(path).map_err(path_error)?;
+            std::fs::rename(tmp_path, path).map_err(path_error)
+        }
+        Err(err) => Err(path_error(err)),
+    }
+}
+
+/// Computes a unique temporary sibling path, `<file name>.<process id>.<counter>.tmp`.
 fn temporary_path(path: &Path) -> PathBuf {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
     let mut file_name = path
         .file_name()
         .map(|name| name.to_os_string())
         .unwrap_or_else(|| "conferencier".into());
-    file_name.push(".tmp");
+    let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
+    file_name.push(format!(".{}.{counter}.tmp", std::process::id()));
 
     path.with_file_name(file_name)
 }
@@ -985,6 +1033,40 @@ mod tests {
 
         let file_contents = tokio::fs::read_to_string(&path_buf).await?;
         assert!(file_contents.contains("enabled = false"));
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_saves_install_complete_snapshots() -> Result<()> {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("config.toml");
+
+        let mut snapshots = Vec::new();
+        let mut tasks = Vec::new();
+        for writer in 0..4_i64 {
+            let store = ConfigStore::new();
+            store.set_integer("App", "writer", writer)?;
+            store.set_string("App", "payload", "x".repeat(64 * 1024))?;
+            snapshots.push(store.save_str()?);
+
+            let path = path.clone();
+            tasks.push(tokio::spawn(async move {
+                for _ in 0..50 {
+                    store.save_file(&path).await?;
+                }
+                Ok::<(), Error>(())
+            }));
+        }
+        for task in tasks {
+            task.await.expect("save task panicked")?;
+        }
+
+        let saved = std::fs::read_to_string(&path)?;
+        assert!(snapshots.contains(&saved), "the file mixes several saves");
+        let entries: Vec<_> = std::fs::read_dir(dir.path())?
+            .map(|entry| entry.map(|entry| entry.file_name()))
+            .collect::<std::io::Result<_>>()?;
+        assert_eq!(entries, ["config.toml"], "temporary files were left behind");
         Ok(())
     }
 }

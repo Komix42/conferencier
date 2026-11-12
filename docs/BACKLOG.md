@@ -18,7 +18,6 @@ These entries are planned for the 0.0.5 release. The API redesign is implemented
 
 - **Temporary section-name migration guard.** Following [RFC-0005](./RFC-0005_api_redesign.md), `ConfigScope` derives in 0.0.5 and later 0.0.x and 0.1.x releases whose implicit section was affected by the old `Confer` prefix rule require an explicit section. Remove the guard in 0.2.0, and warn in its migration notes that a direct upgrade from 0.0.4 bypasses the guard. Origin: RFC-0005 N7.
 - **Unused `serde` dependency.** `conferencier` depends on `serde` with the `derive` feature, but no code uses it; TOML values are converted through the `toml` crate. Its `derive` feature is the only reason why every build of `conferencier` compiles the `serde_derive` proc-macro. Direction: remove it, and add it back if an idea such as a `#[confer(serde)]` escape hatch (see [Conversion hooks](#derive-attributes-and-field-types)) needs it. Origin: a review of the workspace after the 0.0.4 release.
-- **Bug: concurrent `save_file` calls can corrupt the file.** The temporary file of the write has a fixed name derived from the target (`context.toml` → `context.toml.tmp`), so concurrent saves to the same path write into the same temporary file and rename it while another save is still writing to it. In an experiment with four tasks that each changed their own section and saved one shared store (300 rounds), 338 of 1200 saves returned an error and the target file was left unparsable 32 times. Direction: a unique temporary name per save, for example from the process id and a counter. The intended guarantee after the fix is that each successful save installs one complete snapshot; which of several concurrent saves wins stays unspecified, and an application that needs an order serializes its own saves — coordinating writers is its job, not the store's. Until fixed, the rustdoc requires serializing saves to the same path and explains the platform-specific replacement limitations. A plain bug fix with no API change, recorded in the changelog under *Fixed*; no RFC needed, and whether it lands in 0.0.5 is decided separately. Origin: a review of `save_file` against a multi-component application during the RFC-0005 discussion.
 
 ## Ideas
 
@@ -53,4 +52,5 @@ The README's [Scope](../README.md#scope) lists these as intentionally left out. 
 ## Done
 
 - **Public API redesign**: implemented in 0.0.5 — names, shared store and async boundaries ([RFC-0005](./RFC-0005_api_redesign.md)).
+- **Bug: concurrent `save_file` calls can corrupt the file**: fixed in 0.0.5 with a unique temporary file per save.
 - **Unused `SectionGuard`**: removed in 0.0.4. Origin: [IMPL-001](./IMPL_001_baseline.md#7-known-limitations--follow-up-ideas).
