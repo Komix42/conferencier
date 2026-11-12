@@ -840,6 +840,7 @@ mod hygiene {
         table: i64,
         store: String,
         module: String,
+        scope: String,
         guard: i64,
         value: Option<String>,
         key: Vec<String>,
@@ -858,6 +859,7 @@ path = "p"
 table = 1
 store = "s"
 module = "m"
+scope = "sc"
 guard = 2
 value = "v"
 key = ["k"]

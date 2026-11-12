@@ -166,6 +166,7 @@ counters = [10, 20]
 struct Hygiene {
     store: String,
     module: String,
+    scope: String,
     guard: i64,
     value: Option<String>,
     key: Vec<String>,
@@ -177,6 +178,7 @@ async fn field_names_do_not_collide_with_generated_locals() -> Result<()> {
         r#"[Hygiene]
 store = "s"
 module = "m"
+scope = "sc"
 guard = 1
 value = "v"
 key = ["k"]
@@ -188,6 +190,7 @@ key = ["k"]
     {
         let mut guard = module.write().await;
         guard.store = "s2".into();
+        guard.scope = "sc2".into();
         guard.guard = 2;
         guard.value = None;
     }
@@ -196,6 +199,7 @@ key = ["k"]
 
     assert_eq!(store.get_string("Hygiene", "store")?, "s2");
     assert_eq!(store.get_string("Hygiene", "module")?, "m");
+    assert_eq!(store.get_string("Hygiene", "scope")?, "sc2");
     assert_eq!(store.get_integer("Hygiene", "guard")?, 2);
     assert!(store.get_value("Hygiene", "value").is_none());
     assert_eq!(
