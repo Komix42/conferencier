@@ -1,6 +1,6 @@
 # conferencier
 
-A minimal, single-purpose TOML configuration library for Tokio applications. Each part of an application describes its configuration section as a typed Rust struct; conferencier loads the struct from TOML and lets async tasks share it.
+A minimal, easy-to-use TOML configuration library for Tokio applications. Each part of an application describes its configuration section as a typed Rust struct; conferencier loads the struct from TOML and lets async tasks share it.
 
 The crate does this one job and deliberately stays small instead of becoming a general-purpose configuration framework (see [Scope](#scope)).
 
