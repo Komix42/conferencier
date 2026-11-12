@@ -12,12 +12,10 @@ These entries are planned for the 0.0.5 release. The API redesign is implemented
 
 1. **Strict mode for unknown keys** ([Derive attributes and field types](#derive-attributes-and-field-types)): RFC-0006, not yet written.
 2. **Expressions in `default`** ([Derive attributes and field types](#derive-attributes-and-field-types)): RFC-0007, not yet written.
-3. **Unused `serde` dependency** ([Technical debt](#technical-debt)): no RFC needed.
 
 ## Technical debt
 
 - **Temporary section-name migration guard.** Following [RFC-0005](./RFC-0005_api_redesign.md), `ConfigScope` derives in 0.0.5 and later 0.0.x and 0.1.x releases whose implicit section was affected by the old `Confer` prefix rule require an explicit section. Remove the guard in 0.2.0, and warn in its migration notes that a direct upgrade from 0.0.4 bypasses the guard. Origin: RFC-0005 N7.
-- **Unused `serde` dependency.** `conferencier` depends on `serde` with the `derive` feature, but no code uses it; TOML values are converted through the `toml` crate. Its `derive` feature is the only reason why every build of `conferencier` compiles the `serde_derive` proc-macro. Direction: remove it, and add it back if an idea such as a `#[confer(serde)]` escape hatch (see [Conversion hooks](#derive-attributes-and-field-types)) needs it. Origin: a review of the workspace after the 0.0.4 release.
 
 ## Ideas
 
@@ -53,4 +51,5 @@ The README's [Scope](../README.md#scope) lists these as intentionally left out. 
 
 - **Public API redesign**: implemented in 0.0.5 — names, shared store and async boundaries ([RFC-0005](./RFC-0005_api_redesign.md)).
 - **Bug: concurrent `save_file` calls can corrupt the file**: fixed in 0.0.5 with a unique temporary file per save.
+- **Unused `serde` dependency**: removed in 0.0.5; add it back if an idea such as a `#[confer(serde)]` escape hatch (see [Conversion hooks](#derive-attributes-and-field-types)) needs it.
 - **Unused `SectionGuard`**: removed in 0.0.4. Origin: [IMPL-001](./IMPL_001_baseline.md#7-known-limitations--follow-up-ideas).
