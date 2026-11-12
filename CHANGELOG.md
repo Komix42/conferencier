@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Breaking:** `from_string` is now `from_str` (`ConfigStore` also implements `FromStr`), `from_file` is async and replaces `from_file_async`, and there is no blocking file constructor. `get_section_table`, `set_section_table`, `section_exists` and `add_section` are now `get_section`, `set_section`, `has_section` and `ensure_section`; `remove_section` returns `()`.
 - **Breaking:** `ConfigScope::from_store` is synchronous, and `from_store`, `load` and `save` borrow the store (`&ConfigStore`) instead of taking it by value.
 - **Breaking:** `ConfigScope` no longer uses `#[async_trait]`: `load` and `save` return `impl Future<Output = Result<()>> + Send`, so generic code can spawn them. Manual implementations drop `#[async_trait]` and keep `async fn load`/`async fn save`. The `async-trait` dependency is removed.
+- **Breaking:** The default section name is the full struct name; a leading `Confer` word is no longer stripped. A `ConfigScope` such as `ConferApp` without `#[confer(section = ...)]` fails to compile with a message naming both choices: `section = "App"` keeps the 0.0.4 section, `section = "ConferApp"` uses the full name. This check stays through 0.1.x and is removed in 0.2.0, so upgrade from 0.0.4 through a 0.1.x release, or add an explicit section before upgrading to 0.2.0 directly.
 
 ## [0.0.4] - 2026-11-11
 

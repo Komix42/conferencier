@@ -282,35 +282,93 @@ async fn negative_numeric_defaults() -> Result<()> {
     Ok(())
 }
 
-/// Default section names strip a leading `ConfigStore` word only.
+/// Without `section`, the section is the full struct name (RFC-0005 N7). The temporary
+/// migration guard rejects only names that 0.0.4 shortened, i.e. `Confer` followed by an
+/// uppercase letter; these names are not affected.
 #[derive(ConfigScope)]
 struct ConferenceSettings {
     room: String,
 }
 
 #[derive(ConfigScope)]
-struct ConferServer {
+struct Confer {
+    level: u8,
+}
+
+#[allow(non_camel_case_types)]
+#[derive(ConfigScope)]
+struct Confer_App {
+    name: String,
+}
+
+#[derive(ConfigScope)]
+struct r#AppSettings {
     port: u16,
 }
 
 #[tokio::test]
-async fn default_section_name_strips_confer_word_only() -> Result<()> {
+async fn default_section_name_is_the_full_struct_name() -> Result<()> {
     let store = ConfigStore::from_str(
         r#"[ConferenceSettings]
 room = "A1"
 
-[Server]
+[Confer]
+level = 2
+
+[Confer_App]
+name = "demo"
+
+[AppSettings]
 port = 8080
 "#,
     )?;
 
-    let settings = ConferenceSettings::from_store(&store)?;
-    let server = ConferServer::from_store(&store)?;
-
-    assert_eq!(settings.read().await.room, "A1");
-    assert_eq!(server.read().await.port, 8080);
-
+    assert_eq!(
+        ConferenceSettings::from_store(&store)?.read().await.room,
+        "A1"
+    );
+    assert_eq!(Confer::from_store(&store)?.read().await.level, 2);
+    assert_eq!(Confer_App::from_store(&store)?.read().await.name, "demo");
+    assert_eq!(AppSettings::from_store(&store)?.read().await.port, 8080);
     Ok(())
+}
+
+/// The two ways out of the N7 guard for a name such as `ConferApp`.
+mod explicit_confer_sections {
+    use conferencier::{ConfigScope, ConfigStore, Result};
+
+    pub mod old {
+        #[derive(conferencier::ConfigScope)]
+        #[confer(section = "App")]
+        pub struct ConferApp {
+            pub port: u16,
+        }
+    }
+
+    pub mod full {
+        #[derive(conferencier::ConfigScope)]
+        #[confer(section = "ConferApp")]
+        pub struct ConferApp {
+            pub port: u16,
+        }
+    }
+
+    #[tokio::test]
+    async fn explicit_sections_load_and_save_the_chosen_section() -> Result<()> {
+        let store = ConfigStore::from_str("[App]\nport = 1\n[ConferApp]\nport = 2")?;
+        let old = old::ConferApp::from_store(&store)?;
+        let full = full::ConferApp::from_store(&store)?;
+        assert_eq!(old.read().await.port, 1);
+        assert_eq!(full.read().await.port, 2);
+
+        old.write().await.port = 10;
+        full.write().await.port = 20;
+        old::ConferApp::save(&old, &store).await?;
+        full::ConferApp::save(&full, &store).await?;
+        assert_eq!(store.get_integer("App", "port")?, 10);
+        assert_eq!(store.get_integer("ConferApp", "port")?, 20);
+        Ok(())
+    }
 }
 
 #[derive(ConfigScope)]

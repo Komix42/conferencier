@@ -104,10 +104,23 @@ fn parse_section_name(
     }
 
     if let Some(section) = section {
-        Ok(section)
-    } else {
-        Ok(default_section_name(ident))
+        return Ok(section);
     }
+    let name = ident.unraw().to_string();
+    if matches!(derive, DeriveKind::Scope) {
+        if let Some(old) = legacy_section_name(&name) {
+            return Err(syn::Error::new(
+                ident.span(),
+                format!(
+                    "`{name}` needs an explicit section: conferencier 0.0.4 stripped the leading \
+                     `Confer` and used `[{old}]`, but the default section is now the full struct \
+                     name `[{name}]`; add #[confer(section = \"{old}\")] to keep the old section \
+                     or #[confer(section = \"{name}\")] to use the full name"
+                ),
+            ));
+        }
+    }
+    Ok(name)
 }
 
 /// Parses an individual struct field, tracking duplicate keys and metadata.
@@ -249,16 +262,15 @@ fn parse_field(
     })
 }
 
-/// Derives the default section name from the type identifier.
+/// The section that conferencier 0.0.4 derived from `name`, if it differs from `name`.
 ///
-/// A leading `Confer` is stripped only when it is a separate CamelCase word
-/// (`ConferApp` -> `App`), so names like `ConferenceSettings` stay intact.
-fn default_section_name(ident: &syn::Ident) -> String {
-    let name = ident.unraw().to_string();
-    match name.strip_prefix("Confer") {
-        Some(rest) if rest.starts_with(char::is_uppercase) => rest.to_string(),
-        _ => name,
-    }
+/// 0.0.4 stripped a leading `Confer` only when it was a separate CamelCase word
+/// (`ConferApp` -> `App`). The derive rejects such names without an explicit section, so the
+/// change of the default cannot silently move a scope to another section (RFC-0005 N7).
+// TODO(0.2.0): remove together with the guard in `parse_section_name`.
+fn legacy_section_name(name: &str) -> Option<&str> {
+    name.strip_prefix("Confer")
+        .filter(|rest| rest.starts_with(char::is_uppercase))
 }
 
 /// Returns `true` when the attribute is `#[confer(...)]`.
@@ -571,31 +583,20 @@ impl ErrorWithSpan for syn::Error {
 
 #[cfg(test)]
 mod tests {
-    use super::default_section_name;
-    use proc_macro2::Span;
-    use syn::Ident;
+    use super::legacy_section_name;
 
-    fn section(name: &str) -> String {
-        default_section_name(&Ident::new(name, Span::call_site()))
+    #[test]
+    fn legacy_names_strip_a_separate_confer_word() {
+        assert_eq!(legacy_section_name("ConferApp"), Some("App"));
+        assert_eq!(legacy_section_name("ConferConferApp"), Some("ConferApp"));
+        assert_eq!(legacy_section_name("ConferÉtat"), Some("État"));
     }
 
     #[test]
-    fn strips_confer_prefix_at_word_boundary() {
-        assert_eq!(section("ConferApp"), "App");
-        assert_eq!(section("ConferConferApp"), "ConferApp");
-    }
-
-    #[test]
-    fn keeps_names_without_confer_word() {
-        assert_eq!(section("ConferenceSettings"), "ConferenceSettings");
-        assert_eq!(section("Confer"), "Confer");
-        assert_eq!(section("Confer_App"), "Confer_App");
-        assert_eq!(section("Settings"), "Settings");
-    }
-
-    #[test]
-    fn ignores_raw_identifier_prefix() {
-        let ident = Ident::new_raw("ConferApp", Span::call_site());
-        assert_eq!(default_section_name(&ident), "App");
+    fn other_names_have_no_legacy_section() {
+        assert_eq!(legacy_section_name("ConferenceSettings"), None);
+        assert_eq!(legacy_section_name("Confer"), None);
+        assert_eq!(legacy_section_name("Confer_App"), None);
+        assert_eq!(legacy_section_name("Settings"), None);
     }
 }

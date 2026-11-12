@@ -71,7 +71,9 @@ Nothing is synchronized in the background: `load` refreshes a scope from the sto
 
 The `#[derive(ConfigScope)]` macro understands a small set of field/struct attributes that control how data is mapped to TOML. `#[derive(ConfigTable)]` accepts the same field attributes (see [Nested tables](#nested-tables)).
 
-- `#[confer(section = "Name")]` on the struct sets the TOML section. If omitted, it defaults to the struct name, with a leading `Confer` word stripped (e.g. `ConferApp` → `App`, while `ConferenceSettings` stays `ConferenceSettings`).
+- `#[confer(section = "Name")]` on the struct sets the TOML section name. If omitted, the section is the full struct name: `AppConfig` owns `[AppConfig]` (a raw identifier such as `r#AppConfig` too).
+    - Until version 0.0.4, a leading `Confer` word was stripped from the default (`ConferApp` → `[App]`). To keep existing configuration files from silently moving to another section, a `ConfigScope` named `Confer` followed by an uppercase letter, such as `ConferApp`, does not compile without an explicit section: write `#[confer(section = "App")]` to keep the old section or `#[confer(section = "ConferApp")]` to use the full name. Names such as `ConferenceSettings` are not affected.
+    - This migration check stays through the 0.1.x releases and is removed in 0.2.0; then `ConferApp` without `section` simply uses `[ConferApp]`.
 
 Every field is either loaded from TOML or ignored by the configuration file.
 

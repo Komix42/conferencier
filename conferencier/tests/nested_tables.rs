@@ -655,7 +655,7 @@ struct Database {
 }
 
 #[derive(Debug, Clone, PartialEq, ConfigScope, ConfigTable)]
-struct ConferCache {
+struct Cache {
     #[confer(default = 64)]
     size: u32,
 }
@@ -668,7 +668,7 @@ struct Services {
     #[confer(table)]
     replicas: Vec<Database>,
     #[confer(table)]
-    cache: Option<ConferCache>,
+    cache: Option<Cache>,
 }
 
 #[tokio::test]
@@ -701,7 +701,7 @@ size = 32
             pool: 4,
         }
     );
-    let cache = ConferCache::from_store(&store)?;
+    let cache = Cache::from_store(&store)?;
     assert_eq!(cache.read().await.size, 128);
 
     let expected = Services {
@@ -713,7 +713,7 @@ size = 32
             url: "replica".into(),
             pool: 4,
         }],
-        cache: Some(ConferCache { size: 32 }),
+        cache: Some(Cache { size: 32 }),
     };
     let services = Services::from_store(&store)?;
     assert_eq!(*services.read().await, expected);
