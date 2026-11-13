@@ -7,14 +7,26 @@ struct Scope {
 }
 
 #[derive(ConfigTable)]
-#[confer(deny_unknown_keys)]
+#[confer(deny_unknown_keys,)]
 struct Table {
     value: String,
 }
 
 #[derive(ConfigScope, ConfigTable)]
-#[confer(deny_unknown_keys)]
+#[confer(deny_unknown_keys, section = "Both",)]
 struct Both {
+    value: String,
+}
+
+#[derive(ConfigScope)]
+#[confer(section = "SectionFirst", deny_unknown_keys,)]
+struct SectionFirst {
+    value: String,
+}
+
+#[derive(ConfigScope)]
+#[confer(deny_unknown_keys, section = "StrictFirst")]
+struct StrictFirst {
     value: String,
 }
 

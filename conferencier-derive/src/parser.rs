@@ -100,7 +100,7 @@ fn parse_section_name(
                 if deny_unknown_keys {
                     return Err(meta.error("duplicate #[confer(deny_unknown_keys)] attribute"));
                 }
-                if !meta.input.is_empty() {
+                if !meta.input.is_empty() && !meta.input.peek(Token![,]) {
                     return Err(meta.error("#[confer(deny_unknown_keys)] takes no value"));
                 }
                 deny_unknown_keys = true;

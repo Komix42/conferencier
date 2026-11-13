@@ -3,3 +3,9 @@ error: duplicate #[confer(deny_unknown_keys)] attribute
   |
 5 | #[confer(deny_unknown_keys)]
   |          ^^^^^^^^^^^^^^^^^
+
+error: duplicate #[confer(deny_unknown_keys)] attribute
+  --> tests/trybuild/fail_deny_unknown_keys_duplicate.rs:11:29
+   |
+11 | #[confer(deny_unknown_keys, deny_unknown_keys)]
+   |                             ^^^^^^^^^^^^^^^^^

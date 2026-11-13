@@ -59,6 +59,7 @@ Manual scope implementations drop `#[async_trait]`, make `from_store` synchronou
 - The unused `serde` dependency, so builds of `conferencier` no longer compile the `serde_derive` proc-macro.
 
 ### Fixed
+- `#[confer(deny_unknown_keys)]` now accepts following attributes and trailing commas in the same `#[confer(...)]` list instead of mistaking them for a value.
 - Concurrent `save_file` calls to the same path, including calls through cloned stores, no longer corrupt the file or fail. Every call writes its own uniquely named temporary file instead of a shared `<filename>.tmp`, so each successful call installs one complete snapshot; which of several concurrent calls wins is unspecified. The temporary file is also removed when the write or rename fails.
 
 ## [0.0.4] - 2026-11-11

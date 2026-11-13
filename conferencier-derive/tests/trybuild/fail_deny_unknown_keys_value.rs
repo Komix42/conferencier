@@ -6,4 +6,10 @@ struct WithValue {
     value: String,
 }
 
+#[derive(ConfigScope)]
+#[confer(deny_unknown_keys(true))]
+struct WithArguments {
+    value: String,
+}
+
 fn main() {}
