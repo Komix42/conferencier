@@ -17,6 +17,7 @@ pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
         ident,
         generics,
         section,
+        section_span,
         deny_unknown_keys,
         fields,
     } = scope;
@@ -51,6 +52,12 @@ pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
     let shared_scope = quote! { #crate_path::SharedScope<Self> };
     let result_type = quote! { #crate_path::Result };
     let table_type = quote! { #crate_path::toml::Table };
+    let section_marker = section_span.map(|_| {
+        quote! {
+            impl #impl_generics #crate_path::__private::DerivedConfigScope
+                for #ident #ty_generics #where_clause {}
+        }
+    });
 
     let read_section = quote! { #crate_private::read_section(#store, #section_lit)? };
     // Without loaded fields the section is only checked (R5); a binding would be unused.
@@ -101,6 +108,8 @@ pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
     };
 
     Ok(quote! {
+        #section_marker
+
         impl #impl_generics #crate_path::ConfigScope for #ident #ty_generics #where_clause {
             fn from_store(#store: &#store_type) -> #result_type<#shared_scope> {
                 #path_binding
@@ -137,6 +146,7 @@ pub fn generate_table(scope: Scope, crate_path: syn::Path) -> Result<TokenStream
     let Scope {
         ident,
         generics,
+        section_span,
         deny_unknown_keys,
         fields,
         ..
@@ -152,6 +162,13 @@ pub fn generate_table(scope: Scope, crate_path: syn::Path) -> Result<TokenStream
     let struct_fields = struct_fields(&fields);
     let table_type = quote! { #crate_path::toml::Table };
     let result_type = quote! { #crate_path::Result };
+    let section_check = section_span.map(|span| {
+        let check = generated_local("check_derived_scope");
+        quote_spanned! {span=>
+            fn #check<T: #crate_path::__private::DerivedConfigScope>() {}
+            #check::<Self>();
+        }
+    });
     let known_keys: Vec<_> = fields
         .iter()
         .filter(|field| !field.ignore)
@@ -200,6 +217,7 @@ pub fn generate_table(scope: Scope, crate_path: syn::Path) -> Result<TokenStream
     Ok(quote! {
         impl #impl_generics #crate_path::ConfigTable for #ident #ty_generics #where_clause {
             fn from_table(#from_params) -> #result_type<Self> {
+                #section_check
                 #unknown_key_check
                 #( #load_statements )*
                 Ok(Self { #(#struct_fields),* })

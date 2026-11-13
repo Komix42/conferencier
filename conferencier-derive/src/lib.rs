@@ -100,7 +100,7 @@ pub fn scope_derive(input: TokenStream) -> TokenStream {
 /// conversion rules as [`ConfigScope`]. The struct attribute `deny_unknown_keys`
 /// rejects unmapped keys in this table. It applies only to this type. A table-only
 /// derive does not accept `section`; a struct deriving both traits can use it for
-/// the scope implementation.
+/// the scope implementation, regardless of derive order or macro aliases.
 ///
 /// Ignored fields are initialized whenever a new table value is constructed,
 /// including on a scope reload. Unknown keys are ignored on load and omitted

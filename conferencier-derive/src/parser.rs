@@ -27,7 +27,7 @@ pub fn parse_scope(input: DeriveInput, derive: DeriveKind) -> Result<Scope> {
         ..
     } = input;
 
-    let (section, deny_unknown_keys) = parse_section_name(&attrs, &ident, derive)?;
+    let (section, section_span, deny_unknown_keys) = parse_section_name(&attrs, &ident, derive)?;
 
     let data = match data {
         syn::Data::Struct(data) => data,
@@ -63,6 +63,7 @@ pub fn parse_scope(input: DeriveInput, derive: DeriveKind) -> Result<Scope> {
         ident,
         generics,
         section,
+        section_span,
         deny_unknown_keys,
         fields: result_fields,
     })
@@ -70,14 +71,13 @@ pub fn parse_scope(input: DeriveInput, derive: DeriveKind) -> Result<Scope> {
 
 /// Extracts the TOML section name and strictness from the `#[confer(...)]` attributes.
 ///
-/// `ConfigTable` accepts and validates `section` but does not use it, so one struct can derive
-/// both macros.
+/// `ConfigTable` validates `section` for use by a `ConfigScope` derive on the same struct.
 fn parse_section_name(
     attrs: &[Attribute],
     ident: &syn::Ident,
     derive: DeriveKind,
-) -> Result<(String, bool)> {
-    let mut section: Option<String> = None;
+) -> Result<(String, Option<Span>, bool)> {
+    let mut section: Option<(String, Span)> = None;
     let mut deny_unknown_keys = false;
 
     for attr in attrs {
@@ -91,7 +91,7 @@ fn parse_section_name(
                     return Err(meta.error("duplicate #[confer(section = ...)] attribute"));
                 }
                 let value: LitStr = meta.value()?.parse()?;
-                section = Some(value.value());
+                section = Some((value.value(), meta.path.span()));
                 Ok(())
             } else if meta.path.is_ident("deny_unknown_keys") {
                 if deny_unknown_keys {
@@ -111,8 +111,8 @@ fn parse_section_name(
         })?;
     }
 
-    if let Some(section) = section {
-        return Ok((section, deny_unknown_keys));
+    if let Some((section, span)) = section {
+        return Ok((section, Some(span), deny_unknown_keys));
     }
     let name = ident.unraw().to_string();
     if matches!(derive, DeriveKind::Scope) {
@@ -128,7 +128,7 @@ fn parse_section_name(
             ));
         }
     }
-    Ok((name, deny_unknown_keys))
+    Ok((name, None, deny_unknown_keys))
 }
 
 /// Parses an individual struct field, tracking duplicate keys and metadata.

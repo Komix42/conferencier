@@ -65,6 +65,12 @@ pub mod __private {
         integer_vec, string, string_vec, table, table_element,
     };
 
+    #[diagnostic::on_unimplemented(
+        message = "`#[confer(section = ...)]` requires `#[derive(ConfigScope)]` on the same struct",
+        label = "`section` applies only to a derived ConfigScope"
+    )]
+    pub trait DerivedConfigScope {}
+
     /// Returns a snapshot of `section`: empty when absent, an error when not a table.
     pub fn read_section(store: &crate::ConfigStore, section: &str) -> crate::Result<toml::Table> {
         store.read_section(section)

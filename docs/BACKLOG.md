@@ -48,6 +48,7 @@ The README's [Scope](../README.md#scope) lists these as intentionally left out. 
 
 ## Done
 
+- **Reject `section` on table-only derives**: implemented in 0.0.5 ([RFC-0008](./RFC-0008_table_section.md)).
 - **Expressions in `default` and one rule for missing keys**: implemented in 0.0.5 ([RFC-0007](./RFC-0007_default_expressions.md)).
 - **Strict unknown-key rejection and diagnostic path formatting**: implemented in 0.0.5 ([RFC-0006](./RFC-0006_strict_unknown_keys.md)).
 - **Public API redesign**: implemented in 0.0.5 — names, shared store and async boundaries ([RFC-0005](./RFC-0005_api_redesign.md)).

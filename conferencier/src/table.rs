@@ -16,7 +16,8 @@ use crate::Result;
 ///
 /// With the default `derive` feature, `#[derive(ConfigTable)]` supports the same
 /// field attributes as [`ConfigScope`](crate::ConfigScope): `rename`, `default`,
-/// `ignore` and `table`. A table-only derive does not accept `section`.
+/// `ignore` and `table`. A table-only derive does not accept `section`; when both
+/// traits are derived, `section` applies only to the scope.
 /// Mark an owning field `#[confer(table)]` and use `T`, `Option<T>` or `Vec<T>`
 /// to represent a table, an optional table or an array of tables respectively.
 /// Unknown keys are ignored on load and are not returned on save unless the type

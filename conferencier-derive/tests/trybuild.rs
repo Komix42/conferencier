@@ -8,6 +8,7 @@ fn trybuild_suite() {
     t.pass("tests/trybuild/pass_ignored_key_collision.rs");
     t.pass("tests/trybuild/pass_generic_scope.rs");
     t.pass("tests/trybuild/pass_table_shapes.rs");
+    t.pass("tests/trybuild/pass_scope_table_section.rs");
     t.pass("tests/trybuild/pass_generic_table.rs");
     t.pass("tests/trybuild/pass_table_confer_prefix.rs");
     t.pass("tests/trybuild/pass_deny_unknown_keys.rs");
@@ -31,6 +32,7 @@ fn trybuild_suite() {
     t.compile_fail("tests/trybuild/fail_table_conflicts.rs");
     t.compile_fail("tests/trybuild/fail_table_shape.rs");
     t.compile_fail("tests/trybuild/fail_table_struct.rs");
+    t.compile_fail("tests/trybuild/fail_table_section.rs");
     t.compile_fail("tests/trybuild/fail_table_ignore_expr_scope.rs");
     t.compile_fail("tests/trybuild/fail_confer_prefix.rs");
     t.compile_fail("tests/trybuild/fail_deny_unknown_keys_duplicate.rs");
