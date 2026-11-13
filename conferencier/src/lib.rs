@@ -59,7 +59,7 @@ pub mod __private {
     pub use tokio::sync::RwLock;
 
     use crate::scope::SharedScope;
-    pub use crate::table_path::{child_path, element_path};
+    pub use crate::table_path::{child_path, element_path, section_path};
     pub use crate::value_conversion::{
         array, boolean, boolean_vec, datetime, datetime_vec, float, float_vec, integer,
         integer_vec, string, string_vec, table, table_element,

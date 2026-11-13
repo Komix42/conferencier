@@ -224,8 +224,8 @@ async fn absent_tables_follow_their_shape() -> Result<()> {
 
     let error = error_of(Strict::from_store(&ConfigStore::from_str("[Strict]")?));
     assert!(
-        matches!(&error, Error::MissingKey { section, key }
-            if section == "Strict.tls" && key == "cert"),
+        matches!(&error, Error::MissingKey { path, key }
+            if path == "Strict.tls" && key == "cert"),
         "unexpected error: {error:?}"
     );
     assert_eq!(error.to_string(), "missing key Strict.tls.cert");
@@ -358,16 +358,16 @@ async fn checked_error(source: &str) -> Result<Error> {
 async fn errors_report_nested_paths() -> Result<()> {
     let error = checked_error("[App.server]\nother = 1").await?;
     assert!(
-        matches!(&error, Error::MissingKey { section, key }
-            if section == "App.server" && key == "port"),
+        matches!(&error, Error::MissingKey { path, key }
+            if path == "App.server" && key == "port"),
         "unexpected error: {error:?}"
     );
     assert_eq!(error.to_string(), "missing key App.server.port");
 
     let error = checked_error("[App]\nserver = 5").await?;
     assert!(
-        matches!(&error, Error::TypeMismatch { section, key, expected: "table", found: "integer" }
-            if section == "App" && key == "server"),
+        matches!(&error, Error::TypeMismatch { path, key, expected: "table", found: "integer" }
+            if path == "App" && key == "server"),
         "unexpected error: {error:?}"
     );
     assert_eq!(
@@ -377,8 +377,8 @@ async fn errors_report_nested_paths() -> Result<()> {
 
     let error = checked_error("[App.upstream]\nurl = \"a\"\nweight = 1").await?;
     assert!(
-        matches!(&error, Error::TypeMismatch { section, key, expected: "array", found: "table" }
-            if section == "App" && key == "upstream"),
+        matches!(&error, Error::TypeMismatch { path, key, expected: "array", found: "table" }
+            if path == "App" && key == "upstream"),
         "unexpected error: {error:?}"
     );
     assert_eq!(
@@ -388,8 +388,8 @@ async fn errors_report_nested_paths() -> Result<()> {
 
     let error = checked_error("[App]\nupstream = [{ url = \"a\", weight = 1 }, \"b\"]").await?;
     assert!(
-        matches!(&error, Error::ValueParse { section, key, message }
-            if section == "App"
+        matches!(&error, Error::ValueParse { path, key, message }
+            if path == "App"
                 && key == "upstream"
                 && message == "expected array elements of type table, found string (at index 1)"),
         "unexpected error: {error:?}"
@@ -404,8 +404,8 @@ async fn errors_report_nested_paths() -> Result<()> {
     )
     .await?;
     assert!(
-        matches!(&error, Error::ValueParse { section, key, message }
-            if section == "App.upstream[1]"
+        matches!(&error, Error::ValueParse { path, key, message }
+            if path == "App.upstream[1]"
                 && key == "weight"
                 && message == "value out of range for u32"),
         "unexpected error: {error:?}"
@@ -417,8 +417,8 @@ async fn errors_report_nested_paths() -> Result<()> {
 
     let error = checked_error("[App]\n\"my key\" = { port = \"bad\" }").await?;
     assert!(
-        matches!(&error, Error::TypeMismatch { section, key, expected: "integer", found: "string" }
-            if section == "App.\"my key\"" && key == "port"),
+        matches!(&error, Error::TypeMismatch { path, key, expected: "integer", found: "string" }
+            if path == "App.\"my key\"" && key == "port"),
         "unexpected error: {error:?}"
     );
     assert_eq!(
@@ -433,8 +433,8 @@ async fn array_elements_are_converted_depth_first() -> Result<()> {
     // The first element misses a required key and the second is not a table (L5).
     let error = checked_error("[App]\nupstream = [{ url = \"a\" }, \"b\"]").await?;
     assert!(
-        matches!(&error, Error::MissingKey { section, key }
-            if section == "App.upstream[0]" && key == "weight"),
+        matches!(&error, Error::MissingKey { path, key }
+            if path == "App.upstream[0]" && key == "weight"),
         "unexpected error: {error:?}"
     );
     Ok(())
@@ -547,8 +547,8 @@ async fn nested_save_errors_leave_the_store_unchanged() -> Result<()> {
     let before = store.get_section("Stats");
     let error = error_of(Stats::save(&module, &store).await);
     assert!(
-        matches!(&error, Error::ValueParse { section, key, .. }
-            if section == "Stats.counters[1]" && key == "total"),
+        matches!(&error, Error::ValueParse { path, key, .. }
+            if path == "Stats.counters[1]" && key == "total"),
         "unexpected error: {error:?}"
     );
     assert_eq!(

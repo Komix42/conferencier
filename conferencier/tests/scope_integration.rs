@@ -22,6 +22,30 @@ struct Server {
     cache: Vec<u8>,
 }
 
+#[derive(Debug, ConfigScope)]
+#[confer(section = "App.server")]
+struct DottedSection {
+    port: u16,
+}
+
+#[derive(Debug, ConfigScope)]
+#[confer(section = "Ports")]
+struct Ports {
+    ports: Vec<u8>,
+}
+
+#[derive(ConfigScope)]
+#[confer(section = "App")]
+struct WidePorts {
+    ports: Vec<u64>,
+}
+
+#[derive(Debug, ConfigScope)]
+#[confer(section = "Ratios")]
+struct Ratios {
+    ratios: Vec<f32>,
+}
+
 #[tokio::test]
 async fn module_from_store_loads_defaults_and_values() -> Result<()> {
     let store = ConfigStore::from_str(
@@ -103,6 +127,86 @@ fn store_and_from_store_work_without_a_runtime() -> Result<()> {
     let guard = module.try_read().expect("no other guard exists");
     assert_eq!(guard.port, 8080);
     assert_eq!(guard.host, "localhost");
+    Ok(())
+}
+
+#[test]
+fn derived_scope_diagnostics_format_the_literal_top_level_section() -> Result<()> {
+    let error = DottedSection::from_store(&ConfigStore::new()).unwrap_err();
+    assert!(matches!(
+        error,
+        Error::MissingKey { ref path, ref key }
+            if path == "\"App.server\"" && key == "port"
+    ));
+    assert_eq!(error.to_string(), "missing key \"App.server\".port");
+    let store = ConfigStore::from_str("[\"App.server\"]\nport = 80")?;
+    assert_eq!(
+        DottedSection::from_store(&store)?
+            .try_read()
+            .expect("no other guard exists")
+            .port,
+        80
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn scalar_array_range_errors_include_the_element_index() -> Result<()> {
+    let store = ConfigStore::from_str("[Ports]\nports = [0, 256]")?;
+    let error = Ports::from_store(&store).unwrap_err();
+    assert!(matches!(
+        error,
+        Error::ValueParse { ref path, ref key, ref message }
+            if path == "Ports"
+                && key == "ports"
+                && message == "value out of range for u8 (at index 1)"
+    ));
+    assert_eq!(
+        error.to_string(),
+        "invalid value at Ports.ports: value out of range for u8 (at index 1)"
+    );
+    assert_eq!(
+        Ports::from_store(&ConfigStore::from_str("[Ports]\nports = [1]")?)?
+            .try_read()
+            .expect("no other guard exists")
+            .ports,
+        vec![1]
+    );
+
+    let store = ConfigStore::from_str("[App]\nports = [0]")?;
+    let scope = WidePorts::from_store(&store)?;
+    scope.write().await.ports = vec![0, u64::MAX];
+    let before = store.save_str()?;
+    let error = WidePorts::save(&scope, &store).await.unwrap_err();
+    let expected_message = format!(
+        "value `{}` out of range for TOML integer (at index 1)",
+        u64::MAX
+    );
+    assert!(matches!(
+        error,
+        Error::ValueParse { ref path, ref key, message }
+            if path == "App"
+                && key == "ports"
+                && message == expected_message
+    ));
+    assert_eq!(store.save_str()?, before);
+
+    let store = ConfigStore::from_str("[Ratios]\nratios = [1.0, 1e100]")?;
+    let error = Ratios::from_store(&store).unwrap_err();
+    assert!(matches!(
+        error,
+        Error::ValueParse { ref path, ref key, ref message }
+            if path == "Ratios"
+                && key == "ratios"
+                && message == "value out of range for f32 (at index 1)"
+    ));
+    assert_eq!(
+        Ratios::from_store(&ConfigStore::from_str("[Ratios]\nratios = [1.0]")?)?
+            .try_read()
+            .expect("no other guard exists")
+            .ratios,
+        vec![1.0]
+    );
     Ok(())
 }
 
@@ -460,7 +564,7 @@ async fn required_datetime_without_default_reports_missing_key() -> Result<()> {
         .expect("a missing required key must fail");
 
     assert!(
-        matches!(&err, Error::MissingKey { section, key } if section == "Clock" && key == "started_at"),
+        matches!(&err, Error::MissingKey { path, key } if path == "Clock" && key == "started_at"),
         "unexpected error: {err}"
     );
 

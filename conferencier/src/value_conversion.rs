@@ -21,65 +21,45 @@ pub fn describe(value: &Value) -> &'static str {
 }
 
 /// Converts a TOML value to `String`, producing a type-mismatch error when incompatible.
-pub fn string(section: &str, key: &str, value: Value) -> Result<String> {
+pub fn string(path: &str, key: &str, value: Value) -> Result<String> {
     match value {
         Value::String(s) => Ok(s),
-        other => Err(Error::type_mismatch(
-            section,
-            key,
-            "string",
-            describe(&other),
-        )),
+        other => Err(Error::type_mismatch(path, key, "string", describe(&other))),
     }
 }
 
 /// Converts a TOML value to `i64`, producing a type-mismatch error when incompatible.
-pub fn integer(section: &str, key: &str, value: Value) -> Result<i64> {
+pub fn integer(path: &str, key: &str, value: Value) -> Result<i64> {
     match value {
         Value::Integer(v) => Ok(v),
-        other => Err(Error::type_mismatch(
-            section,
-            key,
-            "integer",
-            describe(&other),
-        )),
+        other => Err(Error::type_mismatch(path, key, "integer", describe(&other))),
     }
 }
 
 /// Converts a TOML value to `f64`, accepting integers and floats.
-pub fn float(section: &str, key: &str, value: Value) -> Result<f64> {
+pub fn float(path: &str, key: &str, value: Value) -> Result<f64> {
     match value {
         Value::Float(v) => Ok(v),
         Value::Integer(v) => Ok(v as f64),
-        other => Err(Error::type_mismatch(
-            section,
-            key,
-            "float",
-            describe(&other),
-        )),
+        other => Err(Error::type_mismatch(path, key, "float", describe(&other))),
     }
 }
 
 /// Converts a TOML value to `bool`, producing a type-mismatch error when incompatible.
-pub fn boolean(section: &str, key: &str, value: Value) -> Result<bool> {
+pub fn boolean(path: &str, key: &str, value: Value) -> Result<bool> {
     match value {
         Value::Boolean(v) => Ok(v),
-        other => Err(Error::type_mismatch(
-            section,
-            key,
-            "boolean",
-            describe(&other),
-        )),
+        other => Err(Error::type_mismatch(path, key, "boolean", describe(&other))),
     }
 }
 
 /// Converts a TOML value to [`Datetime`], parsing strings when necessary.
-pub fn datetime(section: &str, key: &str, value: Value) -> Result<Datetime> {
+pub fn datetime(path: &str, key: &str, value: Value) -> Result<Datetime> {
     match value {
         Value::Datetime(dt) => Ok(dt),
-        Value::String(s) => parse_datetime(section, key, &s),
+        Value::String(s) => parse_datetime(path, key, &s),
         other => Err(Error::type_mismatch(
-            section,
+            path,
             key,
             "datetime",
             describe(&other),
@@ -88,92 +68,82 @@ pub fn datetime(section: &str, key: &str, value: Value) -> Result<Datetime> {
 }
 
 /// Converts a TOML value to a [`Table`], producing a type-mismatch error when incompatible.
-pub fn table(section: &str, key: &str, value: Value) -> Result<Table> {
+pub fn table(path: &str, key: &str, value: Value) -> Result<Table> {
     match value {
         Value::Table(table) => Ok(table),
-        other => Err(Error::type_mismatch(
-            section,
-            key,
-            "table",
-            describe(&other),
-        )),
+        other => Err(Error::type_mismatch(path, key, "table", describe(&other))),
     }
 }
 
 /// Converts a TOML value to its array elements without converting them.
-pub fn array(section: &str, key: &str, value: Value) -> Result<Vec<Value>> {
+pub fn array(path: &str, key: &str, value: Value) -> Result<Vec<Value>> {
     match value {
         Value::Array(items) => Ok(items),
-        other => Err(Error::type_mismatch(
-            section,
-            key,
-            "array",
-            describe(&other),
-        )),
+        other => Err(Error::type_mismatch(path, key, "array", describe(&other))),
     }
 }
 
 /// Converts one element of an array of tables, reporting its index on mismatch.
-pub fn table_element(section: &str, key: &str, value: Value, index: usize) -> Result<Table> {
+pub fn table_element(path: &str, key: &str, value: Value, index: usize) -> Result<Table> {
     match value {
         Value::Table(table) => Ok(table),
         other => Err(annotate_with_index(
-            element_mismatch(section, key, "table", &other),
+            element_mismatch(path, key, "table", &other),
             index,
         )),
     }
 }
 
 /// Converts a TOML value to `Vec<String>`, validating element types.
-pub fn string_vec(section: &str, key: &str, value: Value) -> Result<Vec<String>> {
-    to_vec(section, key, value, |section, key, element| match element {
+pub fn string_vec(path: &str, key: &str, value: Value) -> Result<Vec<String>> {
+    to_vec(path, key, value, |path, key, element| match element {
         Value::String(s) => Ok(s),
-        other => Err(element_mismatch(section, key, "string", &other)),
+        other => Err(element_mismatch(path, key, "string", &other)),
     })
 }
 
 /// Converts a TOML value to `Vec<i64>`, validating element types.
-pub fn integer_vec(section: &str, key: &str, value: Value) -> Result<Vec<i64>> {
-    to_vec(section, key, value, |section, key, element| match element {
+pub fn integer_vec(path: &str, key: &str, value: Value) -> Result<Vec<i64>> {
+    to_vec(path, key, value, |path, key, element| match element {
         Value::Integer(v) => Ok(v),
-        other => Err(element_mismatch(section, key, "integer", &other)),
+        other => Err(element_mismatch(path, key, "integer", &other)),
     })
 }
 
 /// Converts a TOML value to `Vec<f64>`, upcasting integer elements when needed.
-pub fn float_vec(section: &str, key: &str, value: Value) -> Result<Vec<f64>> {
-    to_vec(section, key, value, |section, key, element| match element {
+pub fn float_vec(path: &str, key: &str, value: Value) -> Result<Vec<f64>> {
+    to_vec(path, key, value, |path, key, element| match element {
         Value::Float(v) => Ok(v),
         Value::Integer(v) => Ok(v as f64),
-        other => Err(element_mismatch(section, key, "float", &other)),
+        other => Err(element_mismatch(path, key, "float", &other)),
     })
 }
 
 /// Converts a TOML value to `Vec<bool>`, validating element types.
-pub fn boolean_vec(section: &str, key: &str, value: Value) -> Result<Vec<bool>> {
-    to_vec(section, key, value, |section, key, element| match element {
+pub fn boolean_vec(path: &str, key: &str, value: Value) -> Result<Vec<bool>> {
+    to_vec(path, key, value, |path, key, element| match element {
         Value::Boolean(v) => Ok(v),
-        other => Err(element_mismatch(section, key, "boolean", &other)),
+        other => Err(element_mismatch(path, key, "boolean", &other)),
     })
 }
 
 /// Converts a TOML value to `Vec<Datetime>`, parsing string elements when necessary.
-pub fn datetime_vec(section: &str, key: &str, value: Value) -> Result<Vec<Datetime>> {
-    to_vec(section, key, value, |section, key, element| match element {
+pub fn datetime_vec(path: &str, key: &str, value: Value) -> Result<Vec<Datetime>> {
+    to_vec(path, key, value, |path, key, element| match element {
         Value::Datetime(dt) => Ok(dt),
-        Value::String(s) => parse_datetime(section, key, &s),
-        other => Err(element_mismatch(section, key, "datetime", &other)),
+        Value::String(s) => parse_datetime(path, key, &s),
+        other => Err(element_mismatch(path, key, "datetime", &other)),
     })
 }
 
-/// Parses a TOML datetime from `raw`, annotating errors with section/key context.
-fn parse_datetime(section: &str, key: &str, raw: &str) -> Result<Datetime> {
+/// Parses a TOML datetime from `raw`, annotating errors with path/key context.
+fn parse_datetime(path: &str, key: &str, raw: &str) -> Result<Datetime> {
     Datetime::from_str(raw)
-        .map_err(|err| Error::value_parse(section, key, format!("failed to parse datetime: {err}")))
+        .map_err(|err| Error::value_parse(path, key, format!("failed to parse datetime: {err}")))
 }
 
 /// Converts a TOML array to `Vec<T>` using the provided element conversion callback.
-fn to_vec<T, F>(section: &str, key: &str, value: Value, mut convert: F) -> Result<Vec<T>>
+fn to_vec<T, F>(path: &str, key: &str, value: Value, mut convert: F) -> Result<Vec<T>>
 where
     F: FnMut(&str, &str, Value) -> Result<T>,
 {
@@ -181,7 +151,7 @@ where
         Value::Array(items) => {
             let mut out = Vec::with_capacity(items.len());
             for (index, item) in items.into_iter().enumerate() {
-                match convert(section, key, item) {
+                match convert(path, key, item) {
                     Ok(v) => out.push(v),
                     Err(err) => {
                         return Err(match err {
@@ -195,19 +165,14 @@ where
             }
             Ok(out)
         }
-        other => Err(Error::type_mismatch(
-            section,
-            key,
-            "array",
-            describe(&other),
-        )),
+        other => Err(Error::type_mismatch(path, key, "array", describe(&other))),
     }
 }
 
 /// Builds a [`Error::ValueParse`] describing an invalid array element type.
-fn element_mismatch(section: &str, key: &str, expected: &'static str, value: &Value) -> Error {
+fn element_mismatch(path: &str, key: &str, expected: &'static str, value: &Value) -> Error {
     Error::value_parse(
-        section,
+        path,
         key,
         format!(
             "expected array elements of type {expected}, found {}",
@@ -219,22 +184,18 @@ fn element_mismatch(section: &str, key: &str, expected: &'static str, value: &Va
 /// Adds index context to element-related errors to aid debugging.
 fn annotate_with_index(error: Error, index: usize) -> Error {
     match error {
-        Error::ValueParse {
-            section,
-            key,
-            message,
-        } => Error::ValueParse {
-            section,
+        Error::ValueParse { path, key, message } => Error::ValueParse {
+            path,
             key,
             message: format!("{message} (at index {index})"),
         },
         Error::TypeMismatch {
-            section,
+            path,
             key,
             expected,
             found,
         } => Error::TypeMismatch {
-            section,
+            path,
             key,
             expected,
             found,

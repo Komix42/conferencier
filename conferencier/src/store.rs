@@ -260,7 +260,8 @@ impl ConfigStore {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::TypeMismatch`] with key `<section>` when the entry is not a table.
+    /// Returns [`Error::TypeMismatch`] with an empty `path` and the section name
+    /// as `key` when the entry is not a table.
     pub fn set_section(&self, section: &str, table: Table) -> Result<()> {
         let mut guard = self.write();
         match guard.entry(section.to_owned()) {
@@ -402,7 +403,7 @@ impl ConfigStore {
     /// [`Error::TypeMismatch`] for a non-table section or a non-string value.
     pub fn get_string(&self, section: &str, key: &str) -> Result<String> {
         let value = self.fetch_value(section, key)?;
-        value_conversion::string(section, key, value)
+        value_conversion::string(&crate::table_path::section_path(section), key, value)
     }
 
     /// Retrieves an integer value stored at `section.key`.
@@ -415,7 +416,7 @@ impl ConfigStore {
     /// [`Error::TypeMismatch`] for a non-table section or a non-integer value.
     pub fn get_integer(&self, section: &str, key: &str) -> Result<i64> {
         let value = self.fetch_value(section, key)?;
-        value_conversion::integer(section, key, value)
+        value_conversion::integer(&crate::table_path::section_path(section), key, value)
     }
 
     /// Retrieves a floating-point value stored at `section.key`.
@@ -429,7 +430,7 @@ impl ConfigStore {
     /// [`Error::TypeMismatch`] for a non-table section or an incompatible value.
     pub fn get_float(&self, section: &str, key: &str) -> Result<f64> {
         let value = self.fetch_value(section, key)?;
-        value_conversion::float(section, key, value)
+        value_conversion::float(&crate::table_path::section_path(section), key, value)
     }
 
     /// Retrieves a boolean value stored at `section.key`.
@@ -442,7 +443,7 @@ impl ConfigStore {
     /// [`Error::TypeMismatch`] for a non-table section or a non-boolean value.
     pub fn get_boolean(&self, section: &str, key: &str) -> Result<bool> {
         let value = self.fetch_value(section, key)?;
-        value_conversion::boolean(section, key, value)
+        value_conversion::boolean(&crate::table_path::section_path(section), key, value)
     }
 
     /// Retrieves a [`Datetime`] value stored at `section.key`, parsing strings when necessary.
@@ -457,7 +458,7 @@ impl ConfigStore {
     /// a string that cannot be parsed as a TOML datetime.
     pub fn get_datetime(&self, section: &str, key: &str) -> Result<Datetime> {
         let value = self.fetch_value(section, key)?;
-        value_conversion::datetime(section, key, value)
+        value_conversion::datetime(&crate::table_path::section_path(section), key, value)
     }
 
     /// Retrieves a string array stored at `section.key`.
@@ -471,7 +472,7 @@ impl ConfigStore {
     /// produces [`Error::ValueParse`] naming its zero-based index.
     pub fn get_string_vec(&self, section: &str, key: &str) -> Result<Vec<String>> {
         let value = self.fetch_value(section, key)?;
-        value_conversion::string_vec(section, key, value)
+        value_conversion::string_vec(&crate::table_path::section_path(section), key, value)
     }
 
     /// Retrieves an integer array stored at `section.key`.
@@ -485,7 +486,7 @@ impl ConfigStore {
     /// [`Error::ValueParse`] naming its zero-based index.
     pub fn get_integer_vec(&self, section: &str, key: &str) -> Result<Vec<i64>> {
         let value = self.fetch_value(section, key)?;
-        value_conversion::integer_vec(section, key, value)
+        value_conversion::integer_vec(&crate::table_path::section_path(section), key, value)
     }
 
     /// Retrieves a floating-point array stored at `section.key`.
@@ -500,7 +501,7 @@ impl ConfigStore {
     /// [`Error::ValueParse`] naming its zero-based index.
     pub fn get_float_vec(&self, section: &str, key: &str) -> Result<Vec<f64>> {
         let value = self.fetch_value(section, key)?;
-        value_conversion::float_vec(section, key, value)
+        value_conversion::float_vec(&crate::table_path::section_path(section), key, value)
     }
 
     /// Retrieves a boolean array stored at `section.key`.
@@ -514,7 +515,7 @@ impl ConfigStore {
     /// [`Error::ValueParse`] naming its zero-based index.
     pub fn get_boolean_vec(&self, section: &str, key: &str) -> Result<Vec<bool>> {
         let value = self.fetch_value(section, key)?;
-        value_conversion::boolean_vec(section, key, value)
+        value_conversion::boolean_vec(&crate::table_path::section_path(section), key, value)
     }
 
     /// Retrieves a [`Datetime`] array stored at `section.key`, parsing string values when necessary.
@@ -528,7 +529,7 @@ impl ConfigStore {
     /// produces [`Error::ValueParse`] naming its zero-based index.
     pub fn get_datetime_vec(&self, section: &str, key: &str) -> Result<Vec<Datetime>> {
         let value = self.fetch_value(section, key)?;
-        value_conversion::datetime_vec(section, key, value)
+        value_conversion::datetime_vec(&crate::table_path::section_path(section), key, value)
     }
 
     /// Stores a string at `section.key`, creating the section if needed.
@@ -539,7 +540,8 @@ impl ConfigStore {
     /// # Errors
     ///
     /// Returns [`Error::TypeMismatch`] if the top-level entry named `section` is not a
-    /// table, leaving the document unchanged.
+    /// table, leaving the document unchanged. The error has an empty `path` and uses
+    /// `section` as its `key`.
     pub fn set_string(&self, section: &str, key: &str, value: String) -> Result<()> {
         self.set_value(section, key, Value::String(value))
     }
@@ -668,17 +670,18 @@ impl ConfigStore {
 
     /// Fetches the raw TOML [`Value`] stored at `section.key`, producing detailed errors.
     fn fetch_value(&self, section: &str, key: &str) -> Result<Value> {
+        let path = crate::table_path::section_path(section);
         let guard = self.read();
         let section_value = guard
             .get(section)
-            .ok_or_else(|| Error::missing_key(section, key))?;
+            .ok_or_else(|| Error::missing_key(&path, key))?;
         let table = section_value
             .as_table()
             .ok_or_else(|| section_mismatch(section, section_value))?;
         table
             .get(key)
             .cloned()
-            .ok_or_else(|| Error::missing_key(section, key))
+            .ok_or_else(|| Error::missing_key(&path, key))
     }
 
     fn from_table(table: Table) -> Self {
@@ -719,12 +722,7 @@ fn section_table<'a>(root: &'a Table, section: &str) -> Option<&'a Table> {
 
 /// The error for a top-level entry `section` that is not a table.
 fn section_mismatch(section: &str, found: &Value) -> Error {
-    Error::type_mismatch(
-        section,
-        "<section>",
-        "table",
-        value_conversion::describe(found),
-    )
+    Error::type_mismatch("", section, "table", value_conversion::describe(found))
 }
 
 /// Reads the file at `path`, attaching the path to I/O errors.
@@ -913,16 +911,35 @@ mod tests {
         ] {
             assert!(matches!(
                 &error,
-                Error::TypeMismatch { section, key, expected: "table", found: "integer" }
-                    if section == "App" && key == "<section>"
+                Error::TypeMismatch { path, key, expected: "table", found: "integer" }
+                    if path.is_empty() && key == "App"
             ));
-            assert_eq!(
-                error.to_string(),
-                "expected table at App.<section> but found integer"
-            );
+            assert_eq!(error.to_string(), "expected table at App but found integer");
         }
         assert_eq!(store.save_str()?, before);
         Ok(())
+    }
+
+    #[test]
+    fn diagnostics_quote_literal_top_level_sections_and_keys() {
+        let error = ConfigStore::new()
+            .get_integer("App.server", "port")
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            Error::MissingKey { ref path, ref key }
+                if path == "\"App.server\"" && key == "port"
+        ));
+        assert_eq!(error.to_string(), "missing key \"App.server\".port");
+
+        let error = Error::missing_key("App", "a.b");
+        assert_eq!(error.to_string(), "missing key App.\"a.b\"");
+
+        let error = ConfigStore::new().get_integer("", "key").unwrap_err();
+        assert_eq!(error.to_string(), "missing key \"\".key");
+
+        let error = Error::missing_key("App", "a\"b\n");
+        assert_eq!(error.to_string(), "missing key App.\"a\\\"b\\n\"");
     }
 
     #[test]

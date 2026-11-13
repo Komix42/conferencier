@@ -21,7 +21,8 @@ pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
     } = scope;
 
     let section_lit = LitStr::new(&section, Span::call_site());
-    let path = quote! { #section_lit };
+    let path = generated_local("path");
+    let path_expr = quote! { &#path };
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
     let store = generated_local("store");
     let table = generated_local("table");
@@ -33,12 +34,12 @@ pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
         .iter()
         .map(|ident| field_local(ident))
         .collect();
-    let load_statements = load_statements(&fields, &path, &table, &crate_path)?;
+    let crate_private = quote! { #crate_path::__private };
+    let load_statements = load_statements(&fields, &path_expr, &table, &crate_path)?;
     let store_statements =
-        store_statements(&fields, &quote! { #guard }, &path, &table, &crate_path)?;
+        store_statements(&fields, &quote! { #guard }, &path_expr, &table, &crate_path)?;
     let struct_fields = struct_fields(&fields);
 
-    let crate_private = quote! { #crate_path::__private };
     let store_type = quote! { #crate_path::ConfigStore };
     let shared_scope = quote! { #crate_path::SharedScope<Self> };
     let result_type = quote! { #crate_path::Result };
@@ -50,6 +51,11 @@ pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
         quote! { #read_section; }
     } else {
         quote! { let mut #table = #read_section; }
+    };
+    let path_binding = if loaded.is_empty() {
+        TokenStream::new()
+    } else {
+        quote! { let #path = #crate_private::section_path(#section_lit); }
     };
 
     let assign = if loaded.is_empty() {
@@ -77,6 +83,7 @@ pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
     Ok(quote! {
         impl #impl_generics #crate_path::ConfigScope for #ident #ty_generics #where_clause {
             fn from_store(#store: &#store_type) -> #result_type<#shared_scope> {
+                #path_binding
                 #snapshot
                 #( #load_statements )*
                 let value = Self { #(#struct_fields),* };
@@ -84,6 +91,7 @@ pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
             }
 
             async fn load(scope: &#shared_scope, #store: &#store_type) -> #result_type<()> {
+                #path_binding
                 #snapshot
                 #( #load_statements )*
                 #assign
@@ -91,6 +99,7 @@ pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
             }
 
             async fn save(scope: &#shared_scope, #store: &#store_type) -> #result_type<()> {
+                #path_binding
                 let #table = #section_table;
                 #store.set_section(#section_lit, #table)
             }
@@ -308,10 +317,10 @@ fn scalar_insert(
         quote! { #table.insert(::std::string::String::from(#key), #value); }
     };
     match kind.container {
-        ContainerKind::Plain => insert(scalar_to_value(&kind.scalar, path, key, crate_path)),
+        ContainerKind::Plain => insert(scalar_to_value(&kind.scalar, path, key, crate_path, None)),
         ContainerKind::Vec => insert(vec_to_value(&kind.scalar, path, key, crate_path)),
         ContainerKind::Option => {
-            let insert = insert(scalar_to_value(&kind.scalar, path, key, crate_path));
+            let insert = insert(scalar_to_value(&kind.scalar, path, key, crate_path, None));
             quote! {
                 if let ::core::option::Option::Some(value) = value {
                     #insert
@@ -507,6 +516,7 @@ fn scalar_to_value(
     path: &TokenStream,
     key: &LitStr,
     crate_path: &syn::Path,
+    index: Option<TokenStream>,
 ) -> TokenStream {
     let value_type = quote! { #crate_path::toml::Value };
     match scalar {
@@ -518,7 +528,7 @@ fn scalar_to_value(
             quote! { #value_type::Datetime(::core::clone::Clone::clone(value)) }
         }
         ScalarKind::Integer(kind) => {
-            let raw = integer_to_store(kind, quote! { (*value) }, path, key, crate_path);
+            let raw = integer_to_store(kind, quote! { (*value) }, path, key, crate_path, index);
             quote! { #value_type::Integer(#raw) }
         }
         ScalarKind::Float(FloatKind::F64) => quote! { #value_type::Float(*value) },
@@ -533,11 +543,11 @@ fn vec_to_value(
     key: &LitStr,
     crate_path: &syn::Path,
 ) -> TokenStream {
-    let element = scalar_to_value(scalar, path, key, crate_path);
+    let element = scalar_to_value(scalar, path, key, crate_path, Some(quote! { index }));
     quote! {
         {
             let mut array = ::std::vec::Vec::with_capacity(value.len());
-            for value in value {
+            for (index, value) in value.iter().enumerate() {
                 array.push(#element);
             }
             #crate_path::toml::Value::Array(array)
@@ -631,11 +641,11 @@ fn integer_vec_from_store(
     quote! {
         {
             let mut out = Vec::with_capacity(value.len());
-            for raw in value.into_iter() {
+            for (index, raw) in value.into_iter().enumerate() {
                 match <#scalar as ::core::convert::TryFrom<i64>>::try_from(raw) {
                     Ok(v) => out.push(v),
                     Err(_) => {
-                        return Err(#err::value_parse(#path, #key, format!("value out of range for {}", stringify!(#scalar))));
+                        return Err(#err::value_parse(#path, #key, format!("value out of range for {} (at index {})", stringify!(#scalar), index)));
                     }
                 }
             }
@@ -658,12 +668,12 @@ fn float_vec_from_store(
             quote! {
                 {
                     let mut out = Vec::with_capacity(value.len());
-                    for raw in value.into_iter() {
+                    for (index, raw) in value.into_iter().enumerate() {
                         if !raw.is_finite() {
-                            return Err(#err::value_parse(#path, #key, String::from("non-finite float")));
+                            return Err(#err::value_parse(#path, #key, format!("non-finite float (at index {})", index)));
                         }
                         if raw < f32::MIN as f64 || raw > f32::MAX as f64 {
-                            return Err(#err::value_parse(#path, #key, String::from("value out of range for f32")));
+                            return Err(#err::value_parse(#path, #key, format!("value out of range for f32 (at index {})", index)));
                         }
                         out.push(raw as f32);
                     }
@@ -681,6 +691,7 @@ fn integer_to_store(
     path: &TokenStream,
     key: &LitStr,
     crate_path: &syn::Path,
+    index: Option<TokenStream>,
 ) -> TokenStream {
     let err = quote! { #crate_path::Error };
     match kind {
@@ -688,11 +699,19 @@ fn integer_to_store(
         IntegerKind::I8 | IntegerKind::I16 | IntegerKind::I32 => quote! { i64::from(#value) },
         IntegerKind::U8 | IntegerKind::U16 | IntegerKind::U32 => quote! { #value as i64 },
         IntegerKind::U64 | IntegerKind::Usize => {
+            let error_message = match index {
+                Some(index) => quote! {
+                    format!("value `{}` out of range for TOML integer (at index {})", raw, #index)
+                },
+                None => quote! {
+                    format!("value `{}` out of range for TOML integer", raw)
+                },
+            };
             quote! {
                 {
                     let raw = #value as u64;
                     if raw > i64::MAX as u64 {
-                        return Err(#err::value_parse(#path, #key, format!("value `{}` out of range for TOML integer", raw)));
+                        return Err(#err::value_parse(#path, #key, #error_message));
                     }
                     raw as i64
                 }

@@ -14,9 +14,9 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// [`ConfigScope`](crate::ConfigScope) and [`ConfigTable`](crate::ConfigTable)
 /// implementations.
 ///
-/// For keys inside nested tables, `section` holds the path of the table, such as
-/// `App.upstream[1]`. When a section exists but is not a table, `key` is `<section>`.
-/// Section and key strings are diagnostic context, not a structured path API.
+/// `path` holds the formatted path of the table containing the key, such as
+/// `App.upstream[1]`. For errors about a top-level entry that is not a table,
+/// `path` is empty and `key` is the entry name.
 ///
 /// # Inspecting errors
 ///
@@ -30,8 +30,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 ///
 /// let error = ConfigStore::new().get_integer("App", "port").unwrap_err();
 /// match error {
-///     Error::MissingKey { section, key } => {
-///         assert_eq!((section.as_str(), key.as_str()), ("App", "port"));
+///     Error::MissingKey { path, key } => {
+///         assert_eq!((path.as_str(), key.as_str()), ("App", "port"));
 ///     }
 ///     other => panic!("unexpected error: {other}"),
 /// }
@@ -63,18 +63,21 @@ pub enum Error {
     #[error("failed to serialize TOML: {0}")]
     Serialize(#[from] toml::ser::Error),
     /// A required key is absent.
-    #[error("missing key {section}.{key}")]
+    #[error("missing key {}", display_key(.path, .key))]
     MissingKey {
-        /// Section or table path containing the key.
-        section: String,
+        /// Formatted path of the table containing the key.
+        path: String,
         /// The missing key.
         key: String,
     },
     /// A value has a different TOML type than the field expects.
-    #[error("expected {expected} at {section}.{key} but found {found}")]
+    #[error(
+        "expected {expected} at {} but found {found}",
+        display_key(.path, .key)
+    )]
     TypeMismatch {
-        /// Section or table path containing the key.
-        section: String,
+        /// Formatted path of the table containing the key.
+        path: String,
         /// The key holding the value.
         key: String,
         /// Expected TOML type, such as `integer` or `table`.
@@ -85,10 +88,13 @@ pub enum Error {
     /// A value has an acceptable TOML type but cannot be converted, for example an
     /// integer out of range for the field type, an invalid datetime string or an
     /// array element of the wrong type.
-    #[error("invalid value at {section}.{key}: {message}")]
+    #[error(
+        "invalid value at {}: {message}",
+        display_key(.path, .key)
+    )]
     ValueParse {
-        /// Section or table path containing the key.
-        section: String,
+        /// Formatted path of the table containing the key.
+        path: String,
         /// The key holding the value.
         key: String,
         /// Description of the problem.
@@ -102,13 +108,14 @@ impl Error {
         Self::Io { path, source }
     }
 
-    /// Reports that `key` is required but absent from `section`.
+    /// Reports that `key` is required but absent from the table at `path`.
     ///
-    /// For a nested table, pass its diagnostic path, such as `App.server`,
-    /// as `section`. This constructs an error; it does not look in a store.
-    pub fn missing_key(section: impl Into<String>, key: impl Into<String>) -> Self {
+    /// Pass an already formatted diagnostic path, such as `App.server`. For a
+    /// top-level entry itself, use an empty path and its name as the key. This
+    /// constructs an error; it does not look in a store.
+    pub fn missing_key(path: impl Into<String>, key: impl Into<String>) -> Self {
         Self::MissingKey {
-            section: section.into(),
+            path: path.into(),
             key: key.into(),
         }
     }
@@ -117,15 +124,15 @@ impl Error {
     ///
     /// `expected` and `found` are type labels such as `"integer"` or `"string"`;
     /// [`toml::Value::type_str`] supplies the latter. Pass a nested table's
-    /// diagnostic path as `section` when appropriate.
+    /// diagnostic path as `path` when appropriate.
     pub fn type_mismatch(
-        section: impl Into<String>,
+        path: impl Into<String>,
         key: impl Into<String>,
         expected: &'static str,
         found: &'static str,
     ) -> Self {
         Self::TypeMismatch {
-            section: section.into(),
+            path: path.into(),
             key: key.into(),
             expected,
             found,
@@ -135,19 +142,23 @@ impl Error {
     /// Reports a value that cannot be converted despite having an acceptable TOML type.
     ///
     /// Use `message` to explain the reason, for example `"value out of range for u16"`.
-    /// Both borrowed and owned strings are accepted for `section`, `key` and `message`;
-    /// a nested table's diagnostic path can be used as `section`.
+    /// Both borrowed and owned strings are accepted for `path`, `key` and `message`;
+    /// the path must already be formatted.
     pub fn value_parse(
-        section: impl Into<String>,
+        path: impl Into<String>,
         key: impl Into<String>,
         message: impl Into<String>,
     ) -> Self {
         Self::ValueParse {
-            section: section.into(),
+            path: path.into(),
             key: key.into(),
             message: message.into(),
         }
     }
+}
+
+fn display_key(path: &str, key: &str) -> String {
+    crate::table_path::child_path(path, key)
 }
 
 impl From<std::io::Error> for Error {
@@ -182,6 +193,19 @@ mod tests {
             assert_eq!(error.to_string(), expected);
             assert!(error.source().is_none());
         }
+    }
+
+    #[test]
+    fn diagnostics_quote_final_keys_and_root_entries() {
+        assert_eq!(
+            Error::missing_key("App", "a.b").to_string(),
+            "missing key App.\"a.b\""
+        );
+        assert_eq!(
+            Error::type_mismatch("", "App.server", "table", "integer").to_string(),
+            "expected table at \"App.server\" but found integer"
+        );
+        assert_eq!(Error::missing_key("", "").to_string(), "missing key \"\"");
     }
 
     #[test]

@@ -47,8 +47,8 @@ fn assert_not_a_table(error: &Error, expected_section: &str) {
     assert!(
         matches!(
             error,
-            Error::TypeMismatch { section, key, expected: "table", found: "integer" }
-                if section == expected_section && key == "<section>"
+            Error::TypeMismatch { path, key, expected: "table", found: "integer" }
+                if path.is_empty() && key == expected_section
         ),
         "unexpected error: {error:?}"
     );
@@ -96,7 +96,7 @@ async fn failing_save_leaves_the_store_unchanged() -> Result<()> {
     let error = error_of(Counters::save(&module, &store).await);
     assert!(matches!(
         &error,
-        Error::ValueParse { section, key, .. } if section == "Counters" && key == "total"
+        Error::ValueParse { path, key, .. } if path == "Counters" && key == "total"
     ));
     assert_eq!(
         error.to_string(),
