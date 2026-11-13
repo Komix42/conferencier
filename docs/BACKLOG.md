@@ -13,6 +13,7 @@ The planned RFCs for 0.0.5 are implemented; see [Done](#done).
 ## Technical debt
 
 - **Temporary section-name migration guard.** Following [RFC-0005](./RFC-0005_api_redesign.md), `ConfigScope` derives in 0.0.5 and later 0.0.x and 0.1.x releases whose implicit section was affected by the old `Confer` prefix rule require an explicit section. Remove the guard in 0.2.0, and warn in its migration notes that a direct upgrade from 0.0.4 bypasses the guard. Origin: RFC-0005 N7.
+- **`save_file` does not preserve the target file's permissions.** The temporary file is created with default permissions (the directory's inherited ACL on Windows, the process umask on Unix) and the rename replaces the target together with its permissions. A file restricted to its owner can therefore become readable by others after a save, for example a file with explicit owner-only access in a directory that grants read access to the Users group on Windows, or a `0600` file under umask `022` on Unix. The content is also exposed through the temporary file before the rename. Reproduced on Windows; the Unix case follows from the same code path. Direction: create the temporary file with the target's permissions (on Unix, open it with the target's mode before writing; on Windows, copy the security descriptor or use `ReplaceFileW`), or document that callers restrict the directory instead. Origin: the 0.0.5 review; present since the original atomic save.
 
 ## Ideas
 
