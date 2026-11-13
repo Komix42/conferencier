@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.0.5] - 2026-11-13
+
 ### Added
 - Expanded rustdoc for the complete public API, with examples, conversion and error semantics, snapshot behavior, scope lock guidance and the current file-write limitations. The READMEs explain scopes, the `derive` feature and `#[confer(...)]`, and include the updated reload examples.
 - Public `table_path::{section_path, child_path, element_path}` helpers build the derive's diagnostic paths in manual `ConfigScope` and `ConfigTable` implementations, with or without the `derive` feature ([RFC-0006](docs/RFC-0006_strict_unknown_keys.md)).
