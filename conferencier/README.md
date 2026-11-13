@@ -47,7 +47,7 @@ struct AppConfig {
     name: String,
     #[confer(default = 8080)]
     port: i64,
-    #[confer(default = ["stable"])]
+    #[confer(default = vec!["stable".into()])]
     features: Vec<String>,
 }
 
@@ -94,11 +94,12 @@ Every field is either loaded from TOML or ignored by the configuration file.
 
 - `#[confer(rename = "key")]` on a field overrides the TOML key name.
 
-- `#[confer(default = <literal>)]` provides a value when the key is missing.
-    - Supported scalar defaults: strings (in quotes), integers and floats (including negative values such as `-1` or `-0.5`), booleans, and RFC 3339 datetimes as strings.
-    - Vector defaults use array syntax: `#[confer(default = [1, 2, 3])]` or `#[confer(default = ["a", "b"])]`.
-    - Works with `Option<T>` and `Option<Vec<T>>` as well; when no default is given, missing keys become `None`.
-    - Without a default, a missing key is an error for plain `T` and `Vec<T>` fields (`Error::MissingKey`), including `Datetime`.
+- `#[confer(default)]` uses the field type's `Default::default()` when its key is missing.
+
+- `#[confer(default = <expr>)]` uses a Rust expression of exactly the field's type when its key is missing. For example, use `"localhost".into()` for `String`, `1.0` for `f64`, `vec!["a".into(), "b".into()]` for `Vec<String>`, and `"07:30".parse().unwrap()` for `Datetime`. An invalid datetime string then panics when the missing-key fallback is evaluated.
+    - Defaults run in field declaration order, only when their key is missing; a present but invalid value returns an error instead. A failed load leaves the scope unchanged, but earlier expression side effects are not undone.
+    - A syntactically recognized `Option<T>` or `Option<Vec<T>>` loads as `None` when missing and cannot have a `default`. Type aliases are opaque to the derive.
+    - A missing plain scalar or scalar `Vec` without a default returns `Error::MissingKey`; table fields have the rules described below.
 
 - `#[confer(table)]` maps the field to a nested table or an array of tables; see [Nested tables](#nested-tables).
 
@@ -107,9 +108,10 @@ Every field is either loaded from TOML or ignored by the configuration file.
 - `#[confer(ignore)]` initializes the field with `Default::default()`.
 
 - `#[confer(ignore = <expr>)]` initializes the field with a Rust expression, e.g. `#[confer(ignore = Vec::with_capacity(16))]`.
-    - The expression is evaluated once, in `from_store`, after all loaded fields have been read successfully; ignored fields are initialized in declaration order. `load` and `save` never touch them.
-    - It is a plain, synchronous Rust expression (not a string) evaluated in its own closure: it cannot use `store`, other fields or `.await`, and `return` or `?` end the expression, not `from_store`. A string literal is just a `&str`, so for a `String` field write `String::from("abc")`.
+    - An ignored field of a scope is initialized once, in `from_store`, after all loaded fields have converted; scope `load` and `save` never touch it. An ignored field of a table is initialized whenever the table is constructed.
     - The field type does not need to implement `Default`.
+
+Both expression forms use a synchronous closure returning the field's type. They may use constants and functions in scope, but not generated parameters, other fields or `.await`. `return` exits the closure, and `?` uses its return type rather than propagating through the generated method.
 
 `ignore` cannot be combined with `rename` or `default`, because an ignored field has no key.
 
@@ -127,7 +129,7 @@ If a type falls outside this set, the derive emits a compile error with a friend
 
 Conferencier uses `toml` 1.2 with TOML 1.1 support. Prefer `conferencier::toml::{Table, Value}` and `conferencier::Datetime` for types shared with the store; types from `toml` 0.9 are not interchangeable with them.
 
-TOML 1.1 times may omit seconds (for example `07:30`, also accepted as a datetime default). In the new datetime API, `Time::second` and `Time::nanosecond` are optional: `None` means the component was omitted, not explicitly set to zero.
+TOML 1.1 times may omit seconds (for example `07:30`, or `"07:30".parse().unwrap()` as a datetime default). In the new datetime API, `Time::second` and `Time::nanosecond` are optional: `None` means the component was omitted, not explicitly set to zero.
 
 ### Troubleshooting
 
@@ -138,7 +140,8 @@ TOML 1.1 times may omit seconds (for example `07:30`, also accepted as a datetim
 - "`#[confer(init)]` was removed" → for an ignored field write `#[confer(ignore = <expr>)]` (no quotes); on a loaded field delete `init`, and add `#[confer(default = ...)]` only if a missing key should fall back to a value.
 - "`unknown key App.prot`" → the containing struct has `#[confer(deny_unknown_keys)]`; fix the key, rename a loaded field to it, or remove strictness if extra keys are intentional. Nested types need the attribute themselves; it is not inherited.
 - "cannot be combined with `#[confer(ignore)]`" → an ignored field has no TOML key; use `#[confer(ignore = <expr>)]` instead of `default`, and drop `rename`.
-- Defaults must have the right literal form (e.g., `"string"`, `[1, 2]`, or RFC 3339 for datetimes).
+- A default expression must have the field's type: for a `String`, write `"text".into()` rather than `"text"`; for a `Vec`, use `vec![...]` rather than an array literal.
+- "`#[confer(default)] cannot be used on an Option field`" → remove the attribute to keep `None` on a missing key, or use the inner type with a default when a value is required.
 
 ## Nested tables
 
@@ -149,7 +152,7 @@ use conferencier::{ConfigStore, ConfigScope, ConfigTable};
 
 #[derive(ConfigTable)]
 struct Server {
-    #[confer(default = "localhost")]
+    #[confer(default = "localhost".into())]
     host: String,
     #[confer(default = 8080)]
     port: u16,
@@ -200,12 +203,13 @@ A table type takes the same field attributes as a scope (`rename`, `default`, `i
 
 | Field type | TOML | Key missing on load | Save |
 | --- | --- | --- | --- |
-| `T` | table: `[App.server]` or `server = { ... }` | loaded from an empty table: the defaults of `T` apply, a required field of `T` fails with `MissingKey` | always written |
+| `T` | table: `[App.server]` or `server = { ... }` | explicit `default`, or loaded from an empty table if none is given | always written |
 | `Option<T>` | table | `None` | `None` removes the key |
-| `Vec<T>` | array of tables: `[[App.upstream]]` or `upstream = [{ ... }]` | empty `Vec` | always written, including as `upstream = []` |
+| `Vec<T>` | array of tables: `[[App.upstream]]` or `upstream = [{ ... }]` | explicit `default`, or empty `Vec` if none is given | always written, including as `upstream = []` |
 
-- An absent table `Vec<T>` loads as empty, while an absent scalar `Vec` without `default` (e.g. `Vec<String>`) fails with `MissingKey`. An empty `Vec<T>` is saved as `upstream = []`; TOML does not allow adding `[[App.upstream]]` entries after that array, so remove or replace it first.
-- `#[confer(table)]` cannot be combined with `default` or `ignore`; defaults belong to the fields of `T`. Other shapes such as `Option<Vec<T>>`, `Box<T>` or maps are not supported.
+- An absent table `Vec<T>` without `default` loads as empty, while an absent scalar `Vec` without `default` (e.g. `Vec<String>`) fails with `MissingKey`. An empty `Vec<T>` is saved as `upstream = []`; TOML does not allow adding `[[App.upstream]]` entries after that array, so remove or replace it first.
+- `#[confer(table, default)]` calls the table field's Rust `Default`, not its fields' `confer` defaults. For example, a derived `Default` gives `0` to a `u16` field even if that field has `#[confer(default = 8080)]`; omitting the table's `default` instead decodes an empty table and applies the inner defaults.
+- `#[confer(table)]` cannot be combined with `ignore`. Other shapes such as `Option<Vec<T>>`, `Box<T>` or maps are not supported.
 - Errors keep a formatted table `path` and a logical key; diagnostic output quotes dotted or otherwise non-bare TOML key segments. For example, a missing `a.b` key reports `missing key App."a.b"`. Scalar-array conversion errors include the zero-based element index, e.g. `invalid value at App.ports: value out of range for u16 (at index 1)`.
 - Tables are plain values: every successful `load` builds them anew. Ignored fields inside a table type are therefore initialized again on each load (with `Default::default()` or their `ignore = <expr>` initializer), unlike ignored fields of the scope itself. If the load fails, the scope keeps its previous state, but side effects of initializers that have already run are not undone.
 - One struct can derive both `ConfigScope` and `ConfigTable`; `section` then applies only to the scope. `#[derive(ConfigScope)]` alone does not make a struct usable as a table field.
@@ -285,6 +289,8 @@ Conferencier is primarily meant for reading configuration. Saving works, but it 
 
 - `ConfigStore::save_str` and `ConfigStore::save_file` regenerate the whole document from the stored values. Comments are lost, keys may be reordered, inline tables become `[section.table]` headers, and values are written in canonical notation (for example `0x1F90` becomes `8080` and `'text'` becomes `"text"`).
 - A scope's `save` owns its section, including all tables nested in it: it removes every key and sub-table that is not mapped to a non-ignored field, at any depth (also inside tables mapped with `#[confer(table)]`). In lenient mode, a misspelled key such as `prot = 9090` is ignored on load (`port` falls back to its default) and deleted by the next save. A strict type rejects it on load, but save still replaces the section without rechecking. Other sections are not changed; keep data that no scope owns in a separate section.
+- A computed default is saved like any other loaded value; later loads read that value instead of recomputing it. Use an `Option` with an application-level fallback if the value should stay dynamic after saving.
+- A well-typed default does not necessarily round-trip: a non-finite `f32` such as `f32::NAN` can be saved but is rejected on load.
 - Concurrent `save_file` calls to the same file, even through cloned stores, are safe: each call writes its own temporary file, so each successful call installs one complete snapshot, but which call wins is unspecified. Serialize saves yourself if their order matters. Replacement and durability limitations are described in the [API reference](https://docs.rs/conferencier/latest/conferencier/struct.ConfigStore.html#method.save_file).
 
 If people edit the configuration file by hand, prefer to only load it, and use saving mainly to generate an initial configuration file.

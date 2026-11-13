@@ -10,7 +10,7 @@ use conferencier::{ConfigScope, ConfigStore, ConfigTable, Result};
 /// The `[App.server]` table. All fields have defaults, so the table may be omitted.
 #[derive(ConfigTable)]
 struct Server {
-    #[confer(default = "localhost")]
+    #[confer(default = "localhost".into())]
     host: String,
     #[confer(default = 8080)]
     port: u16,

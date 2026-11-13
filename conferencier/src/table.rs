@@ -83,13 +83,14 @@ use crate::Result;
 pub trait ConfigTable: Sized {
     /// Constructs a value from an owned table, using `path` for error reporting.
     ///
-    /// The derived implementation applies defaults to absent keys, uses `None`
-    /// for optional fields without defaults and ignores unknown keys. An empty
-    /// table is a valid input, but required fields without defaults still fail.
+    /// The derived implementation applies explicit defaults to absent keys, uses
+    /// `None` for optional fields and ignores unknown keys unless
+    /// `#[confer(deny_unknown_keys)]` is set. An empty table is a valid input, but
+    /// required scalar fields without defaults still fail.
     ///
     /// Ignored fields are initialized after this table's loaded fields convert.
-    /// Each call creates a fresh value; initializer side effects that have already
-    /// occurred, including in nested tables, are not undone if a later conversion fails.
+    /// Each call creates a fresh value; side effects of default expressions or
+    /// initializers that have already run are not undone if a later conversion fails.
     ///
     /// # Errors
     ///
@@ -102,7 +103,7 @@ pub trait ConfigTable: Sized {
     /// Converts this value into the complete table to persist.
     ///
     /// The derived implementation writes only loaded fields, omits absent optional
-    /// fields and empty arrays of tables, and recursively converts nested tables.
+    /// fields, writes empty arrays of tables as `[]`, and recursively converts nested tables.
     /// It never mutates `self`. `path` is used only for error reporting.
     ///
     /// The owning scope replaces its whole section on save, so keys not returned

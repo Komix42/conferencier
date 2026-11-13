@@ -17,14 +17,14 @@ use tokio::try_join;
 struct ServerProfile {
     /// Rename demonstrates mapping struct fields to different TOML keys.
     #[confer(rename = "addr")]
-    #[confer(default = "0.0.0.0")]
+    #[confer(default = "0.0.0.0".into())]
     bind_address: String,
 
     /// Required value – if the key is missing `from_store` will return an error.
     port: u16,
 
-    /// Default values for vectors come from array literals.
-    #[confer(default = ["api", "web"])]
+    /// Vector defaults are ordinary Rust expressions.
+    #[confer(default = vec!["api".into(), "web".into()])]
     roles: Vec<String>,
 
     /// Optional vector: absence of the key yields `None` and saving removes it again.
@@ -51,7 +51,7 @@ struct FeatureToggles {
 
     /// Example of nested defaults and renames.
     #[confer(rename = "rollout")]
-    #[confer(default = "2025-01-01T00:00:00Z")]
+    #[confer(default = "2025-01-01T00:00:00Z".parse().unwrap())]
     rollout_start: Datetime,
 }
 

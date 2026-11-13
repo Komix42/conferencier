@@ -7,15 +7,14 @@ use conferencier::{ConfigScope, ConfigStore, Datetime, Error, Result, SharedScop
 struct Server {
     #[confer(rename = "p")]
     port: u16,
-    #[confer(default = "0.0.0.0")]
+    #[confer(default = "0.0.0.0".into())]
     host: String,
     #[confer(default = 3)]
     retries: i32,
-    #[confer(default = ["alpha", "beta"])]
+    #[confer(default = vec!["alpha".into(), "beta".into()])]
     features: Vec<String>,
-    #[confer(default = "2024-01-01T00:00:00Z")]
+    #[confer(default = "2024-01-01T00:00:00Z".parse().unwrap())]
     started_at: Datetime,
-    #[confer(default = "example.com")]
     endpoint: Option<String>,
     notes: Option<String>,
     #[confer(ignore = Vec::new())]
@@ -65,7 +64,7 @@ struct StrictEmpty {
 #[derive(Debug, ConfigScope)]
 #[confer(deny_unknown_keys)]
 struct StrictDefaultScope {
-    #[confer(default = "fallback")]
+    #[confer(default = "fallback".into())]
     name: String,
 }
 
@@ -76,6 +75,7 @@ async fn module_from_store_loads_defaults_and_values() -> Result<()> {
 extra = 7
 p = 8080
 notes = "temp"
+endpoint = "example.com"
 "#,
     )?;
 
@@ -306,12 +306,9 @@ async fn strict_scope_checks_known_keys_before_conversion_and_keeps_failed_load_
 #[derive(ConfigScope)]
 #[confer(section = "Nested")]
 struct NestedModule {
-    #[confer(default = [1, 2, 3])]
     counters: Option<Vec<u16>>,
-    #[confer(default = [4, 5])]
     thresholds: Option<Vec<u16>>,
     #[confer(rename = "aliases")]
-    #[confer(default = ["primary", "secondary"])]
     aliases: Option<Vec<String>>,
 }
 
@@ -328,11 +325,8 @@ counters = [10, 20]
     {
         let guard = module.read().await;
         assert_eq!(guard.counters.as_deref(), Some(&[10, 20][..]));
-        assert_eq!(guard.thresholds.as_deref(), Some(&[4, 5][..]));
-        assert_eq!(
-            guard.aliases.as_deref(),
-            Some(&["primary".to_string(), "secondary".to_string()][..])
-        );
+        assert_eq!(guard.thresholds, None);
+        assert_eq!(guard.aliases, None);
     }
 
     {
@@ -352,6 +346,15 @@ counters = [10, 20]
     assert_eq!(
         store.get_string_vec("Nested", "aliases")?,
         vec!["blue".to_string(), "green".to_string()]
+    );
+
+    let restored = NestedModule::from_store(&store)?;
+    let guard = restored.read().await;
+    assert_eq!(guard.counters, None);
+    assert_eq!(guard.thresholds.as_deref(), Some(&[30, 40, 50][..]));
+    assert_eq!(
+        guard.aliases.as_deref(),
+        Some(&["blue".to_string(), "green".to_string()][..])
     );
 
     Ok(())
@@ -449,12 +452,12 @@ struct NegativeDefaults {
     offset: i32,
     #[confer(default = -2.5)]
     ratio: f64,
-    #[confer(default = -3)]
+    #[confer(default = -3.0)]
     bias: f32,
-    #[confer(default = [-1, 2])]
+    #[confer(default = vec![-1, 2])]
     deltas: Vec<i64>,
     #[confer(default = -7)]
-    floor: Option<i64>,
+    floor: i64,
 }
 
 #[tokio::test]
@@ -469,7 +472,7 @@ async fn negative_numeric_defaults() -> Result<()> {
         assert_eq!(guard.ratio, -2.5);
         assert_eq!(guard.bias, -3.0);
         assert_eq!(guard.deltas, vec![-1, 2]);
-        assert_eq!(guard.floor, Some(-7));
+        assert_eq!(guard.floor, -7);
     }
 
     NegativeDefaults::save(&module, &store).await?;
@@ -575,9 +578,9 @@ mod explicit_confer_sections {
 #[derive(ConfigScope)]
 #[confer(section = "Schedule")]
 struct ScheduleDefaults {
-    #[confer(default = "07:30")]
+    #[confer(default = "07:30".parse().unwrap())]
     alarm: Datetime,
-    #[confer(default = ["07:30", "08:45:00.125"])]
+    #[confer(default = vec!["07:30".parse().unwrap(), "08:45:00.125".parse().unwrap()])]
     reminders: Vec<Datetime>,
 }
 
@@ -608,6 +611,263 @@ async fn datetime_defaults_preserve_omitted_seconds() -> Result<()> {
     assert_eq!(reloaded.alarm, original.alarm);
     assert_eq!(reloaded.reminders, original.reminders);
     Ok(())
+}
+
+mod default_expressions {
+    use super::*;
+
+    static CALLS: AtomicUsize = AtomicUsize::new(0);
+    static ORDER: AtomicUsize = AtomicUsize::new(0);
+    static BEFORE_PANIC: AtomicUsize = AtomicUsize::new(0);
+    static PANICS: AtomicUsize = AtomicUsize::new(0);
+    const PORT: u16 = 8080;
+
+    fn computed() -> u16 {
+        CALLS.fetch_add(1, Ordering::SeqCst) as u16 + 1
+    }
+
+    fn panicking_default() -> u16 {
+        PANICS.fetch_add(1, Ordering::SeqCst);
+        panic!("default failed")
+    }
+
+    fn ordered_default() -> usize {
+        ORDER.fetch_add(1, Ordering::SeqCst)
+    }
+
+    fn before_panic() -> u16 {
+        BEFORE_PANIC.fetch_add(1, Ordering::SeqCst);
+        3
+    }
+
+    #[derive(Debug, ConfigScope)]
+    #[confer(section = "Computed")]
+    struct Computed {
+        required: u16,
+        #[confer(default = computed())]
+        generated: u16,
+        later: u16,
+        #[confer(default = PORT)]
+        port: u16,
+        #[confer(default = "localhost".to_owned())]
+        host: String,
+        #[confer(default = vec!["a".into(), "b".into()])]
+        names: Vec<String>,
+        #[confer(default, rename = "empty-values")]
+        empty: Vec<u16>,
+        #[confer(default = { return 7; })]
+        closure_return: u16,
+        #[confer(default = 3 + 4)]
+        arithmetic: u16,
+    }
+
+    #[tokio::test]
+    async fn defaults_run_only_for_missing_keys_and_are_saved() -> Result<()> {
+        CALLS.store(0, Ordering::SeqCst);
+        let config_store = ConfigStore::from_str("[Computed]")?;
+        assert!(matches!(
+            Computed::from_store(&config_store).unwrap_err(),
+            Error::MissingKey { key, .. } if key == "required"
+        ));
+        assert_eq!(CALLS.load(Ordering::SeqCst), 0);
+
+        config_store.load_str("[Computed]\nrequired = 1\nlater = 2")?;
+        let instance = Computed::from_store(&config_store)?;
+        {
+            let guard = instance.read().await;
+            assert_eq!(guard.generated, 1);
+            assert_eq!(guard.port, PORT);
+            assert_eq!(guard.host, "localhost");
+            assert_eq!(guard.names, ["a", "b"]);
+            assert!(guard.empty.is_empty());
+            assert_eq!(guard.closure_return, 7);
+            assert_eq!(guard.arithmetic, 7);
+        }
+        assert_eq!(CALLS.load(Ordering::SeqCst), 1);
+
+        Computed::save(&instance, &config_store).await?;
+        assert_eq!(config_store.get_integer("Computed", "generated")?, 1);
+        Computed::load(&instance, &config_store).await?;
+        assert_eq!(CALLS.load(Ordering::SeqCst), 1);
+
+        config_store.load_str("[Computed]\nrequired = 3\nlater = 4")?;
+        Computed::load(&instance, &config_store).await?;
+        assert_eq!(CALLS.load(Ordering::SeqCst), 2);
+        assert_eq!(instance.read().await.generated, 2);
+
+        config_store.load_str("[Computed]\nrequired = 5\ngenerated = \"bad\"\nlater = 6")?;
+        assert!(Computed::load(&instance, &config_store).await.is_err());
+        assert_eq!(CALLS.load(Ordering::SeqCst), 2);
+        assert_eq!(instance.read().await.required, 3);
+
+        config_store.load_str("[Computed]\nrequired = 6")?;
+        assert!(Computed::load(&instance, &config_store).await.is_err());
+        assert_eq!(CALLS.load(Ordering::SeqCst), 3);
+        let guard = instance.read().await;
+        assert_eq!((guard.required, guard.generated, guard.later), (3, 2, 4));
+        Ok(())
+    }
+
+    #[derive(Debug, ConfigScope)]
+    struct OrderedDefaults {
+        #[confer(default = ordered_default())]
+        first: usize,
+        required: u16,
+        #[confer(default = ordered_default())]
+        last: usize,
+    }
+
+    #[tokio::test]
+    async fn defaults_run_in_declaration_order_and_stop_at_an_error() -> Result<()> {
+        ORDER.store(0, Ordering::SeqCst);
+        assert!(matches!(
+            OrderedDefaults::from_store(&ConfigStore::new()).unwrap_err(),
+            Error::MissingKey { key, .. } if key == "required"
+        ));
+        assert_eq!(ORDER.load(Ordering::SeqCst), 1);
+
+        let store = ConfigStore::from_str("[OrderedDefaults]\nrequired = 4")?;
+        let scope = OrderedDefaults::from_store(&store)?;
+        let guard = scope.read().await;
+        assert_eq!((guard.first, guard.required, guard.last), (1, 4, 2));
+        assert_eq!(ORDER.load(Ordering::SeqCst), 3);
+        Ok(())
+    }
+
+    #[derive(Debug, ConfigScope)]
+    #[confer(section = "Panicking")]
+    struct Panicking {
+        first: u16,
+        #[confer(default = before_panic())]
+        second: u16,
+        #[confer(default = panicking_default())]
+        third: u16,
+    }
+
+    #[tokio::test]
+    async fn a_panicking_default_leaves_the_scope_unchanged() -> Result<()> {
+        BEFORE_PANIC.store(0, Ordering::SeqCst);
+        PANICS.store(0, Ordering::SeqCst);
+        let config_store = ConfigStore::from_str("[Panicking]\nfirst = 1\nsecond = 2\nthird = 3")?;
+        let instance = Panicking::from_store(&config_store)?;
+        config_store.load_str("[Panicking]\nfirst = 9")?;
+
+        let task_scope = instance.clone();
+        let task_store = config_store.clone();
+        let failure = tokio::spawn(async move { Panicking::load(&task_scope, &task_store).await })
+            .await
+            .unwrap_err();
+        assert!(failure.is_panic());
+        assert_eq!(BEFORE_PANIC.load(Ordering::SeqCst), 1);
+        assert_eq!(PANICS.load(Ordering::SeqCst), 1);
+        let guard = instance.read().await;
+        assert_eq!((guard.first, guard.second, guard.third), (1, 2, 3));
+        assert_eq!(config_store.get_integer("Panicking", "first")?, 9);
+        Ok(())
+    }
+
+    #[derive(Debug, ConfigScope)]
+    #[confer(section = "NonFinite")]
+    struct NonFinite {
+        #[confer(default = f32::NAN)]
+        number: f32,
+    }
+
+    #[tokio::test]
+    async fn non_finite_default_can_be_saved_but_not_reloaded() -> Result<()> {
+        let config_store = ConfigStore::new();
+        let instance = NonFinite::from_store(&config_store)?;
+        assert!(instance.read().await.number.is_nan());
+        NonFinite::save(&instance, &config_store).await?;
+        let restored = ConfigStore::from_str(&config_store.save_str()?)?;
+        assert!(matches!(
+            NonFinite::from_store(&restored).unwrap_err(),
+            Error::ValueParse { .. }
+        ));
+        Ok(())
+    }
+}
+
+mod default_expression_hygiene {
+    use super::*;
+    use conferencier::ConfigTable;
+
+    #[allow(non_upper_case_globals)]
+    const store: u16 = 1;
+    #[allow(non_upper_case_globals)]
+    const scope: u16 = 2;
+    #[allow(non_upper_case_globals)]
+    const table: u16 = 3;
+    #[allow(non_upper_case_globals)]
+    const path: u16 = 4;
+    #[allow(non_upper_case_globals)]
+    const value: u16 = 5;
+    #[allow(non_upper_case_globals)]
+    const raw: u16 = 6;
+    #[allow(non_upper_case_globals)]
+    const index: u16 = 7;
+    #[allow(non_upper_case_globals)]
+    const array: u16 = 8;
+    #[allow(non_upper_case_globals)]
+    const array_path: u16 = 9;
+    #[allow(non_upper_case_globals)]
+    const out: u16 = 10;
+    #[allow(non_upper_case_globals)]
+    const v: u16 = 11;
+
+    #[derive(ConfigScope)]
+    struct Scope {
+        #[confer(default = store)]
+        a: u16,
+        #[confer(default = scope)]
+        b: u16,
+        #[confer(default = table)]
+        c: u16,
+        #[confer(default = path)]
+        d: u16,
+        #[confer(default = value)]
+        e: u16,
+        #[confer(default = vec![raw, index, array, array_path, out, v])]
+        others: Vec<u16>,
+        #[confer(default = 12)]
+        internal_store: u16,
+        #[confer(default = 13)]
+        internal_scope: u16,
+    }
+
+    #[derive(ConfigTable)]
+    struct Table {
+        #[confer(default = store + scope + table + path + value)]
+        total: u16,
+        #[confer(default = vec![raw, index, array, array_path, out, v])]
+        others: Vec<u16>,
+    }
+
+    #[tokio::test]
+    async fn user_constants_do_not_capture_generated_locals() -> Result<()> {
+        let config_store = ConfigStore::new();
+        let instance = Scope::from_store(&config_store)?;
+        {
+            let guard = instance.read().await;
+            assert_eq!(
+                (guard.a, guard.b, guard.c, guard.d, guard.e),
+                (1, 2, 3, 4, 5)
+            );
+            assert_eq!(guard.others, [6, 7, 8, 9, 10, 11]);
+            assert_eq!((guard.internal_store, guard.internal_scope), (12, 13));
+        }
+        Scope::load(&instance, &config_store).await?;
+        Scope::save(&instance, &config_store).await?;
+
+        let decoded = Table::from_table("Inner", conferencier::toml::Table::new())?;
+        assert_eq!(decoded.total, 15);
+        assert_eq!(decoded.others, [6, 7, 8, 9, 10, 11]);
+        let encoded = decoded.to_table("Inner")?;
+        let decoded = Table::from_table("Inner", encoded)?;
+        assert_eq!(decoded.total, 15);
+        assert_eq!(decoded.others, [6, 7, 8, 9, 10, 11]);
+        Ok(())
+    }
 }
 
 /// `Datetime` has no `Default` value; a required field of that type is built directly.

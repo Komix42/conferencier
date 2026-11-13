@@ -1,17 +1,14 @@
 use std::collections::HashMap;
 
-use proc_macro2::{Span, TokenStream};
+use proc_macro2::Span;
 use quote::quote;
 use syn::ext::IdentExt;
 use syn::spanned::Spanned;
-use syn::{
-    Attribute, DeriveInput, Expr, ExprLit, ExprUnary, Field as SynField, Fields, Lit, LitStr,
-    Result, Token, Type, UnOp,
-};
+use syn::{Attribute, DeriveInput, Expr, Field as SynField, Fields, LitStr, Result, Token, Type};
 
 use crate::model::{
-    ContainerKind, DeriveKind, Field, FieldKind, FieldType, FloatKind, IntegerKind, ScalarKind,
-    Scope, TableContainer, TableType,
+    ContainerKind, DeriveKind, Field, FieldDefault, FieldKind, FieldType, FloatKind, IntegerKind,
+    ScalarKind, Scope, TableContainer, TableType,
 };
 
 /// Error reported for any use of the removed `#[confer(init)]` attribute.
@@ -146,7 +143,7 @@ fn parse_field(
         .ok_or_else(|| syn::Error::new(field.span(), "expected named field"))?;
 
     let mut rename: Option<(String, Span)> = None;
-    let mut default_expr: Option<(Expr, Span)> = None;
+    let mut default: Option<FieldDefault> = None;
     let mut initializer: Option<Expr> = None;
     let mut ignore: Option<Span> = None;
     let mut table = false;
@@ -166,12 +163,17 @@ fn parse_field(
                 rename = Some((value.value(), span));
                 Ok(())
             } else if meta.path.is_ident("default") {
-                if default_expr.is_some() {
-                    return Err(meta.error("duplicate #[confer(default = ...)] attribute"));
+                if default.is_some() {
+                    return Err(meta.error("duplicate #[confer(default)] attribute"));
                 }
                 let span = meta.path.span();
-                let expr: Expr = meta.value()?.parse()?;
-                default_expr = Some((expr, span));
+                let expr = if meta.input.peek(Token![=]) {
+                    let expr: Expr = meta.value()?.parse()?;
+                    Some(quote! { #expr })
+                } else {
+                    None
+                };
+                default = Some(FieldDefault { expr, span });
                 Ok(())
             } else if meta.path.is_ident("init") {
                 Err(meta.error(INIT_REMOVED))
@@ -202,12 +204,6 @@ fn parse_field(
     }
 
     if table {
-        if let Some((_, span)) = &default_expr {
-            return Err(syn::Error::new(
-                *span,
-                "#[confer(table)] cannot be combined with #[confer(default)]",
-            ));
-        }
         if let Some(span) = ignore {
             return Err(syn::Error::new(
                 span,
@@ -218,9 +214,9 @@ fn parse_field(
 
     let ignore = ignore.is_some();
     if ignore {
-        if let Some((_, span)) = &default_expr {
+        if let Some(default) = &default {
             return Err(syn::Error::new(
-                *span,
+                default.span,
                 "#[confer(default)] cannot be combined with #[confer(ignore)]; use #[confer(ignore = <expr>)]",
             ));
         }
@@ -256,10 +252,24 @@ fn parse_field(
         Some(FieldKind::Scalar(classify_type(&field.ty, derive)?))
     };
 
-    let default_tokens = match (default_expr, &kind) {
-        (Some((expr, _)), Some(FieldKind::Scalar(kind))) => Some(transform_default(expr, kind)?),
-        _ => None,
+    let is_option = match &kind {
+        Some(FieldKind::Scalar(kind)) => {
+            matches!(
+                kind.container,
+                ContainerKind::Option | ContainerKind::OptionVec
+            )
+        }
+        Some(FieldKind::Table(kind)) => matches!(kind.container, TableContainer::Option),
+        None => false,
     };
+    if let Some(default) = &default {
+        if is_option {
+            return Err(syn::Error::new(
+                default.span,
+                "#[confer(default)] cannot be used on an Option field: a missing key already loads as None\nhelp: use the inner type with #[confer(default = ...)], or remove the attribute",
+            ));
+        }
+    }
 
     let initializer_tokens = initializer.map(|expr| quote! { #expr });
 
@@ -268,7 +278,7 @@ fn parse_field(
         ty: field.ty.clone(),
         key,
         kind,
-        default: default_tokens,
+        default,
         initializer: initializer_tokens,
         ignore,
         span: field.span(),
@@ -434,151 +444,6 @@ fn match_outer_type<'a>(ty: &'a Type, expected: &str) -> Option<&'a Type> {
         Some(syn::GenericArgument::Type(inner)) => Some(inner),
         _ => None,
     }
-}
-
-/// Converts a literal default expression into tokens matching the field type.
-fn transform_default(expr: Expr, field_type: &FieldType) -> Result<TokenStream> {
-    match field_type.container {
-        ContainerKind::Plain => transform_plain_default(expr, &field_type.scalar),
-        ContainerKind::Vec => transform_vec_default(expr, &field_type.scalar, false),
-        ContainerKind::Option => transform_option_default(expr, &field_type.scalar),
-        ContainerKind::OptionVec => transform_vec_default(expr, &field_type.scalar, true),
-    }
-}
-
-/// Handles defaults for non-container fields.
-fn transform_plain_default(expr: Expr, scalar: &ScalarKind) -> Result<TokenStream> {
-    literal_tokens(expr, scalar)
-}
-
-/// Wraps defaults for optional fields in `Some(...)`.
-fn transform_option_default(expr: Expr, scalar: &ScalarKind) -> Result<TokenStream> {
-    let tokens = literal_tokens(expr, scalar)?;
-    Ok(quote! { Some(#tokens) })
-}
-
-/// Validates and converts defaults specified for vector and option-vector fields.
-fn transform_vec_default(
-    expr: Expr,
-    scalar: &ScalarKind,
-    wrap_option: bool,
-) -> Result<TokenStream> {
-    match expr {
-        Expr::Array(array) => {
-            let elements: Vec<_> = array
-                .elems
-                .into_iter()
-                .map(|element| literal_tokens(element, scalar))
-                .collect::<Result<Vec<_>>>()?;
-            if wrap_option {
-                Ok(quote! { Some(vec![#(#elements),*]) })
-            } else {
-                Ok(quote! { vec![#(#elements),*] })
-            }
-        }
-        _ => Err(syn::Error::new(
-            expr.span(),
-            "defaults for Vec<T> must use [ ... ] syntax",
-        )),
-    }
-}
-
-/// Ensures the provided literal matches the scalar kind expected by the field.
-fn validate_literal(expr: &Expr, scalar: &ScalarKind) -> Result<()> {
-    match scalar {
-        ScalarKind::String => match expr {
-            Expr::Lit(expr_lit) => match &expr_lit.lit {
-                Lit::Str(_) => Ok(()),
-                _ => Err(syn::Error::new(expr.span(), "expected string literal")),
-            },
-            _ => Err(syn::Error::new(expr.span(), "expected string literal")),
-        },
-        ScalarKind::Datetime => match expr {
-            Expr::Lit(expr_lit) => match &expr_lit.lit {
-                Lit::Str(lit) => lit
-                    .value()
-                    .parse::<toml::value::Datetime>()
-                    .map(|_| ())
-                    .map_err(|err| {
-                        syn::Error::new(
-                            lit.span(),
-                            format!("invalid TOML datetime `{}`: {err}", lit.value()),
-                        )
-                    }),
-                _ => Err(syn::Error::new(expr.span(), "expected string literal")),
-            },
-            _ => Err(syn::Error::new(expr.span(), "expected string literal")),
-        },
-        ScalarKind::Bool => match expr {
-            Expr::Lit(expr_lit) => match expr_lit.lit {
-                Lit::Bool(_) => Ok(()),
-                _ => Err(syn::Error::new(expr.span(), "expected boolean literal")),
-            },
-            _ => Err(syn::Error::new(expr.span(), "expected boolean literal")),
-        },
-        ScalarKind::Integer(kind) => match strip_negation(expr) {
-            (
-                negative,
-                Expr::Lit(ExprLit {
-                    lit: Lit::Int(_), ..
-                }),
-            ) => {
-                if negative && kind.is_unsigned() {
-                    Err(syn::Error::new_spanned(
-                        expr,
-                        format!(
-                            "negative default for unsigned integer type `{}`",
-                            kind.type_tokens()
-                        ),
-                    ))
-                } else {
-                    Ok(())
-                }
-            }
-            _ => Err(syn::Error::new(expr.span(), "expected integer literal")),
-        },
-        ScalarKind::Float(_) => match strip_negation(expr) {
-            (
-                _,
-                Expr::Lit(ExprLit {
-                    lit: Lit::Float(_) | Lit::Int(_),
-                    ..
-                }),
-            ) => Ok(()),
-            _ => Err(syn::Error::new(expr.span(), "expected float literal")),
-        },
-    }
-}
-
-/// Splits a leading unary minus off `expr`, reporting whether one was present.
-fn strip_negation(expr: &Expr) -> (bool, &Expr) {
-    match expr {
-        Expr::Unary(ExprUnary {
-            op: UnOp::Neg(_),
-            expr: inner,
-            ..
-        }) => (true, inner),
-        _ => (false, expr),
-    }
-}
-
-/// Transforms validated literals into concrete tokens used in generated code.
-fn literal_tokens(expr: Expr, scalar: &ScalarKind) -> Result<TokenStream> {
-    validate_literal(&expr, scalar)?;
-    Ok(match scalar {
-        ScalarKind::String => quote! { (#expr).to_string() },
-        ScalarKind::Bool => quote! { #expr },
-        ScalarKind::Integer(_) => quote! { #expr },
-        ScalarKind::Float(kind) => {
-            let ty = kind.type_tokens();
-            quote! { (#expr) as #ty }
-        }
-        ScalarKind::Datetime => {
-            // Validated above, so parsing cannot fail. The target type is inferred from the
-            // field, which keeps the generated code free of `toml` paths.
-            quote! { (#expr).parse().expect("datetime default validated at compile time") }
-        }
-    })
 }
 
 /// Helper trait for enriching errors with additional span information.

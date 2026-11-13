@@ -28,6 +28,8 @@ pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
     let store = generated_local("store");
     let table = generated_local("table");
     let guard = generated_local("guard");
+    let scope = generated_local("scope");
+    let value = generated_local("value");
 
     let loaded: Vec<_> = fields.iter().filter(|field| !field.ignore).collect();
     let known_keys: Vec<_> = loaded
@@ -80,7 +82,7 @@ pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
         TokenStream::new()
     } else {
         quote! {
-            let mut #guard = scope.write().await;
+            let mut #guard = #scope.write().await;
             #( #guard.#loaded_idents = #loaded_locals; )*
         }
     };
@@ -90,7 +92,7 @@ pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
     } else {
         quote! {
             {
-                let #guard = scope.read().await;
+                let #guard = #scope.read().await;
                 let mut #table = #table_type::new();
                 #( #store_statements )*
                 #table
@@ -105,11 +107,11 @@ pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
                 #snapshot
                 #unknown_key_check
                 #( #load_statements )*
-                let value = Self { #(#struct_fields),* };
-                Ok(#crate_private::new_shared_scope(value))
+                let #value = Self { #(#struct_fields),* };
+                Ok(#crate_private::new_shared_scope(#value))
             }
 
-            async fn load(scope: &#shared_scope, #store: &#store_type) -> #result_type<()> {
+            async fn load(#scope: &#shared_scope, #store: &#store_type) -> #result_type<()> {
                 #path_binding
                 #snapshot
                 #unknown_key_check
@@ -118,7 +120,7 @@ pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
                 Ok(())
             }
 
-            async fn save(scope: &#shared_scope, #store: &#store_type) -> #result_type<()> {
+            async fn save(#scope: &#shared_scope, #store: &#store_type) -> #result_type<()> {
                 #path_binding
                 let #table = #section_table;
                 #store.set_section(#section_lit, #table)
@@ -242,18 +244,22 @@ fn store_uses_path(kind: &FieldKind) -> bool {
 
 /// Name of the local holding a field's value inside the generated functions.
 ///
-/// The prefix keeps user field names (e.g. `store`, `scope`) from shadowing the identifiers
-/// used by the generated code. The mixed-site span additionally hides the local from user
-/// expressions, which carry call-site spans.
+/// A separate prefix prevents collisions with the other generated locals; the mixed-site span
+/// hides the local from user expressions, which carry call-site spans.
 fn field_local(ident: &Ident) -> Ident {
-    format_ident!("__confer_{}", ident, span = Span::mixed_site())
+    format_ident!("__confer_field_{}", ident, span = Span::mixed_site())
 }
 
 /// Identifier of a local or parameter of the generated code, such as `store` or `table`.
 ///
-/// It has a mixed-site span, so initializers from `#[confer(ignore = <expr>)]` cannot refer to it.
+/// The prefix avoids ordinary user item names; the mixed-site span hides it from user expressions.
 fn generated_local(name: &str) -> Ident {
-    Ident::new(name, Span::mixed_site())
+    format_ident!("__confer_internal_{}", name, span = Span::mixed_site())
+}
+
+/// Evaluates a user expression in a closure returning the field type.
+fn typed_expression(ty: &syn::Type, expr: &TokenStream) -> TokenStream {
+    quote! { (|| -> #ty { #expr })() }
 }
 
 /// Generates the initial value of an ignored field.
@@ -263,9 +269,19 @@ fn generated_local(name: &str) -> Ident {
 fn ignored_value(field: &Field) -> TokenStream {
     let ty = &field.ty;
     match &field.initializer {
-        Some(init) => quote! { (|| -> #ty { #init })() },
+        Some(init) => typed_expression(ty, init),
         None => quote_spanned! { ty.span() => ::core::default::Default::default() },
     }
+}
+
+/// Generates an explicit missing-key fallback, if one was specified.
+fn default_value(field: &Field) -> Option<TokenStream> {
+    let default = field.default.as_ref()?;
+    let ty = &field.ty;
+    Some(match &default.expr {
+        Some(expr) => typed_expression(ty, expr),
+        None => quote_spanned! { default.span => <#ty as ::core::default::Default>::default() },
+    })
 }
 
 /// Returns the conversion of a loaded field.
@@ -287,24 +303,27 @@ fn load_statements(
     table: &Ident,
     crate_path: &syn::Path,
 ) -> Result<Vec<TokenStream>> {
+    let value = generated_local("value");
     fields
         .iter()
         .filter(|field| !field.ignore)
         .map(|field| {
             let local = field_local(&field.ident);
             let key = LitStr::new(&field.key, field.span);
+            let default = default_value(field);
             let (present, absent) = match field_kind(field)? {
                 FieldKind::Scalar(kind) => (
                     present_value(kind, path, &key, crate_path),
-                    absent_value(kind, field.default.as_ref(), path, &key, crate_path),
+                    absent_value(kind, default.as_ref(), path, &key, crate_path),
                 ),
                 FieldKind::Table(table_type) => {
-                    table_from_value(table_type, path, &key, crate_path)
+                    let (present, absent) = table_from_value(table_type, path, &key, crate_path);
+                    (present, default.unwrap_or(absent))
                 }
             };
             Ok(quote! {
                 let #local = match #table.remove(#key) {
-                    ::core::option::Option::Some(value) => #present,
+                    ::core::option::Option::Some(#value) => #present,
                     ::core::option::Option::None => #absent,
                 };
             })
@@ -314,8 +333,7 @@ fn load_statements(
 
 /// Generates statements inserting every loaded field of `source` into `table`.
 ///
-/// `source` is an expression whose fields are read by reference. `None` options and empty
-/// vectors of tables are omitted.
+/// `source` is an expression whose fields are read by reference. `None` options are omitted.
 fn store_statements(
     fields: &[Field],
     source: &TokenStream,
@@ -323,6 +341,7 @@ fn store_statements(
     table: &Ident,
     crate_path: &syn::Path,
 ) -> Result<Vec<TokenStream>> {
+    let value = generated_local("value");
     fields
         .iter()
         .filter(|field| !field.ignore)
@@ -337,7 +356,7 @@ fn store_statements(
             };
             Ok(quote! {
                 {
-                    let value = &#source.#ident;
+                    let #value = &#source.#ident;
                     #block
                 }
             })
@@ -353,6 +372,7 @@ fn scalar_insert(
     key: &LitStr,
     crate_path: &syn::Path,
 ) -> TokenStream {
+    let local_value = generated_local("value");
     let insert = |value: TokenStream| {
         quote! { #table.insert(::std::string::String::from(#key), #value); }
     };
@@ -362,7 +382,7 @@ fn scalar_insert(
         ContainerKind::Option => {
             let insert = insert(scalar_to_value(&kind.scalar, path, key, crate_path, None));
             quote! {
-                if let ::core::option::Option::Some(value) = value {
+                if let ::core::option::Option::Some(#local_value) = #local_value {
                     #insert
                 }
             }
@@ -370,7 +390,7 @@ fn scalar_insert(
         ContainerKind::OptionVec => {
             let insert = insert(vec_to_value(&kind.scalar, path, key, crate_path));
             quote! {
-                if let ::core::option::Option::Some(value) = value {
+                if let ::core::option::Option::Some(#local_value) = #local_value {
                     #insert
                 }
             }
@@ -401,10 +421,14 @@ fn table_from_value(
 ) -> (TokenStream, TokenStream) {
     let private = quote! { #crate_path::__private };
     let from_table = table_method(table_type, "from_table", crate_path);
+    let value = generated_local("value");
+    let array_path = generated_local("array_path");
+    let out = generated_local("out");
+    let index = generated_local("index");
     let nested = quote! {
         {
-            let value = #private::table(#path, #key, value)?;
-            #from_table(&#private::child_path(#path, #key), value)?
+            let #value = #private::table(#path, #key, #value)?;
+            #from_table(&#private::child_path(#path, #key), #value)?
         }
     };
     match table_type.container {
@@ -421,14 +445,14 @@ fn table_from_value(
         TableContainer::Vec => (
             quote! {
                 {
-                    let value = #private::array(#path, #key, value)?;
-                    let array_path = #private::child_path(#path, #key);
-                    let mut out = ::std::vec::Vec::with_capacity(value.len());
-                    for (index, value) in value.into_iter().enumerate() {
-                        let value = #private::table_element(#path, #key, value, index)?;
-                        out.push(#from_table(&#private::element_path(&array_path, index), value)?);
+                    let #value = #private::array(#path, #key, #value)?;
+                    let #array_path = #private::child_path(#path, #key);
+                    let mut #out = ::std::vec::Vec::with_capacity(#value.len());
+                    for (#index, #value) in #value.into_iter().enumerate() {
+                        let #value = #private::table_element(#path, #key, #value, #index)?;
+                        #out.push(#from_table(&#private::element_path(&#array_path, #index), #value)?);
                     }
-                    out
+                    #out
                 }
             },
             quote! { ::std::vec::Vec::new() },
@@ -449,28 +473,32 @@ fn table_insert(
     let private = quote! { #crate_path::__private };
     let value_type = quote! { #crate_path::toml::Value };
     let to_table = table_method(table_type, "to_table", crate_path);
+    let value = generated_local("value");
+    let array = generated_local("array");
+    let array_path = generated_local("array_path");
+    let index = generated_local("index");
     let insert_nested = quote! {
         #table.insert(
             ::std::string::String::from(#key),
-            #value_type::Table(#to_table(value, &#private::child_path(#path, #key))?),
+            #value_type::Table(#to_table(#value, &#private::child_path(#path, #key))?),
         );
     };
     match table_type.container {
         TableContainer::Plain => insert_nested,
         TableContainer::Option => quote! {
-            if let ::core::option::Option::Some(value) = value {
+            if let ::core::option::Option::Some(#value) = #value {
                 #insert_nested
             }
         },
         TableContainer::Vec => quote! {
-            let array_path = #private::child_path(#path, #key);
-            let mut array = ::std::vec::Vec::with_capacity(value.len());
-            for (index, value) in value.iter().enumerate() {
-                array.push(#value_type::Table(
-                    #to_table(value, &#private::element_path(&array_path, index))?,
+            let #array_path = #private::child_path(#path, #key);
+            let mut #array = ::std::vec::Vec::with_capacity(#value.len());
+            for (#index, #value) in #value.iter().enumerate() {
+                #array.push(#value_type::Table(
+                    #to_table(#value, &#private::element_path(&#array_path, #index))?,
                 ));
             }
-            #table.insert(::std::string::String::from(#key), #value_type::Array(array));
+            #table.insert(::std::string::String::from(#key), #value_type::Array(#array));
         },
     }
 }
@@ -482,6 +510,7 @@ fn present_value(
     key: &LitStr,
     crate_path: &syn::Path,
 ) -> TokenStream {
+    let value = generated_local("value");
     let (convert, adjust) = match kind.container {
         ContainerKind::Plain | ContainerKind::Option => (
             scalar_conversion(&kind.scalar),
@@ -495,7 +524,7 @@ fn present_value(
     let convert = Ident::new(convert, Span::call_site());
     let converted = quote! {
         {
-            let value = #crate_path::__private::#convert(#path, #key, value)?;
+            let #value = #crate_path::__private::#convert(#path, #key, #value)?;
             #adjust
         }
     };
@@ -557,20 +586,21 @@ fn scalar_to_value(
     index: Option<TokenStream>,
 ) -> TokenStream {
     let value_type = quote! { #crate_path::toml::Value };
+    let value = generated_local("value");
     match scalar {
         ScalarKind::String => {
-            quote! { #value_type::String(::core::clone::Clone::clone(value)) }
+            quote! { #value_type::String(::core::clone::Clone::clone(#value)) }
         }
-        ScalarKind::Bool => quote! { #value_type::Boolean(*value) },
+        ScalarKind::Bool => quote! { #value_type::Boolean(*#value) },
         ScalarKind::Datetime => {
-            quote! { #value_type::Datetime(::core::clone::Clone::clone(value)) }
+            quote! { #value_type::Datetime(::core::clone::Clone::clone(#value)) }
         }
         ScalarKind::Integer(kind) => {
-            let raw = integer_to_store(kind, quote! { (*value) }, path, key, crate_path, index);
+            let raw = integer_to_store(kind, quote! { (*#value) }, path, key, crate_path, index);
             quote! { #value_type::Integer(#raw) }
         }
-        ScalarKind::Float(FloatKind::F64) => quote! { #value_type::Float(*value) },
-        ScalarKind::Float(FloatKind::F32) => quote! { #value_type::Float(f64::from(*value)) },
+        ScalarKind::Float(FloatKind::F64) => quote! { #value_type::Float(*#value) },
+        ScalarKind::Float(FloatKind::F32) => quote! { #value_type::Float(f64::from(*#value)) },
     }
 }
 
@@ -581,14 +611,17 @@ fn vec_to_value(
     key: &LitStr,
     crate_path: &syn::Path,
 ) -> TokenStream {
-    let element = scalar_to_value(scalar, path, key, crate_path, Some(quote! { index }));
+    let value = generated_local("value");
+    let index = generated_local("index");
+    let array = generated_local("array");
+    let element = scalar_to_value(scalar, path, key, crate_path, Some(quote! { #index }));
     quote! {
         {
-            let mut array = ::std::vec::Vec::with_capacity(value.len());
-            for (index, value) in value.iter().enumerate() {
-                array.push(#element);
+            let mut #array = ::std::vec::Vec::with_capacity(#value.len());
+            for (#index, #value) in #value.iter().enumerate() {
+                #array.push(#element);
             }
-            #crate_path::toml::Value::Array(array)
+            #crate_path::toml::Value::Array(#array)
         }
     }
 }
@@ -600,8 +633,9 @@ fn scalar_from_store(
     key: &LitStr,
     crate_path: &syn::Path,
 ) -> TokenStream {
+    let value = generated_local("value");
     match scalar {
-        ScalarKind::String | ScalarKind::Bool | ScalarKind::Datetime => quote! { value },
+        ScalarKind::String | ScalarKind::Bool | ScalarKind::Datetime => quote! { #value },
         ScalarKind::Integer(kind) => integer_from_store(kind, path, key, crate_path),
         ScalarKind::Float(kind) => float_from_store(kind, path, key, crate_path),
     }
@@ -614,8 +648,9 @@ fn vec_from_store(
     key: &LitStr,
     crate_path: &syn::Path,
 ) -> TokenStream {
+    let value = generated_local("value");
     match scalar {
-        ScalarKind::String | ScalarKind::Bool | ScalarKind::Datetime => quote! { value },
+        ScalarKind::String | ScalarKind::Bool | ScalarKind::Datetime => quote! { #value },
         ScalarKind::Integer(kind) => integer_vec_from_store(kind, path, key, crate_path),
         ScalarKind::Float(kind) => float_vec_from_store(kind, path, key, crate_path),
     }
@@ -630,9 +665,11 @@ fn integer_from_store(
 ) -> TokenStream {
     let err = quote! { #crate_path::Error };
     let ty = kind.type_tokens();
+    let value = generated_local("value");
+    let v = generated_local("v");
     quote! {
-        match <#ty as ::core::convert::TryFrom<i64>>::try_from(value) {
-            Ok(v) => v,
+        match <#ty as ::core::convert::TryFrom<i64>>::try_from(#value) {
+            Ok(#v) => #v,
             Err(_) => {
                 return Err(#err::value_parse(#path, #key, format!("value out of range for {}", stringify!(#ty))));
             }
@@ -647,20 +684,22 @@ fn float_from_store(
     key: &LitStr,
     crate_path: &syn::Path,
 ) -> TokenStream {
+    let value = generated_local("value");
+    let raw = generated_local("raw");
     match kind {
-        FloatKind::F64 => quote! { value },
+        FloatKind::F64 => quote! { #value },
         FloatKind::F32 => {
             let err = quote! { #crate_path::Error };
             quote! {
                 {
-                    let raw = value;
-                    if !raw.is_finite() {
+                    let #raw = #value;
+                    if !#raw.is_finite() {
                         return Err(#err::value_parse(#path, #key, String::from("non-finite float")));
                     }
-                    if raw < f32::MIN as f64 || raw > f32::MAX as f64 {
+                    if #raw < f32::MIN as f64 || #raw > f32::MAX as f64 {
                         return Err(#err::value_parse(#path, #key, String::from("value out of range for f32")));
                     }
-                    raw as f32
+                    #raw as f32
                 }
             }
         }
@@ -676,18 +715,23 @@ fn integer_vec_from_store(
 ) -> TokenStream {
     let err = quote! { #crate_path::Error };
     let scalar = kind.type_tokens();
+    let value = generated_local("value");
+    let out = generated_local("out");
+    let index = generated_local("index");
+    let raw = generated_local("raw");
+    let v = generated_local("v");
     quote! {
         {
-            let mut out = Vec::with_capacity(value.len());
-            for (index, raw) in value.into_iter().enumerate() {
-                match <#scalar as ::core::convert::TryFrom<i64>>::try_from(raw) {
-                    Ok(v) => out.push(v),
+            let mut #out = Vec::with_capacity(#value.len());
+            for (#index, #raw) in #value.into_iter().enumerate() {
+                match <#scalar as ::core::convert::TryFrom<i64>>::try_from(#raw) {
+                    Ok(#v) => #out.push(#v),
                     Err(_) => {
-                        return Err(#err::value_parse(#path, #key, format!("value out of range for {} (at index {})", stringify!(#scalar), index)));
+                        return Err(#err::value_parse(#path, #key, format!("value out of range for {} (at index {})", stringify!(#scalar), #index)));
                     }
                 }
             }
-            out
+            #out
         }
     }
 }
@@ -699,23 +743,27 @@ fn float_vec_from_store(
     key: &LitStr,
     crate_path: &syn::Path,
 ) -> TokenStream {
+    let value = generated_local("value");
+    let out = generated_local("out");
+    let index = generated_local("index");
+    let raw = generated_local("raw");
     match kind {
-        FloatKind::F64 => quote! { value },
+        FloatKind::F64 => quote! { #value },
         FloatKind::F32 => {
             let err = quote! { #crate_path::Error };
             quote! {
                 {
-                    let mut out = Vec::with_capacity(value.len());
-                    for (index, raw) in value.into_iter().enumerate() {
-                        if !raw.is_finite() {
-                            return Err(#err::value_parse(#path, #key, format!("non-finite float (at index {})", index)));
+                    let mut #out = Vec::with_capacity(#value.len());
+                    for (#index, #raw) in #value.into_iter().enumerate() {
+                        if !#raw.is_finite() {
+                            return Err(#err::value_parse(#path, #key, format!("non-finite float (at index {})", #index)));
                         }
-                        if raw < f32::MIN as f64 || raw > f32::MAX as f64 {
-                            return Err(#err::value_parse(#path, #key, format!("value out of range for f32 (at index {})", index)));
+                        if #raw < f32::MIN as f64 || #raw > f32::MAX as f64 {
+                            return Err(#err::value_parse(#path, #key, format!("value out of range for f32 (at index {})", #index)));
                         }
-                        out.push(raw as f32);
+                        #out.push(#raw as f32);
                     }
-                    out
+                    #out
                 }
             }
         }
@@ -732,6 +780,7 @@ fn integer_to_store(
     index: Option<TokenStream>,
 ) -> TokenStream {
     let err = quote! { #crate_path::Error };
+    let raw = generated_local("raw");
     match kind {
         IntegerKind::I64 | IntegerKind::Isize => quote! { #value as i64 },
         IntegerKind::I8 | IntegerKind::I16 | IntegerKind::I32 => quote! { i64::from(#value) },
@@ -739,19 +788,19 @@ fn integer_to_store(
         IntegerKind::U64 | IntegerKind::Usize => {
             let error_message = match index {
                 Some(index) => quote! {
-                    format!("value `{}` out of range for TOML integer (at index {})", raw, #index)
+                    format!("value `{}` out of range for TOML integer (at index {})", #raw, #index)
                 },
                 None => quote! {
-                    format!("value `{}` out of range for TOML integer", raw)
+                    format!("value `{}` out of range for TOML integer", #raw)
                 },
             };
             quote! {
                 {
-                    let raw = #value as u64;
-                    if raw > i64::MAX as u64 {
+                    let #raw = #value as u64;
+                    if #raw > i64::MAX as u64 {
                         return Err(#err::value_parse(#path, #key, #error_message));
                     }
-                    raw as i64
+                    #raw as i64
                 }
             }
         }

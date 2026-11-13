@@ -33,6 +33,96 @@ fn sub_table<'a>(table: &'a Table, key: &str) -> &'a Table {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Default, ConfigTable)]
+struct DefaultTable {
+    #[confer(default = 8080)]
+    port: u16,
+}
+
+#[derive(Debug, ConfigTable)]
+struct ManualDefaultTable {
+    #[confer(default = 8080)]
+    port: u16,
+}
+
+impl Default for ManualDefaultTable {
+    fn default() -> Self {
+        Self { port: 8080 }
+    }
+}
+
+#[derive(Debug, ConfigScope)]
+struct DefaultTables {
+    #[confer(table, default)]
+    rust_default: DefaultTable,
+    #[confer(table, default)]
+    manual_default: ManualDefaultTable,
+    #[confer(table, default = DefaultTable { port: 42 })]
+    expression: DefaultTable,
+    #[confer(table, default = vec![DefaultTable { port: 99 }])]
+    entries: Vec<DefaultTable>,
+    #[confer(table, default)]
+    empty: Vec<DefaultTable>,
+}
+
+#[tokio::test]
+async fn table_defaults_use_the_field_type_and_roundtrip_empty_vectors() -> Result<()> {
+    let store = ConfigStore::new();
+    let instance = DefaultTables::from_store(&store)?;
+    {
+        let guard = instance.read().await;
+        assert_eq!(guard.rust_default.port, 0);
+        assert_eq!(guard.manual_default.port, 8080);
+        assert_eq!(guard.expression.port, 42);
+        assert_eq!(guard.entries, [DefaultTable { port: 99 }]);
+        assert!(guard.empty.is_empty());
+    }
+    assert_eq!(DefaultTable::from_table("table", Table::new())?.port, 8080);
+
+    instance.write().await.entries.clear();
+    DefaultTables::save(&instance, &store).await?;
+    let restored = DefaultTables::from_store(&ConfigStore::from_str(&store.save_str()?)?)?;
+    let guard = restored.read().await;
+    assert!(guard.entries.is_empty());
+    assert!(guard.empty.is_empty());
+    Ok(())
+}
+
+#[derive(Debug, ConfigScope)]
+struct QualifiedOptions {
+    std_port: std::option::Option<u16>,
+    core_numbers: core::option::Option<Vec<u16>>,
+    #[confer(table)]
+    std_table: std::option::Option<DefaultTable>,
+    #[confer(table)]
+    core_table: core::option::Option<DefaultTable>,
+}
+
+#[tokio::test]
+async fn qualified_options_load_missing_and_present_values() -> Result<()> {
+    let empty = QualifiedOptions::from_store(&ConfigStore::new())?;
+    {
+        let guard = empty.read().await;
+        assert_eq!(guard.std_port, None);
+        assert_eq!(guard.core_numbers, None);
+        assert_eq!(guard.std_table, None);
+        assert_eq!(guard.core_table, None);
+    }
+
+    let store = ConfigStore::from_str(
+        "[QualifiedOptions]\nstd_port = 1\ncore_numbers = [2, 3]\n\
+         [QualifiedOptions.std_table]\nport = 4\n\
+         [QualifiedOptions.core_table]\nport = 5",
+    )?;
+    let present = QualifiedOptions::from_store(&store)?;
+    let guard = present.read().await;
+    assert_eq!(guard.std_port, Some(1));
+    assert_eq!(guard.core_numbers.as_deref(), Some(&[2, 3][..]));
+    assert_eq!(guard.std_table, Some(DefaultTable { port: 4 }));
+    assert_eq!(guard.core_table, Some(DefaultTable { port: 5 }));
+    Ok(())
+}
+
 #[derive(Debug, Clone, PartialEq, ConfigTable)]
 struct Window {
     seconds: u32,
@@ -49,7 +139,7 @@ struct Limits {
 
 #[derive(Debug, Clone, PartialEq, ConfigTable)]
 struct Server {
-    #[confer(default = "localhost")]
+    #[confer(default = "localhost".into())]
     host: String,
     #[confer(default = 8080)]
     port: u16,

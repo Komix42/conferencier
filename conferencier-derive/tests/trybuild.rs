@@ -14,8 +14,9 @@ fn trybuild_suite() {
     t.compile_fail("tests/trybuild/fail_duplicate_keys.rs");
     t.compile_fail("tests/trybuild/fail_unsupported_type.rs");
     t.compile_fail("tests/trybuild/fail_conflicting_attrs.rs");
-    t.compile_fail("tests/trybuild/fail_invalid_datetime.rs");
-    t.compile_fail("tests/trybuild/fail_negative_unsigned.rs");
+    t.compile_fail("tests/trybuild/fail_default_types.rs");
+    t.compile_fail("tests/trybuild/fail_default_options.rs");
+    t.compile_fail("tests/trybuild/fail_default_aliases.rs");
     t.compile_fail("tests/trybuild/fail_init_removed.rs");
     t.compile_fail("tests/trybuild/fail_ignore_conflicts.rs");
     t.compile_fail("tests/trybuild/fail_duplicate_ignore.rs");

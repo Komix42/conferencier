@@ -14,7 +14,7 @@ struct AppSettings {
     /// Mandatory value fetched from TOML (errors if missing).
     port: u16,
     /// Provide a default when the key is absent.
-    #[confer(default = "localhost")]
+    #[confer(default = "localhost".into())]
     host: String,
     /// Optional field becomes `None` when the key is missing.
     banner: Option<String>,

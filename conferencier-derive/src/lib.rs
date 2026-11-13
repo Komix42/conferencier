@@ -32,10 +32,13 @@ use crate::model::DeriveKind;
 ///   the full struct name is used, without a raw identifier's `r#` prefix.
 /// - Struct: `deny_unknown_keys` rejects unmapped keys in this scope's section on
 ///   load. It does not apply to nested table types or other sections.
-/// - Fields: `rename = "key"`, `default = <literal>`, `ignore`,
+/// - Fields: `rename = "key"`, `default`, `default = <expr>`, `ignore`,
 ///   `ignore = <expr>` and `table` control conversion and runtime-only state.
 /// - A field marked `table` must use `T`, `Option<T>` or `Vec<T>` with
 ///   `T: conferencier::ConfigTable`.
+/// - A bare `default` uses the field type's `Default`; an expression has the
+///   field's exact type and runs only when its key is missing. `Option` fields
+///   cannot have a `default`.
 ///
 /// Ignored fields directly in the scope are initialized once in `from_store`
 /// and survive reloads. Unknown TOML keys are ignored on load and removed on save
@@ -89,7 +92,7 @@ pub fn scope_derive(input: TokenStream) -> TokenStream {
 ///
 /// # Helper attributes
 ///
-/// Named fields accept `#[confer(rename = "key")]`, `default = <literal>`,
+/// Named fields accept `#[confer(rename = "key")]`, `default`, `default = <expr>`,
 /// `ignore`, `ignore = <expr>` and `table`, with the same field conversion rules
 /// as [`ConfigScope`]. The struct attribute `deny_unknown_keys` rejects unmapped
 /// keys in this table. It applies only to this type. A table-only derive does not
@@ -113,7 +116,7 @@ pub fn scope_derive(input: TokenStream) -> TokenStream {
 ///
 /// #[derive(ConfigTable)]
 /// struct Server {
-///     #[confer(default = "localhost")]
+///     #[confer(default = "localhost".into())]
 ///     host: String,
 ///     port: u16,
 /// }

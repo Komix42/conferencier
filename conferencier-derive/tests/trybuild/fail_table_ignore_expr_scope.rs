@@ -16,7 +16,7 @@ struct UsesPath {
 #[derive(conferencier_derive::ConfigTable)]
 struct UsesLocal {
     port: u16,
-    #[confer(ignore = __confer_port)]
+    #[confer(ignore = __confer_field_port)]
     copy: u16,
 }
 

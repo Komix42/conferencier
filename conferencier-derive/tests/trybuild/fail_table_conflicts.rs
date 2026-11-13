@@ -4,12 +4,6 @@ struct Inner {
 }
 
 #[derive(conferencier_derive::ConfigScope)]
-struct TableWithDefault {
-    #[confer(table, default = 5)]
-    inner: Inner,
-}
-
-#[derive(conferencier_derive::ConfigScope)]
 struct TableWithIgnore {
     #[confer(table)]
     #[confer(ignore)]

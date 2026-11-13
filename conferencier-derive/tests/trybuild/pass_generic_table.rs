@@ -6,12 +6,12 @@ use conferencier::ConfigTable;
 #[derive(conferencier_derive::ConfigTable)]
 struct Wrapper<T, U>
 where
-    T: ConfigTable,
+    T: ConfigTable + Default,
     U: ConfigTable,
 {
-    #[confer(table)]
+    #[confer(table, default = T::default())]
     inner: T,
-    #[confer(table)]
+    #[confer(table, default = Vec::<U>::new())]
     items: Vec<U>,
     #[confer(ignore = Vec::<T>::new())]
     cache: Vec<T>,
@@ -20,7 +20,7 @@ where
 }
 
 #[allow(dead_code)]
-#[derive(conferencier_derive::ConfigTable)]
+#[derive(Default, conferencier_derive::ConfigTable)]
 struct Leaf {
     value: i64,
 }

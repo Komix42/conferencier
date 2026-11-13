@@ -45,7 +45,7 @@ struct Scalars {
     unsigned: u32,
     ratio: f32,
     precise: f64,
-    stamp: Option<toml::value::Datetime>,
+    stamp: Option<conferencier::Datetime>,
     flags: Vec<bool>,
     ratios: Option<Vec<f32>>,
 }

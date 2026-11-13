@@ -114,7 +114,8 @@ pub trait ConfigScope: Send + Sync + Sized + 'static {
     /// Builds a new shared scope from a snapshot of its section in `store`.
     ///
     /// A missing section is loaded as an empty table, so field defaults apply.
-    /// Required keys without defaults still fail. Derived scopes ignore unknown
+    /// A default expression runs only for a missing key, in field declaration order;
+    /// a present but invalid value does not use it. Derived scopes ignore unknown
     /// keys unless `#[confer(deny_unknown_keys)]` is set.
     /// Ignored fields are initialized once, in declaration order, after all
     /// loaded fields convert successfully.
@@ -136,7 +137,8 @@ pub trait ConfigScope: Send + Sync + Sized + 'static {
     /// before acquiring the scope's write lock. It updates all loaded fields together,
     /// only after every conversion succeeds. Ignored fields of the scope itself are never changed.
     /// Nested [`ConfigTable`](crate::ConfigTable) values are rebuilt, including their
-    /// ignored fields; side effects of their initializers are not rolled back on error.
+    /// ignored fields. Side effects of defaults or initializers already evaluated are
+    /// not rolled back on error or panic; the scope remains unchanged.
     ///
     /// This reads only the in-memory store. Call [`ConfigStore::load_file`] first
     /// when the source is an edited file. Reloading several scopes is not one
@@ -163,7 +165,8 @@ pub trait ConfigScope: Send + Sync + Sized + 'static {
     /// converts them into a new table, releases the scope lock and replaces the store section
     /// in one write. Readers never observe a partially saved section. Other sections
     /// are unchanged; unknown keys and nested tables in the owned section are removed.
-    /// Ignored fields are not written.
+    /// Ignored fields are not written. Computed defaults are saved as ordinary values
+    /// and are not recomputed on a later load while their keys are present.
     /// A scope with only ignored fields saves an empty section without locking `scope`.
     ///
     /// This updates only the in-memory store. [`ConfigStore::save_file`] persists

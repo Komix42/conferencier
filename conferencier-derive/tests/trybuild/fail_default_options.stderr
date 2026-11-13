@@ -1,0 +1,53 @@
+error: #[confer(default)] cannot be used on an Option field: a missing key already loads as None
+       help: use the inner type with #[confer(default = ...)], or remove the attribute
+ --> tests/trybuild/fail_default_options.rs:6:14
+  |
+6 |     #[confer(default)]
+  |              ^^^^^^^
+
+error: #[confer(default)] cannot be used on an Option field: a missing key already loads as None
+       help: use the inner type with #[confer(default = ...)], or remove the attribute
+  --> tests/trybuild/fail_default_options.rs:12:14
+   |
+12 |     #[confer(default = Some(1))]
+   |              ^^^^^^^
+
+error: #[confer(default)] cannot be used on an Option field: a missing key already loads as None
+       help: use the inner type with #[confer(default = ...)], or remove the attribute
+  --> tests/trybuild/fail_default_options.rs:18:14
+   |
+18 |     #[confer(default = None)]
+   |              ^^^^^^^
+
+error: #[confer(default)] cannot be used on an Option field: a missing key already loads as None
+       help: use the inner type with #[confer(default = ...)], or remove the attribute
+  --> tests/trybuild/fail_default_options.rs:24:21
+   |
+24 |     #[confer(table, default)]
+   |                     ^^^^^^^
+
+error: #[confer(default)] cannot be used on an Option field: a missing key already loads as None
+       help: use the inner type with #[confer(default = ...)], or remove the attribute
+  --> tests/trybuild/fail_default_options.rs:30:21
+   |
+30 |     #[confer(table, default = None)]
+   |                     ^^^^^^^
+
+error: #[confer(default)] cannot be used on an Option field: a missing key already loads as None
+       help: use the inner type with #[confer(default = ...)], or remove the attribute
+  --> tests/trybuild/fail_default_options.rs:36:21
+   |
+36 |     #[confer(table, default)]
+   |                     ^^^^^^^
+
+error: duplicate #[confer(default)] attribute
+  --> tests/trybuild/fail_default_options.rs:42:23
+   |
+42 |     #[confer(default, default = 1)]
+   |                       ^^^^^^^
+
+error: duplicate #[confer(default)] attribute
+  --> tests/trybuild/fail_default_options.rs:49:14
+   |
+49 |     #[confer(default)]
+   |              ^^^^^^^

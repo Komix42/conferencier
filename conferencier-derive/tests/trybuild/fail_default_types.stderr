@@ -1,0 +1,113 @@
+error[E0425]: cannot find value `store` in this scope
+  --> tests/trybuild/fail_default_types.rs:21:24
+   |
+21 |     #[confer(default = store)]
+   |                        ^^^^^ not found in this scope
+
+error[E0425]: cannot find value `scope` in this scope
+  --> tests/trybuild/fail_default_types.rs:23:24
+   |
+23 |     #[confer(default = scope)]
+   |                        ^^^^^ not found in this scope
+   |
+help: consider importing this function
+   |
+ 1 + use std::thread::scope;
+   |
+
+error[E0425]: cannot find value `__confer_internal_store` in this scope
+  --> tests/trybuild/fail_default_types.rs:25:24
+   |
+25 |     #[confer(default = __confer_internal_store)]
+   |                        ^^^^^^^^^^^^^^^^^^^^^^^ not found in this scope
+   |
+help: an identifier with the same name is defined here, but is not accessible due to macro hygiene
+  --> tests/trybuild/fail_default_types.rs:15:10
+   |
+15 | #[derive(conferencier_derive::ConfigScope)]
+   |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: this error originates in the derive macro `conferencier_derive::ConfigScope` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0425]: cannot find value `__confer_field_port` in this scope
+  --> tests/trybuild/fail_default_types.rs:27:24
+   |
+27 |     #[confer(default = __confer_field_port)]
+   |                        ^^^^^^^^^^^^^^^^^^^ not found in this scope
+   |
+help: an identifier with the same name is defined here, but is not accessible due to macro hygiene
+  --> tests/trybuild/fail_default_types.rs:15:10
+   |
+15 | #[derive(conferencier_derive::ConfigScope)]
+   |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: this error originates in the derive macro `conferencier_derive::ConfigScope` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0728]: `await` is only allowed inside `async` functions and blocks
+  --> tests/trybuild/fail_default_types.rs:19:40
+   |
+15 | #[derive(conferencier_derive::ConfigScope)]
+   |          -------------------------------- this is not `async`
+...
+19 |     #[confer(default = async { 1_u16 }.await)]
+   |                                        ^^^^^ only allowed inside `async` functions and blocks
+
+error[E0308]: mismatched types
+ --> tests/trybuild/fail_default_types.rs:7:24
+  |
+7 |     #[confer(default = "localhost")]
+  |                        ^^^^^^^^^^^ expected `String`, found `&str`
+8 |     host: String,
+  |           ------ expected `std::string::String` because of return type
+  |
+help: try using a conversion method
+  |
+7 |     #[confer(default = "localhost".to_string())]
+  |                                   ++++++++++++
+
+error[E0308]: mismatched types
+  --> tests/trybuild/fail_default_types.rs:9:24
+   |
+ 9 |     #[confer(default = 1)]
+   |                        ^ expected `f64`, found integer
+10 |     ratio: f64,
+   |            --- expected `f64` because of return type
+   |
+help: use a float literal
+   |
+ 9 |     #[confer(default = 1.0)]
+   |                         ++
+
+error[E0308]: mismatched types
+  --> tests/trybuild/fail_default_types.rs:11:24
+   |
+11 |     #[confer(default = [1, 2])]
+   |                        ^^^^^^ expected `Vec<u16>`, found `[{integer}; 2]`
+12 |     ports: Vec<u16>,
+   |            -------- expected `Vec<u16>` because of return type
+   |
+   = note: expected struct `Vec<u16>`
+               found array `[{integer}; 2]`
+help: try using a conversion method
+   |
+11 |     #[confer(default = [1, 2].to_vec())]
+   |                              +++++++++
+
+error[E0277]: the `?` operator can only be used in a closure that returns `Result` or `Option` (or another type that implements `FromResidual`)
+  --> tests/trybuild/fail_default_types.rs:17:35
+   |
+15 | #[derive(conferencier_derive::ConfigScope)]
+   |          -------------------------------- this function should return `Result` or `Option` to accept `?`
+16 | struct InvalidControlFlow {
+17 |     #[confer(default = read_port()?)]
+   |                                   ^ cannot use the `?` operator in a closure that returns `u16`
+
+error[E0277]: the trait bound `NoDefault: Default` is not satisfied
+  --> tests/trybuild/fail_default_types.rs:39:12
+   |
+39 |     child: NoDefault,
+   |            ^^^^^^^^^ the trait `Default` is not implemented for `NoDefault`
+   |
+help: consider annotating `NoDefault` with `#[derive(Default)]`
+   |
+32 + #[derive(Default)]
+33 | struct NoDefault {
+   |

@@ -8,7 +8,7 @@ struct UsesStore {
 #[derive(conferencier_derive::ConfigScope)]
 struct UsesLocal {
     port: u16,
-    #[confer(ignore = __confer_port)]
+    #[confer(ignore = __confer_field_port)]
     copy: u16,
 }
 

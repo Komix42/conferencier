@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `#[confer(deny_unknown_keys)]` rejects unmapped keys during load, and `Error::UnknownKey` reports them with the formatted table path and raw key ([RFC-0006](docs/RFC-0006_strict_unknown_keys.md)).
 
 ### Changed
+- **Breaking:** `#[confer(default = <expr>)]` takes a Rust expression of exactly the field's type, without implicit literal conversions; `#[confer(default)]` uses the field type's Rust `Default`. Both forms are accepted on table fields, but rejected on syntactically recognized `Option` fields. Defaults run only for missing keys and are saved as ordinary values ([RFC-0007](docs/RFC-0007_default_expressions.md)).
 - **Breaking:** Empty `Vec<T>` table fields are now saved as `key = []` instead of being omitted, so they round-trip as empty even when loading requires a value. TOML does not allow adding `[[key]]` entries after a static array, so remove or replace the array first ([RFC-0007](docs/RFC-0007_default_expressions.md)).
 - **Breaking:** `Error::MissingKey`, `TypeMismatch` and `ValueParse` now store the formatted table path in `path` instead of `section`. Their constructors also take a formatted path; diagnostics quote section and key segments when needed, and non-table top-level entries use an empty path with the entry name as the key. Scalar-array conversion errors identify the zero-based element index ([RFC-0006](docs/RFC-0006_strict_unknown_keys.md)).
 - **Breaking:** Renamed the public API to `ConfigStore`, `ConfigScope`, `SharedScope`, `ConfigTable` and `Error`; `from_confer` is now `from_store`, the derive feature is `derive`, and the old public modules and `value_parse_owned` helper are removed. See [RFC-0005](docs/RFC-0005_api_redesign.md) for the full migration.
@@ -53,10 +54,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 | a nested key with U+0080–U+009F reported literally in an error path | the character is reported as `\u0080`–`\u009F` |
 | `Error::MissingKey`, `TypeMismatch` or `ValueParse` with a `section` field | use the `path` field; constructor arguments use the formatted path |
 | a non-table section mismatch using `key == "<section>"` | an empty `path` and the raw section name in `key` |
+| `String` with `default = "localhost"` | `default = "localhost".into()` |
+| `f32` or `f64` with `default = 1` | `default = 1.0` |
+| `Vec<T>` with `default = [1, 2]`, or `default = []` | `default = vec![1, 2]`, or bare `default` |
+| `Vec<String>` with `default = ["a", "b"]` | `default = vec!["a".into(), "b".into()]` |
+| `Datetime` with `default = "2024-01-01T00:00:00Z"` | `default = "2024-01-01T00:00:00Z".parse().unwrap()` |
+| `Vec<Datetime>` with string literals in `default` | parse each string inside `vec![...]` |
+| `Option<T>` or `Option<Vec<T>>` with a `default` | use the inner type and an expression default to preserve the fallback; or keep `Option` and remove `default` to load a missing key as `None` |
 
 Manual scope implementations drop `#[async_trait]`, make `from_store` synchronous, borrow `&ConfigStore`, and keep `async fn load` and `async fn save`. Manual table implementations only need the new names. Existing helper attributes keep the `#[confer(...)]` name. See [RFC-0005](docs/RFC-0005_api_redesign.md) for the full rationale.
 
+Datetime defaults are parsed when needed; an invalid string in an expression using `unwrap()` panics on a missing key instead of failing at compile time. A bare table `default` calls the table type's `Default`, which may differ from decoding an empty table: for example, a derived Rust `Default` produces `0` for a field with `#[confer(default = 8080)]`.
+
 ### Removed
+- The direct `toml` dependency of `conferencier-derive`; generated code and applications can use the `conferencier` re-exports.
 - The unused `serde` dependency, so builds of `conferencier` no longer compile the `serde_derive` proc-macro.
 
 ### Fixed
