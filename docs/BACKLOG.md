@@ -6,9 +6,16 @@ Unlike the RFCs and implementation reports in this folder, this is a living docu
 
 Each entry states the problem, a possible direction and where it comes from.
 
-## Planned for 0.0.5
+## Planned for 0.0.6
 
-The planned RFCs for 0.0.5 are implemented; see [Done](#done).
+Focus on the reliability of existing file saving, not new configuration features:
+
+1. **Review and address the `save_file` replacement fallback.** Establish when supported platforms use the remove-and-retry path, including failure without concurrent saves, and choose a replacement strategy that avoids deleting the original file before a successful replacement. General coordination of concurrent writers is not a goal.
+2. **Review the `save_file` permission policy.** Assess existing-target replacement and temporary-file exposure on Unix and Windows, then agree on the guarantees and unsupported cases before implementing a fix or documenting an accepted limitation.
+
+Both items are described under [Technical debt](#technical-debt); changes need focused regression tests and matching API documentation. Their final implementation scope follows investigation, not a promise of universal atomicity, crash durability or full filesystem metadata preservation.
+
+The section-name migration guard stays until 0.2.0. New features remain under [Ideas](#ideas); revise the README after 0.0.6 for the 0.1.0 release.
 
 ## Technical debt
 
@@ -42,6 +49,10 @@ The README's [Scope](../README.md#scope) lists these as intentionally left out. 
 - **Format-preserving saves** that keep comments and layout, for example through `toml_edit`. Origin: [RFC-0004](./RFC-0004_nested_tables.md#out-of-scope--future-work).
 - **Layered sources** such as environment variables, command-line arguments or several files. Origin: the README's Scope.
 - **Formats other than TOML.** Origin: [RFC-0001](./RFC-0001_baseline_architecture.md#out-of-scope).
+
+### Documentation
+
+- **Revise the README for 0.1.0.** The README has accumulated attribute details, migration notes, edge cases and operational guidance, making it harder to understand the crate at a glance. Direction: make the introduction and quick start a clear showcase of the crate's purpose and typical use; move detailed reference material and migration guidance to appropriate documentation, keeping important limitations discoverable through links. Keep the root and crate READMEs aligned and preserve runnable examples and doctest coverage; review the derive crate's README for its distinct audience too. Timing: after the 0.0.6 release, for 0.1.0. Origin: the post-0.0.5 planning discussion.
 
 ### Examples
 
