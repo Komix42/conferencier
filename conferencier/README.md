@@ -297,7 +297,7 @@ Conferencier is primarily meant for reading configuration. Saving works, but it 
 - A scope's `save` owns its section, including all tables nested in it: it removes every key and sub-table that is not mapped to a non-ignored field, at any depth (also inside tables mapped with `#[confer(table)]`). In lenient mode, a misspelled key such as `prot = 9090` is ignored on load (`port` falls back to its default) and deleted by the next save. A strict type rejects it on load, but save still replaces the section without rechecking. Other sections are not changed; keep data that no scope owns in a separate section.
 - A computed default is saved like any other loaded value; later loads read that value instead of recomputing it. Use an `Option` with an application-level fallback if the value should stay dynamic after saving.
 - A well-typed default does not necessarily round-trip: a non-finite `f32` such as `f32::NAN` can be saved but is rejected on load.
-- Concurrent `save_file` calls to the same file, even through cloned stores, are safe: each call writes its own temporary file, so each successful call installs one complete snapshot, but which call wins is unspecified. Serialize saves yourself if their order matters. Replacement and durability limitations are described in the [API reference](https://docs.rs/conferencier/latest/conferencier/struct.ConfigStore.html#method.save_file).
+- Concurrent `save_file` calls to the same file, even through cloned stores, never share a temporary file: each successful call installs one complete snapshot, but which call wins is unspecified. Serialize saves yourself if their order matters. Replacement and durability limitations are described in the [API reference](https://docs.rs/conferencier/latest/conferencier/struct.ConfigStore.html#method.save_file).
 
 If people edit the configuration file by hand, prefer to only load it, and use saving mainly to generate an initial configuration file.
 
@@ -306,7 +306,7 @@ If people edit the configuration file by hand, prefer to only load it, and use s
 The crate includes runnable examples:
 
 - `basic_usage` – loads a single scope from an in-memory TOML string, updates it, and saves it back.
-- `advanced_usage` – demonstrates loading from disk, applying updates, and persisting changes atomically.
+- `advanced_usage` – demonstrates loading from disk, applying updates, and saving the updated configuration to a file.
 - `nested_tables` – maps a sub-table and an array of tables to plain structs and shows an error inside a nested table.
 
 Run an example with:

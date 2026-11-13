@@ -204,9 +204,9 @@ impl ConfigStore {
     /// Every call writes its own temporary sibling named
     /// `.conferencier.<process id>.<counter>.tmp`, independent of the target filename,
     /// so long target names remain usable. Concurrent calls to the same target, including
-    /// calls through cloned handles, do not interfere: each successful call installs one
-    /// complete snapshot. Which of several concurrent calls wins is unspecified; an
-    /// application that needs an order serializes its own saves.
+    /// calls through cloned handles, never share a temporary file: each successful call
+    /// installs one complete snapshot. Which of several concurrent calls wins is
+    /// unspecified; an application that needs an order serializes its own saves.
     ///
     /// Replacement uses a rename. If the platform reports that the target already
     /// exists, it is removed before retrying the rename; atomic replacement is
@@ -734,7 +734,9 @@ async fn read_file(path: &Path) -> Result<String> {
         .map_err(|err| Error::io_error(Some(path.to_path_buf()), err))
 }
 
-/// Atomically persists `contents` to `path`, ensuring the file is fully replaced on success.
+/// Persists `contents` to `path` through a temporary sibling and a rename, so a successful
+/// call leaves the complete contents; the replacement is atomic only when the first rename
+/// succeeds (see [`ConfigStore::save_file`]).
 ///
 /// Every call writes its own temporary sibling, so concurrent saves to the same path never
 /// share a temporary file; on error the temporary file is removed. The blocking file
