@@ -17,6 +17,7 @@ fn trybuild_suite() {
     t.compile_fail("tests/trybuild/fail_default_types.rs");
     t.compile_fail("tests/trybuild/fail_default_options.rs");
     t.compile_fail("tests/trybuild/fail_default_aliases.rs");
+    t.compile_fail("tests/trybuild/fail_field_defaults.rs");
     t.compile_fail("tests/trybuild/fail_init_removed.rs");
     t.compile_fail("tests/trybuild/fail_ignore_conflicts.rs");
     t.compile_fail("tests/trybuild/fail_duplicate_ignore.rs");

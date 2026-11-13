@@ -123,6 +123,271 @@ async fn qualified_options_load_missing_and_present_values() -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug, ConfigScope, ConfigTable)]
+#[confer(section = "Required")]
+struct RequiredKeys {
+    scalar: u16,
+    scalars: Vec<u16>,
+    #[confer(table)]
+    table: DefaultTable,
+    #[confer(table)]
+    tables: Vec<DefaultTable>,
+    optional: Option<u16>,
+    optional_vec: Option<Vec<u16>>,
+    #[confer(table)]
+    optional_table: Option<DefaultTable>,
+}
+
+#[test]
+fn required_scalar_and_table_keys_fail_at_the_correct_path() -> Result<()> {
+    for (fields, missing) in [
+        ("", "scalar"),
+        ("scalar = 1", "scalars"),
+        ("scalar = 1\nscalars = []", "table"),
+        ("scalar = 1\nscalars = []\ntable = {}", "tables"),
+    ] {
+        let store = ConfigStore::from_str(&format!("[Required]\n{fields}"))?;
+        let error = error_of(RequiredKeys::from_store(&store));
+        assert!(
+            matches!(&error, Error::MissingKey { path, key }
+                if path == "Required" && key == missing),
+            "unexpected error: {error:?}"
+        );
+
+        let table: Table = fields.parse().unwrap();
+        let error = error_of(RequiredKeys::from_table("Root.inner", table));
+        assert!(
+            matches!(&error, Error::MissingKey { path, key }
+                if path == "Root.inner" && key == missing),
+            "unexpected error: {error:?}"
+        );
+    }
+
+    let store =
+        ConfigStore::from_str("[Required]\nscalar = 1\nscalars = []\ntable = {}\ntables = []")?;
+    let scope = RequiredKeys::from_store(&store)?;
+    let guard = scope.try_read().expect("no other guard exists");
+    assert_eq!(guard.scalar, 1);
+    assert!(guard.scalars.is_empty());
+    assert_eq!(guard.table.port, 8080);
+    assert!(guard.tables.is_empty());
+    assert_eq!(guard.optional, None);
+    assert_eq!(guard.optional_vec, None);
+    assert_eq!(guard.optional_table, None);
+    Ok(())
+}
+
+mod field_defaults {
+    use super::*;
+
+    static INITIALIZERS: AtomicU32 = AtomicU32::new(0);
+    static ORDER: AtomicU32 = AtomicU32::new(0);
+
+    fn next_initializer() -> u32 {
+        INITIALIZERS.fetch_add(1, Ordering::SeqCst)
+    }
+
+    fn next_order() -> u32 {
+        ORDER.fetch_add(1, Ordering::SeqCst)
+    }
+
+    #[derive(Debug, ConfigTable)]
+    #[confer(deny_unknown_keys)]
+    struct Child {
+        #[confer(default = 8080)]
+        port: u16,
+        note: Option<String>,
+        #[confer(ignore = next_initializer())]
+        runtime: u32,
+    }
+
+    #[derive(Debug, ConfigScope)]
+    #[confer(section = "FieldDefaults", deny_unknown_keys)]
+    struct Scope {
+        before: u16,
+        #[confer(field_defaults, rename = "child.with.dot", table)]
+        child: Child,
+    }
+
+    #[tokio::test]
+    async fn missing_and_present_tables_use_their_own_conversion_rules() -> Result<()> {
+        INITIALIZERS.store(0, Ordering::SeqCst);
+        let store = ConfigStore::from_str("[FieldDefaults]\nbefore = 1")?;
+        let scope = Scope::from_store(&store)?;
+        {
+            let guard = scope.read().await;
+            assert_eq!(guard.before, 1);
+            assert_eq!(
+                (guard.child.port, guard.child.note.as_deref()),
+                (8080, None)
+            );
+            assert_eq!(guard.child.runtime, 0);
+        }
+        assert!(
+            !store
+                .get_section("FieldDefaults")
+                .unwrap()
+                .contains_key("child.with.dot")
+        );
+
+        store.load_str("[FieldDefaults]\nbefore = 2\n\"child.with.dot\" = {}")?;
+        Scope::load(&scope, &store).await?;
+        {
+            let guard = scope.read().await;
+            assert_eq!(guard.before, 2);
+            assert_eq!(
+                (guard.child.port, guard.child.note.as_deref()),
+                (8080, None)
+            );
+            assert_eq!(guard.child.runtime, 1);
+        }
+
+        store.load_str(
+            "[FieldDefaults]\nbefore = 3\n\"child.with.dot\" = { port = 90, note = \"configured\" }",
+        )?;
+        Scope::load(&scope, &store).await?;
+        {
+            let guard = scope.read().await;
+            assert_eq!(guard.before, 3);
+            assert_eq!(
+                (
+                    guard.child.port,
+                    guard.child.note.as_deref(),
+                    guard.child.runtime
+                ),
+                (90, Some("configured"), 2)
+            );
+        }
+
+        store.load_str("[FieldDefaults]\nbefore = 4\n\"child.with.dot\" = 5")?;
+        let error = error_of(Scope::load(&scope, &store).await);
+        assert!(
+            matches!(&error, Error::TypeMismatch { path, key, expected: "table", found: "integer" }
+                if path == "FieldDefaults" && key == "child.with.dot"),
+            "unexpected error: {error:?}"
+        );
+
+        store.load_str(
+            "[FieldDefaults]\nbefore = 4\n\"child.with.dot\" = { port = 90, typo = true }",
+        )?;
+        let error = error_of(Scope::load(&scope, &store).await);
+        assert!(
+            matches!(&error, Error::UnknownKey { path, key }
+                if path == "FieldDefaults.\"child.with.dot\"" && key == "typo"),
+            "unexpected error: {error:?}"
+        );
+        {
+            let guard = scope.read().await;
+            assert_eq!(
+                (guard.before, guard.child.port, guard.child.runtime),
+                (3, 90, 2)
+            );
+        }
+        assert_eq!(INITIALIZERS.load(Ordering::SeqCst), 3);
+
+        store.load_str("[FieldDefaults]\nbefore = 5")?;
+        Scope::load(&scope, &store).await?;
+        Scope::save(&scope, &store).await?;
+        let saved = store.get_section("FieldDefaults").unwrap();
+        assert_eq!(
+            sub_table(&saved, "child.with.dot").get("port"),
+            Some(&Value::Integer(8080))
+        );
+        let reloaded = Scope::from_store(&ConfigStore::from_str(&store.save_str()?)?)?;
+        assert_eq!(reloaded.read().await.child.port, 8080);
+        Ok(())
+    }
+
+    #[derive(Debug)]
+    struct Manual {
+        path: String,
+        was_empty: bool,
+    }
+
+    impl ConfigTable for Manual {
+        fn from_table(path: &str, table: Table) -> Result<Self> {
+            Ok(Self {
+                path: path.into(),
+                was_empty: table.is_empty(),
+            })
+        }
+
+        fn to_table(&self, _path: &str) -> Result<Table> {
+            Ok(Table::new())
+        }
+    }
+
+    #[derive(Debug, ConfigTable)]
+    struct ManualOuter {
+        #[confer(table, field_defaults, rename = "manual.key")]
+        manual: Manual,
+    }
+
+    #[test]
+    fn manual_table_receives_an_empty_table_and_nested_path() -> Result<()> {
+        let value = ManualOuter::from_table("Root.outer", Table::new())?;
+        assert!(value.manual.was_empty);
+        assert_eq!(value.manual.path, "Root.outer.\"manual.key\"");
+        Ok(())
+    }
+
+    #[derive(Debug, ConfigTable)]
+    struct RequiredInner {
+        value: u16,
+    }
+
+    #[derive(Debug, ConfigScope)]
+    #[confer(section = "Atomic")]
+    struct AtomicScope {
+        before: u16,
+        #[confer(table, field_defaults, rename = "child.key")]
+        child: RequiredInner,
+    }
+
+    #[tokio::test]
+    async fn missing_required_inner_field_reports_path_and_keeps_scope() -> Result<()> {
+        let store = ConfigStore::from_str("[Atomic]\nbefore = 1\n\"child.key\" = { value = 2 }")?;
+        let scope = AtomicScope::from_store(&store)?;
+        store.load_str("[Atomic]\nbefore = 9")?;
+
+        let error = error_of(AtomicScope::load(&scope, &store).await);
+        assert!(
+            matches!(&error, Error::MissingKey { path, key }
+                if path == "Atomic.\"child.key\"" && key == "value"),
+            "unexpected error: {error:?}"
+        );
+        let guard = scope.read().await;
+        assert_eq!((guard.before, guard.child.value), (1, 2));
+        assert_eq!(store.get_integer("Atomic", "before")?, 9);
+        Ok(())
+    }
+
+    #[derive(Debug, ConfigTable)]
+    struct OrderedInner {
+        #[confer(default = next_order())]
+        order: u32,
+    }
+
+    #[derive(Debug, ConfigScope)]
+    struct Ordered {
+        #[confer(default = next_order())]
+        before: u32,
+        #[confer(table, field_defaults)]
+        inner: OrderedInner,
+        #[confer(default = next_order())]
+        after: u32,
+    }
+
+    #[test]
+    fn empty_table_fallback_runs_at_the_fields_position() -> Result<()> {
+        ORDER.store(0, Ordering::SeqCst);
+        let scope = Ordered::from_store(&ConfigStore::new())?;
+        let guard = scope.try_read().expect("no other guard exists");
+        assert_eq!((guard.before, guard.inner.order, guard.after), (0, 1, 2));
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, ConfigTable)]
 struct Window {
     seconds: u32,
@@ -143,7 +408,7 @@ struct Server {
     host: String,
     #[confer(default = 8080)]
     port: u16,
-    #[confer(table)]
+    #[confer(table, field_defaults)]
     limits: Limits,
 }
 
@@ -168,7 +433,7 @@ struct StrictOuter {
 #[derive(Debug, ConfigScope)]
 #[confer(section = "Outer")]
 struct LenientOuter {
-    #[confer(table)]
+    #[confer(table, field_defaults)]
     child: StrictChild,
     #[confer(table)]
     children: Vec<StrictChild>,
@@ -266,11 +531,11 @@ struct Upstream {
 #[confer(section = "App")]
 struct App {
     name: String,
-    #[confer(table)]
+    #[confer(table, field_defaults)]
     server: Server,
     #[confer(table, rename = "tls-config")]
     tls: Option<Tls>,
-    #[confer(table)]
+    #[confer(table, default)]
     upstream: Vec<Upstream>,
 }
 
@@ -394,6 +659,13 @@ struct Strict {
     tls: Tls,
 }
 
+#[derive(Debug, ConfigScope)]
+#[confer(section = "Strict")]
+struct StrictWithFieldDefaults {
+    #[confer(table, field_defaults)]
+    tls: Tls,
+}
+
 #[tokio::test]
 async fn absent_tables_follow_their_shape() -> Result<()> {
     let module = App::from_store(&ConfigStore::from_str("[App]\nname = \"demo\"")?)?;
@@ -416,6 +688,16 @@ async fn absent_tables_follow_their_shape() -> Result<()> {
     let error = error_of(Strict::from_store(&ConfigStore::from_str("[Strict]")?));
     assert!(
         matches!(&error, Error::MissingKey { path, key }
+            if path == "Strict" && key == "tls"),
+        "unexpected error: {error:?}"
+    );
+    assert_eq!(error.to_string(), "missing key Strict.tls");
+
+    let error = error_of(StrictWithFieldDefaults::from_store(&ConfigStore::from_str(
+        "[Strict]",
+    )?));
+    assert!(
+        matches!(&error, Error::MissingKey { path, key }
             if path == "Strict.tls" && key == "cert"),
         "unexpected error: {error:?}"
     );
@@ -431,7 +713,7 @@ struct Extras {
 #[derive(Debug, ConfigScope)]
 #[confer(section = "Sparse")]
 struct Sparse {
-    #[confer(table)]
+    #[confer(table, field_defaults)]
     extras: Extras,
 }
 
@@ -535,7 +817,7 @@ struct Weighted {
 struct Checked {
     #[confer(table)]
     server: Option<Endpoint>,
-    #[confer(table)]
+    #[confer(table, default)]
     upstream: Vec<Weighted>,
     #[confer(table, rename = "my key")]
     spaced: Option<Endpoint>,
@@ -730,7 +1012,7 @@ struct Session {
 struct Sessions {
     #[confer(table)]
     main: Session,
-    #[confer(table)]
+    #[confer(table, default)]
     extra: Vec<Session>,
     port: u16,
     #[confer(ignore = 100)]
@@ -835,7 +1117,7 @@ async fn nested_save_errors_leave_the_store_unchanged() -> Result<()> {
 #[derive(Debug, Clone, PartialEq, ConfigTable)]
 struct TreeNode {
     name: String,
-    #[confer(table)]
+    #[confer(table, default)]
     children: Vec<TreeNode>,
 }
 
@@ -1099,7 +1381,7 @@ mod hygiene {
         guard: bool,
         value: f64,
         key: u64,
-        #[confer(table)]
+        #[confer(table, default)]
         index: Vec<Names>,
     }
 

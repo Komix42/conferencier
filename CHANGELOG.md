@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `#[confer(deny_unknown_keys)]` rejects unmapped keys during load, and `Error::UnknownKey` reports them with the formatted table path and raw key ([RFC-0006](docs/RFC-0006_strict_unknown_keys.md)).
 
 ### Changed
+- **Breaking:** Missing table `T` and table `Vec<T>` fields now follow the same rule as scalar fields: use an explicit fallback, use `None` for an `Option`, or return `Error::MissingKey`. `#[confer(table, field_defaults)]` explicitly decodes a missing single table from an empty table; `#[confer(table, default)]` uses the field type's Rust `Default` instead ([RFC-0007](docs/RFC-0007_default_expressions.md)).
 - **Breaking:** `#[confer(default = <expr>)]` takes a Rust expression of exactly the field's type, without implicit literal conversions; `#[confer(default)]` uses the field type's Rust `Default`. Both forms are accepted on table fields, but rejected on syntactically recognized `Option` fields. Defaults run only for missing keys and are saved as ordinary values ([RFC-0007](docs/RFC-0007_default_expressions.md)).
 - **Breaking:** Empty `Vec<T>` table fields are now saved as `key = []` instead of being omitted, so they round-trip as empty even when loading requires a value. TOML does not allow adding `[[key]]` entries after a static array, so remove or replace the array first ([RFC-0007](docs/RFC-0007_default_expressions.md)).
 - **Breaking:** `Error::MissingKey`, `TypeMismatch` and `ValueParse` now store the formatted table path in `path` instead of `section`. Their constructors also take a formatted path; diagnostics quote section and key segments when needed, and non-table top-level entries use an empty path with the entry name as the key. Scalar-array conversion errors identify the zero-based element index ([RFC-0006](docs/RFC-0006_strict_unknown_keys.md)).
@@ -61,10 +62,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 | `Datetime` with `default = "2024-01-01T00:00:00Z"` | `default = "2024-01-01T00:00:00Z".parse().unwrap()` |
 | `Vec<Datetime>` with string literals in `default` | parse each string inside `vec![...]` |
 | `Option<T>` or `Option<Vec<T>>` with a `default` | use the inner type and an expression default to preserve the fallback; or keep `Option` and remove `default` to load a missing key as `None` |
+| `#[confer(table)] server: T` relying on an empty-table load | `#[confer(table, field_defaults)]` to preserve it, or use a Rust `default` if that value is intended |
+| `#[confer(table)] upstream: Vec<T>` relying on an empty vector | `#[confer(table, default)]` |
+| `#[confer(table)] server: Option<T>` | unchanged: a missing key is `None` |
 
 Manual scope implementations drop `#[async_trait]`, make `from_store` synchronous, borrow `&ConfigStore`, and keep `async fn load` and `async fn save`. Manual table implementations only need the new names. Existing helper attributes keep the `#[confer(...)]` name. See [RFC-0005](docs/RFC-0005_api_redesign.md) for the full rationale.
 
-Datetime defaults are parsed when needed; an invalid string in an expression using `unwrap()` panics on a missing key instead of failing at compile time. A bare table `default` calls the table type's `Default`, which may differ from decoding an empty table: for example, a derived Rust `Default` produces `0` for a field with `#[confer(default = 8080)]`.
+Datetime defaults are parsed when needed; an invalid string in an expression using `unwrap()` panics on a missing key instead of failing at compile time.
+
+For a missing single table, choose the intended behavior explicitly:
+
+| Declaration | Missing table |
+| --- | --- |
+| `#[confer(table)] server: T` | `MissingKey` |
+| `#[confer(table, default)] server: T` | Rust `T::default()` |
+| `#[confer(table, field_defaults)] server: T` | decode an empty table, including inner defaults and required-key errors |
+| `#[confer(table)] server: Option<T>` | `None` |
+
+**Table migration warning:** A derived Rust `Default` produces `0` for a `u16` field with `#[confer(default = 8080)]`; a missing table decoded using `field_defaults` produces `8080`. Use `field_defaults` to preserve the old empty-table behavior, or check the `Default` implementation and supply an expression if a different value is intended. Migrate nested table fallbacks recursively.
 
 ### Removed
 - The direct `toml` dependency of `conferencier-derive`; generated code and applications can use the `conferencier` re-exports.

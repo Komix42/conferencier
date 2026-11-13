@@ -20,6 +20,13 @@ where
 }
 
 #[allow(dead_code)]
+#[derive(conferencier_derive::ConfigTable)]
+struct FieldDefaults<T: ConfigTable> {
+    #[confer(field_defaults, rename = "inner-key", table,)]
+    inner: T,
+}
+
+#[allow(dead_code)]
 #[derive(Default, conferencier_derive::ConfigTable)]
 struct Leaf {
     value: i64,

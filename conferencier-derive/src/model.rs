@@ -41,6 +41,8 @@ pub struct Field {
     pub kind: Option<FieldKind>,
     /// Explicit fallback for a missing key; only present on loaded fields.
     pub default: Option<FieldDefault>,
+    /// Loads a missing single table from an empty table.
+    pub field_defaults: bool,
     /// Expression from `#[confer(ignore = <expr>)]`; only present on ignored fields.
     pub initializer: Option<TokenStream>,
     pub ignore: bool,

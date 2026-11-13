@@ -144,6 +144,7 @@ fn parse_field(
 
     let mut rename: Option<(String, Span)> = None;
     let mut default: Option<FieldDefault> = None;
+    let mut field_defaults: Option<Span> = None;
     let mut initializer: Option<Expr> = None;
     let mut ignore: Option<Span> = None;
     let mut table = false;
@@ -174,6 +175,15 @@ fn parse_field(
                     None
                 };
                 default = Some(FieldDefault { expr, span });
+                Ok(())
+            } else if meta.path.is_ident("field_defaults") {
+                if field_defaults.is_some() {
+                    return Err(meta.error("duplicate #[confer(field_defaults)] attribute"));
+                }
+                if !meta.input.is_empty() && !meta.input.peek(Token![,]) {
+                    return Err(meta.error("#[confer(field_defaults)] takes no value"));
+                }
+                field_defaults = Some(meta.path.span());
                 Ok(())
             } else if meta.path.is_ident("init") {
                 Err(meta.error(INIT_REMOVED))
@@ -208,6 +218,21 @@ fn parse_field(
             return Err(syn::Error::new(
                 span,
                 "#[confer(table)] cannot be combined with #[confer(ignore)]",
+            ));
+        }
+    }
+
+    if let Some(span) = field_defaults {
+        if !table {
+            return Err(syn::Error::new(
+                span,
+                "#[confer(field_defaults)] requires #[confer(table)]",
+            ));
+        }
+        if default.is_some() {
+            return Err(syn::Error::new(
+                span,
+                "#[confer(field_defaults)] cannot be combined with #[confer(default)]",
             ));
         }
     }
@@ -252,6 +277,17 @@ fn parse_field(
         Some(FieldKind::Scalar(classify_type(&field.ty, derive)?))
     };
 
+    if let Some(span) = field_defaults {
+        if let Some(FieldKind::Table(kind)) = &kind {
+            if !matches!(kind.container, TableContainer::Plain) {
+                return Err(syn::Error::new(
+                    span,
+                    "#[confer(field_defaults)] requires a single table field",
+                ));
+            }
+        }
+    }
+
     let is_option = match &kind {
         Some(FieldKind::Scalar(kind)) => {
             matches!(
@@ -279,6 +315,7 @@ fn parse_field(
         key,
         kind,
         default,
+        field_defaults: field_defaults.is_some(),
         initializer: initializer_tokens,
         ignore,
         span: field.span(),

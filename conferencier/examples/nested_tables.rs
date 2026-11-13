@@ -29,10 +29,10 @@ struct Upstream {
 struct AppSettings {
     name: String,
     /// A sub-table; written as `[App.server]` or `server = { ... }`.
-    #[confer(table)]
+    #[confer(table, field_defaults)]
     server: Server,
     /// An array of tables; an absent key loads as an empty list.
-    #[confer(table)]
+    #[confer(table, default)]
     upstream: Vec<Upstream>,
 }
 

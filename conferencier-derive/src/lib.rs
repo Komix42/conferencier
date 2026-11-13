@@ -33,12 +33,15 @@ use crate::model::DeriveKind;
 /// - Struct: `deny_unknown_keys` rejects unmapped keys in this scope's section on
 ///   load. It does not apply to nested table types or other sections.
 /// - Fields: `rename = "key"`, `default`, `default = <expr>`, `ignore`,
-///   `ignore = <expr>` and `table` control conversion and runtime-only state.
+///   `ignore = <expr>`, `table` and `field_defaults` control conversion and runtime-only state.
 /// - A field marked `table` must use `T`, `Option<T>` or `Vec<T>` with
 ///   `T: conferencier::ConfigTable`.
 /// - A bare `default` uses the field type's `Default`; an expression has the
 ///   field's exact type and runs only when its key is missing. `Option` fields
 ///   cannot have a `default`.
+/// - `#[confer(table, field_defaults)]` loads a missing single table from an
+///   empty table, applying its field defaults without calling the type's `Default`.
+///   Other missing required keys report `MissingKey`.
 ///
 /// Ignored fields directly in the scope are initialized once in `from_store`
 /// and survive reloads. Unknown TOML keys are ignored on load and removed on save
@@ -93,11 +96,11 @@ pub fn scope_derive(input: TokenStream) -> TokenStream {
 /// # Helper attributes
 ///
 /// Named fields accept `#[confer(rename = "key")]`, `default`, `default = <expr>`,
-/// `ignore`, `ignore = <expr>` and `table`, with the same field conversion rules
-/// as [`ConfigScope`]. The struct attribute `deny_unknown_keys` rejects unmapped
-/// keys in this table. It applies only to this type. A table-only derive does not
-/// accept `section`; a struct deriving both traits can use it for the scope
-/// implementation.
+/// `ignore`, `ignore = <expr>`, `table` and `field_defaults`, with the same field
+/// conversion rules as [`ConfigScope`]. The struct attribute `deny_unknown_keys`
+/// rejects unmapped keys in this table. It applies only to this type. A table-only
+/// derive does not accept `section`; a struct deriving both traits can use it for
+/// the scope implementation.
 ///
 /// Ignored fields are initialized whenever a new table value is constructed,
 /// including on a scope reload. Unknown keys are ignored on load and omitted

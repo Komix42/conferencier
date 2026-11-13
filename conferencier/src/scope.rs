@@ -115,8 +115,11 @@ pub trait ConfigScope: Send + Sync + Sized + 'static {
     ///
     /// A missing section is loaded as an empty table, so field defaults apply.
     /// A default expression runs only for a missing key, in field declaration order;
-    /// a present but invalid value does not use it. Derived scopes ignore unknown
-    /// keys unless `#[confer(deny_unknown_keys)]` is set.
+    /// a present but invalid value does not use it. A missing key uses its explicit
+    /// fallback, `None` for an `Option`, or returns [`Error::MissingKey`](crate::Error::MissingKey).
+    /// `#[confer(table, field_defaults)]` selects an empty-table load for a single
+    /// table; a bare `default` uses the table type's Rust `Default` instead.
+    /// Derived scopes ignore unknown keys unless `#[confer(deny_unknown_keys)]` is set.
     /// Ignored fields are initialized once, in declaration order, after all
     /// loaded fields convert successfully.
     ///

@@ -45,7 +45,7 @@ struct AppConfig {
 - A scope defaults to the full struct name as its TOML section. Through 0.1.x, an affected legacy name such as `ConferApp` requires `section = "App"` to keep the old section or `section = "ConferApp"` to adopt the full name. The migration check is removed in 0.2.0 and does not apply to a table-only derive.
 - Scopes and stores are separate values: neither derive starts a background task or performs file I/O. A scope's `save` replaces its whole section, including nested tables and unknown keys.
 
-For the detailed [attribute reference](https://docs.rs/conferencier#derive-attributes) (`section`, `rename`, `default`, `ignore`, `table`) and supported field types, see the main crate's documentation.
+For the detailed [attribute reference](https://docs.rs/conferencier#derive-attributes) (`section`, `rename`, `default`, `ignore`, `table`, `field_defaults`) and supported field types, see the main crate's documentation.
 
 ## License
 

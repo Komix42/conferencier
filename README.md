@@ -98,10 +98,13 @@ Every field is either loaded from TOML or ignored by the configuration file.
 
 - `#[confer(default = <expr>)]` uses a Rust expression of exactly the field's type when its key is missing. For example, use `"localhost".into()` for `String`, `1.0` for `f64`, `vec!["a".into(), "b".into()]` for `Vec<String>`, and `"07:30".parse().unwrap()` for `Datetime`. An invalid datetime string then panics when the missing-key fallback is evaluated.
     - Defaults run in field declaration order, only when their key is missing; a present but invalid value returns an error instead. A failed load leaves the scope unchanged, but earlier expression side effects are not undone.
-    - A syntactically recognized `Option<T>` or `Option<Vec<T>>` loads as `None` when missing and cannot have a `default`. Type aliases are opaque to the derive.
-    - A missing plain scalar or scalar `Vec` without a default returns `Error::MissingKey`; table fields have the rules described below.
+    - A syntactically recognized `Option<T>` or `Option<Vec<T>>` cannot have a `default`. Type aliases are opaque to the derive.
 
 - `#[confer(table)]` maps the field to a nested table or an array of tables; see [Nested tables](#nested-tables).
+
+- `#[confer(table, field_defaults)]` loads a missing single table from an empty table, applying its fields' defaults and reporting any required inner key. The table type need not implement `Default`. It may be combined with `rename`, but not with `default`, `ignore`, `Option<T>` or `Vec<T>`.
+
+For every loaded field, a missing key uses its explicit `default` or `field_defaults`, otherwise `None` for a syntactically recognized `Option`, or else `Error::MissingKey`.
 
 **Ignored fields** are never read from or written to TOML. They have no key, so they are not checked for key collisions. Use them for runtime-only state (see [Configuration and runtime state](#configuration-and-runtime-state)) or for types the derive does not support (e.g., maps):
 
@@ -124,6 +127,7 @@ Migrating from 0.0.3: `#[confer(init = ...)]` was removed. Replace `ignore, init
 - Nested tables: `T`, `Option<T>` and `Vec<T>` where `T` implements `ConfigTable`, with `#[confer(table)]`.
 
 If a type falls outside this set, the derive emits a compile error with a friendly message.
+Type aliases are opaque: scalar aliases are unsupported, and table aliases are treated as single table types that must implement `ConfigTable`, even if they name an `Option`.
 
 ### TOML compatibility
 
@@ -142,6 +146,7 @@ TOML 1.1 times may omit seconds (for example `07:30`, or `"07:30".parse().unwrap
 - "cannot be combined with `#[confer(ignore)]`" → an ignored field has no TOML key; use `#[confer(ignore = <expr>)]` instead of `default`, and drop `rename`.
 - A default expression must have the field's type: for a `String`, write `"text".into()` rather than `"text"`; for a `Vec`, use `vec![...]` rather than an array literal.
 - "`#[confer(default)] cannot be used on an Option field`" → remove the attribute to keep `None` on a missing key, or use the inner type with a default when a value is required.
+- "`missing key App.server`" for a formerly implicit table → make it required, add `#[confer(table, field_defaults)]` to decode an empty table, or choose an explicit Rust `default`. Migrate nested table fallbacks too.
 
 ## Nested tables
 
@@ -168,9 +173,9 @@ struct Upstream {
 #[derive(ConfigScope)]
 #[confer(section = "App")]
 struct AppConfig {
-    #[confer(table)]
+    #[confer(table, field_defaults)]
     server: Server,
-    #[confer(table)]
+    #[confer(table, default)]
     upstream: Vec<Upstream>,
 }
 
@@ -199,16 +204,17 @@ weight = 3
 }
 ```
 
-A table type takes the same field attributes as a scope (`rename`, `default`, `ignore` and `table`), so tables can be nested to any depth. A table field has one of these shapes, where `T` implements `ConfigTable`:
+A table type takes the same field attributes as a scope (`rename`, `default`, `ignore`, `table` and `field_defaults`), so tables can be nested to any depth. A table field has one of these shapes, where `T` implements `ConfigTable`:
 
 | Field type | TOML | Key missing on load | Save |
 | --- | --- | --- | --- |
-| `T` | table: `[App.server]` or `server = { ... }` | explicit `default`, or loaded from an empty table if none is given | always written |
+| `T` | table: `[App.server]` or `server = { ... }` | explicit `default` or `field_defaults`; otherwise `MissingKey` | always written |
 | `Option<T>` | table | `None` | `None` removes the key |
-| `Vec<T>` | array of tables: `[[App.upstream]]` or `upstream = [{ ... }]` | explicit `default`, or empty `Vec` if none is given | always written, including as `upstream = []` |
+| `Vec<T>` | array of tables: `[[App.upstream]]` or `upstream = [{ ... }]` | explicit `default`; otherwise `MissingKey` | always written, including as `upstream = []` |
 
-- An absent table `Vec<T>` without `default` loads as empty, while an absent scalar `Vec` without `default` (e.g. `Vec<String>`) fails with `MissingKey`. An empty `Vec<T>` is saved as `upstream = []`; TOML does not allow adding `[[App.upstream]]` entries after that array, so remove or replace it first.
-- `#[confer(table, default)]` calls the table field's Rust `Default`, not its fields' `confer` defaults. For example, a derived `Default` gives `0` to a `u16` field even if that field has `#[confer(default = 8080)]`; omitting the table's `default` instead decodes an empty table and applies the inner defaults.
+- An empty `Vec<T>` is saved as `upstream = []`; TOML does not allow adding `[[App.upstream]]` entries after that array, so remove or replace it first.
+- `#[confer(table, default)]` calls the table field's Rust `Default`, not its fields' `confer` defaults. For example, a derived `Default` gives `0` to a `u16` field even if that field has `#[confer(default = 8080)]`. To preserve the old missing-table behavior, use `#[confer(table, field_defaults)]` instead: it decodes an empty table, giving `8080` or reporting a required inner key. Apply the same migration to nested table fields.
+- `field_defaults` also applies to manually implemented `ConfigTable`s, which receive an empty table and the nested diagnostic path. Derived strict tables check the empty table before converting its fields.
 - `#[confer(table)]` cannot be combined with `ignore`. Other shapes such as `Option<Vec<T>>`, `Box<T>` or maps are not supported.
 - Errors keep a formatted table `path` and a logical key; diagnostic output quotes dotted or otherwise non-bare TOML key segments. For example, a missing `a.b` key reports `missing key App."a.b"`. Scalar-array conversion errors include the zero-based element index, e.g. `invalid value at App.ports: value out of range for u16 (at index 1)`.
 - Tables are plain values: every successful `load` builds them anew. Ignored fields inside a table type are therefore initialized again on each load (with `Default::default()` or their `ignore = <expr>` initializer), unlike ignored fields of the scope itself. If the load fails, the scope keeps its previous state, but side effects of initializers that have already run are not undone.

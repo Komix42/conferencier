@@ -83,10 +83,11 @@ use crate::Result;
 pub trait ConfigTable: Sized {
     /// Constructs a value from an owned table, using `path` for error reporting.
     ///
-    /// The derived implementation applies explicit defaults to absent keys, uses
-    /// `None` for optional fields and ignores unknown keys unless
-    /// `#[confer(deny_unknown_keys)]` is set. An empty table is a valid input, but
-    /// required scalar fields without defaults still fail.
+    /// For an absent key, the derived implementation applies an explicit fallback,
+    /// uses `None` for an `Option`, or returns [`Error::MissingKey`](crate::Error::MissingKey).
+    /// `#[confer(table, field_defaults)]` loads a missing single nested table from
+    /// an empty table without requiring the nested type to implement `Default`.
+    /// Unknown keys are ignored unless `#[confer(deny_unknown_keys)]` is set.
     ///
     /// Ignored fields are initialized after this table's loaded fields convert.
     /// Each call creates a fresh value; side effects of default expressions or

@@ -311,16 +311,36 @@ fn load_statements(
             let local = field_local(&field.ident);
             let key = LitStr::new(&field.key, field.span);
             let default = default_value(field);
-            let (present, absent) = match field_kind(field)? {
+            let (present, optional, fallback) = match field_kind(field)? {
                 FieldKind::Scalar(kind) => (
                     present_value(kind, path, &key, crate_path),
-                    absent_value(kind, default.as_ref(), path, &key, crate_path),
+                    matches!(
+                        kind.container,
+                        ContainerKind::Option | ContainerKind::OptionVec
+                    ),
+                    default,
                 ),
                 FieldKind::Table(table_type) => {
-                    let (present, absent) = table_from_value(table_type, path, &key, crate_path);
-                    (present, default.unwrap_or(absent))
+                    let fallback = if field.field_defaults {
+                        let from_table = table_method(table_type, "from_table", crate_path);
+                        let private = quote! { #crate_path::__private };
+                        Some(quote! {
+                            #from_table(
+                                &#private::child_path(#path, #key),
+                                #crate_path::toml::Table::new(),
+                            )?
+                        })
+                    } else {
+                        default
+                    };
+                    (
+                        table_from_value(table_type, path, &key, crate_path),
+                        matches!(table_type.container, TableContainer::Option),
+                        fallback,
+                    )
                 }
             };
+            let absent = absent_value(optional, fallback.as_ref(), path, &key, crate_path);
             Ok(quote! {
                 let #local = match #table.remove(#key) {
                     ::core::option::Option::Some(#value) => #present,
@@ -409,16 +429,16 @@ fn table_method(table_type: &TableType, method: &str, crate_path: &syn::Path) ->
     }
 }
 
-/// Converts a present TOML `value` of a table field and handles its absence.
+/// Converts a present TOML `value` of a table field.
 ///
-/// Returns the expressions for the present and the absent case. Array elements are checked and
-/// converted one at a time, so the first error in declaration order is reported (L5).
+/// Array elements are checked and converted one at a time, so the first error in declaration
+/// order is reported (L5).
 fn table_from_value(
     table_type: &TableType,
     path: &TokenStream,
     key: &LitStr,
     crate_path: &syn::Path,
-) -> (TokenStream, TokenStream) {
+) -> TokenStream {
     let private = quote! { #crate_path::__private };
     let from_table = table_method(table_type, "from_table", crate_path);
     let value = generated_local("value");
@@ -432,31 +452,20 @@ fn table_from_value(
         }
     };
     match table_type.container {
-        TableContainer::Plain => (
-            nested,
-            quote! {
-                #from_table(&#private::child_path(#path, #key), #crate_path::toml::Table::new())?
-            },
-        ),
-        TableContainer::Option => (
-            quote! { ::core::option::Option::Some(#nested) },
-            quote! { ::core::option::Option::None },
-        ),
-        TableContainer::Vec => (
-            quote! {
-                {
-                    let #value = #private::array(#path, #key, #value)?;
-                    let #array_path = #private::child_path(#path, #key);
-                    let mut #out = ::std::vec::Vec::with_capacity(#value.len());
-                    for (#index, #value) in #value.into_iter().enumerate() {
-                        let #value = #private::table_element(#path, #key, #value, #index)?;
-                        #out.push(#from_table(&#private::element_path(&#array_path, #index), #value)?);
-                    }
-                    #out
+        TableContainer::Plain => nested,
+        TableContainer::Option => quote! { ::core::option::Option::Some(#nested) },
+        TableContainer::Vec => quote! {
+            {
+                let #value = #private::array(#path, #key, #value)?;
+                let #array_path = #private::child_path(#path, #key);
+                let mut #out = ::std::vec::Vec::with_capacity(#value.len());
+                for (#index, #value) in #value.into_iter().enumerate() {
+                    let #value = #private::table_element(#path, #key, #value, #index)?;
+                    #out.push(#from_table(&#private::element_path(&#array_path, #index), #value)?);
                 }
-            },
-            quote! { ::std::vec::Vec::new() },
-        ),
+                #out
+            }
+        },
     }
 }
 
@@ -538,20 +547,16 @@ fn present_value(
 
 /// Handles missing keys by applying defaults, converting to `None` or returning `MissingKey`.
 fn absent_value(
-    kind: &FieldType,
-    default: Option<&TokenStream>,
+    optional: bool,
+    fallback: Option<&TokenStream>,
     path: &TokenStream,
     key: &LitStr,
     crate_path: &syn::Path,
 ) -> TokenStream {
-    match (kind.container, default) {
-        (_, Some(default)) => quote! { #default },
-        (ContainerKind::Plain | ContainerKind::Vec, None) => {
-            quote! { return Err(#crate_path::Error::missing_key(#path, #key)) }
-        }
-        (ContainerKind::Option | ContainerKind::OptionVec, None) => {
-            quote! { ::core::option::Option::None }
-        }
+    match (optional, fallback) {
+        (_, Some(fallback)) => quote! { #fallback },
+        (true, None) => quote! { ::core::option::Option::None },
+        (false, None) => quote! { return Err(#crate_path::Error::missing_key(#path, #key)) },
     }
 }
 
