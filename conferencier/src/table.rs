@@ -30,7 +30,9 @@ use crate::Result;
 ///
 /// Implementations own the input table and can move values out instead of cloning
 /// them. Use [`Error`](crate::Error)'s constructors to attach `path` and the failing
-/// key to conversion errors. Return a complete table from `to_table`, not a patch.
+/// key to conversion errors. When delegating to a nested table, extend `path`
+/// with [`table_path`](crate::table_path) so that its errors carry the same
+/// paths as derived tables. Return a complete table from `to_table`, not a patch.
 /// These signatures and their TOML types may change while the API is in alpha.
 ///
 /// # Example

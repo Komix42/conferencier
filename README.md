@@ -206,7 +206,7 @@ A table type takes the same field attributes as a scope (`rename`, `default`, `i
 - Tables are plain values: every successful `load` builds them anew. Ignored fields inside a table type are therefore initialized again on each load (with `Default::default()` or their `ignore = <expr>` initializer), unlike ignored fields of the scope itself. If the load fails, the scope keeps its previous state, but side effects of initializers that have already run are not undone.
 - One struct can derive both `ConfigScope` and `ConfigTable`; `section` then applies only to the scope. `#[derive(ConfigScope)]` alone does not make a struct usable as a table field.
 - `#[confer(section = "App.server")]` does not refer to the nested table `[App.server]`: it names a top-level section whose name contains a dot (saved as `["App.server"]`). A nested table always belongs to the scope of its top-level section.
-- A generic table field needs an explicit bound such as `where T: ConfigTable`. `ConfigTable` can also be implemented manually; see its documentation.
+- A generic table field needs an explicit bound such as `where T: ConfigTable`. `ConfigTable` can also be implemented manually; see its documentation. Manual implementations can build the same diagnostic paths as the derive with `conferencier::table_path::{section_path, child_path, element_path}`, which are available without the `derive` feature.
 
 ## Reloading configuration
 
