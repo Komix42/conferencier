@@ -89,7 +89,7 @@ For a missing single table, choose the intended behavior explicitly:
 
 ### Fixed
 - `#[confer(deny_unknown_keys)]` now accepts following attributes and trailing commas in the same `#[confer(...)]` list instead of mistaking them for a value.
-- Concurrent `save_file` calls to the same path, including calls through cloned stores, no longer corrupt the file or fail. Every call writes its own uniquely named temporary file instead of a shared `<filename>.tmp`, so each successful call installs one complete snapshot; which of several concurrent calls wins is unspecified. The temporary file is also removed when the write or rename fails.
+- Concurrent `save_file` calls to the same path, including calls through cloned stores, use separate uniquely named temporary files instead of a shared `<filename>.tmp`, avoiding the previous temporary-file corruption. Every successful call installs one complete snapshot; which of several calls wins is unspecified. On platforms where replacement removes the existing target before retrying the rename, concurrent saves can still fail if another save removes the target first. The temporary file is removed when the write or rename fails.
 
 ## [0.0.4] - 2026-11-11
 

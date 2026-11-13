@@ -20,8 +20,9 @@ use crate::Result;
 /// traits are derived, `section` applies only to the scope.
 /// Mark an owning field `#[confer(table)]` and use `T`, `Option<T>` or `Vec<T>`
 /// to represent a table, an optional table or an array of tables respectively.
-/// Unknown keys are ignored on load and are not returned on save unless the type
-/// has `#[confer(deny_unknown_keys)]`. Strictness belongs to each type and is not
+/// Unknown keys are ignored on load unless the type has
+/// `#[confer(deny_unknown_keys)]`. `to_table` returns only keys mapped by loaded
+/// fields, even for strict types. Strictness belongs to each type and is not
 /// inherited from its containing scope or table.
 ///
 /// Tables are plain values, not shared scope handles. Loading a scope rebuilds
@@ -88,7 +89,8 @@ pub trait ConfigTable: Sized {
     /// uses `None` for an `Option`, or returns [`Error::MissingKey`](crate::Error::MissingKey).
     /// `#[confer(table, field_defaults)]` loads a missing single nested table from
     /// an empty table without requiring the nested type to implement `Default`.
-    /// Unknown keys are ignored unless `#[confer(deny_unknown_keys)]` is set.
+    /// Unknown keys are ignored on load unless `#[confer(deny_unknown_keys)]`
+    /// is set. This does not change `to_table`, which includes only loaded fields.
     ///
     /// Ignored fields are initialized after this table's loaded fields convert.
     /// Each call creates a fresh value; side effects of default expressions or

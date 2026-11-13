@@ -44,8 +44,9 @@ use crate::model::DeriveKind;
 ///   Other missing required keys report `MissingKey`.
 ///
 /// Ignored fields directly in the scope are initialized once in `from_store`
-/// and survive reloads. Unknown TOML keys are ignored on load and removed on save
-/// unless `deny_unknown_keys` is set.
+/// and survive reloads. `deny_unknown_keys` rejects unknown TOML keys on load.
+/// Saving always replaces the scope's whole section, removing keys that do not
+/// map to loaded fields.
 /// See the [attribute reference](https://docs.rs/conferencier#derive-attributes)
 /// for supported scalar types, defaults and nested-table semantics.
 ///
@@ -103,9 +104,9 @@ pub fn scope_derive(input: TokenStream) -> TokenStream {
 /// the scope implementation, regardless of derive order or macro aliases.
 ///
 /// Ignored fields are initialized whenever a new table value is constructed,
-/// including on a scope reload. Unknown keys are ignored on load and omitted
-/// from the returned table unless `deny_unknown_keys` is set. `ConfigScope` alone
-/// does not implement this trait.
+/// including on a scope reload. `deny_unknown_keys` rejects unknown keys on load;
+/// `to_table` always returns only keys mapped by loaded fields. `ConfigScope`
+/// alone does not implement this trait.
 ///
 /// The temporary `Confer` prefix migration check applies only to the scope
 /// implementation, not to a table-only derive.

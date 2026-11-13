@@ -210,9 +210,10 @@ impl ConfigStore {
     ///
     /// Replacement uses a rename. If the platform reports that the target already
     /// exists, it is removed before retrying the rename; atomic replacement is
-    /// therefore not guaranteed on that path. This method does not promise crash
-    /// durability. The temporary file is removed when a write or rename fails, but a
-    /// crash can leave it behind.
+    /// therefore not guaranteed on that path. Concurrent saves can fail in this
+    /// fallback if another save removes the target first. This method does not promise
+    /// crash durability. The temporary file is removed when a write or rename fails,
+    /// but a crash can leave it behind.
     ///
     /// # Errors
     ///
