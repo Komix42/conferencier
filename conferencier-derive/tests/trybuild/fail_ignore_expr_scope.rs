@@ -1,14 +1,14 @@
-// Initializers cannot see the `store` argument or the locals of the generated `from_confer`.
-#[derive(conferencier_derive::ConferModule)]
+// Initializers cannot see the `store` argument or the locals of the generated `from_store`.
+#[derive(conferencier_derive::ConfigScope)]
 struct UsesStore {
     #[confer(ignore = store.clone())]
-    handle: conferencier::SharedConfer,
+    handle: conferencier::ConfigStore,
 }
 
-#[derive(conferencier_derive::ConferModule)]
+#[derive(conferencier_derive::ConfigScope)]
 struct UsesLocal {
     port: u16,
-    #[confer(ignore = __confer_port)]
+    #[confer(ignore = __confer_field_port)]
     copy: u16,
 }
 

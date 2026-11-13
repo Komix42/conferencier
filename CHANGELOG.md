@@ -6,6 +6,93 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.0.5] - 2026-11-13
+
+### Added
+- Expanded rustdoc for the complete public API, with examples, conversion and error semantics, snapshot behavior, scope lock guidance and the current file-write limitations. The READMEs explain scopes, the `derive` feature and `#[confer(...)]`, and include the updated reload examples.
+- Public `table_path::{section_path, child_path, element_path}` helpers build the derive's diagnostic paths in manual `ConfigScope` and `ConfigTable` implementations, with or without the `derive` feature ([RFC-0006](docs/RFC-0006_strict_unknown_keys.md)).
+- `#[confer(deny_unknown_keys)]` rejects unmapped keys during load, and `Error::UnknownKey` reports them with the formatted table path and raw key ([RFC-0006](docs/RFC-0006_strict_unknown_keys.md)).
+
+### Changed
+- `ConfigStore::save_file` uses a temporary filename independent of the target filename, so saving files with long valid names no longer exceeds the filesystem's per-component filename limit.
+- **Breaking:** A struct deriving only `ConfigTable` rejects `#[confer(section = "...")]` instead of silently ignoring it. Remove the attribute, or derive `ConfigScope` as well if a top-level scope is intended ([RFC-0008](docs/RFC-0008_table_section.md)).
+- **Breaking:** Missing table `T` and table `Vec<T>` fields now follow the same rule as scalar fields: use an explicit fallback, use `None` for an `Option`, or return `Error::MissingKey`. `#[confer(table, field_defaults)]` explicitly decodes a missing single table from an empty table; `#[confer(table, default)]` uses the field type's Rust `Default` instead ([RFC-0007](docs/RFC-0007_default_expressions.md)).
+- **Breaking:** `#[confer(default = <expr>)]` takes a Rust expression of exactly the field's type, without implicit literal conversions; `#[confer(default)]` uses the field type's Rust `Default`. Both forms are accepted on table fields, but rejected on syntactically recognized `Option` fields. Defaults run only for missing keys and are saved as ordinary values ([RFC-0007](docs/RFC-0007_default_expressions.md)).
+- **Breaking:** Empty `Vec<T>` table fields are now saved as `key = []` instead of being omitted, so they round-trip as empty even when loading requires a value. TOML does not allow adding `[[key]]` entries after a static array, so remove or replace the array first ([RFC-0007](docs/RFC-0007_default_expressions.md)).
+- **Breaking:** `Error::MissingKey`, `TypeMismatch` and `ValueParse` now store the formatted table path in `path` instead of `section`. Their constructors also take a formatted path; diagnostics quote section and key segments when needed, and non-table top-level entries use an empty path with the entry name as the key. Scalar-array conversion errors identify the zero-based element index ([RFC-0006](docs/RFC-0006_strict_unknown_keys.md)).
+- **Breaking:** Renamed the public API to `ConfigStore`, `ConfigScope`, `SharedScope`, `ConfigTable` and `Error`; `from_confer` is now `from_store`, the derive feature is `derive`, and the old public modules and `value_parse_owned` helper are removed. See [RFC-0005](docs/RFC-0005_api_redesign.md) for the full migration.
+- **Breaking:** `ConfigStore` is a cloneable handle whose clones share one document; `SharedConfer` is gone. Its in-memory methods are synchronous (no `.await`), and only `from_file`, `load_file` and `save_file` stay async. The store uses `std::sync::RwLock` and recovers from a poisoned lock.
+- **Breaking:** `from_string` is now `from_str` (`ConfigStore` also implements `FromStr`), `from_file` is async and replaces `from_file_async`, and there is no blocking file constructor. `get_section_table`, `set_section_table`, `section_exists` and `add_section` are now `get_section`, `set_section`, `has_section` and `ensure_section`; `remove_section` returns `()`.
+- **Breaking:** `ConfigScope::from_store` is synchronous, and `from_store`, `load` and `save` borrow the store (`&ConfigStore`) instead of taking it by value.
+- **Breaking:** `ConfigScope` no longer uses `#[async_trait]`: `load` and `save` return `impl Future<Output = Result<()>> + Send`, so generic code can spawn them. Manual implementations drop `#[async_trait]` and keep `async fn load`/`async fn save`. The `async-trait` dependency is removed.
+- **Breaking:** The default section name is the full struct name; a leading `Confer` word is no longer stripped. A `ConfigScope` such as `ConferApp` without `#[confer(section = ...)]` fails to compile with a message naming both choices: `section = "App"` keeps the 0.0.4 section, `section = "ConferApp"` uses the full name. This check stays through 0.1.x and is removed in 0.2.0, so upgrade from 0.0.4 through a 0.1.x release, or add an explicit section before upgrading to 0.2.0 directly.
+- **Breaking:** Quoted nested segments of diagnostic paths escape U+0080–U+009F as uppercase `\uXXXX`, like the other control characters, instead of writing them literally ([RFC-0006](docs/RFC-0006_strict_unknown_keys.md) P2).
+
+#### Migration from 0.0.4
+
+| 0.0.4 | 0.0.5 |
+| --- | --- |
+| `Confer` | `ConfigStore` |
+| `SharedConfer` (`Arc<Confer>`) | `ConfigStore` |
+| `Confer::new()` | `ConfigStore::new()` |
+| `Confer::from_string(source)?` | `ConfigStore::from_str(source)?` or `source.parse::<ConfigStore>()?` |
+| `Confer::from_file(path)?` (blocking) | `ConfigStore::from_file(path).await?`; outside a runtime `ConfigStore::from_str(&std::fs::read_to_string(path)?)?` |
+| `Confer::from_file_async(path).await?` | `ConfigStore::from_file(path).await?` |
+| `store.get_section_table(section).await` | `store.get_section(section)` |
+| `store.set_section_table(section, table).await?` | `store.set_section(section, table)?` |
+| `store.section_exists(section).await` | `store.has_section(section)` |
+| `store.add_section(section).await?` | `store.ensure_section(section)?` |
+| `store.remove_section(section).await?` | `store.remove_section(section)` — returns `()` |
+| other in-memory methods, e.g. `store.get_integer(section, key).await?` | the same name without `.await`: `store.get_integer(section, key)?` |
+| `store.load_file(path).await?`, `store.save_file(path).await?` | unchanged |
+| `ConferModule` (trait and derive) | `ConfigScope` |
+| `SharedConferModule<T>` | `SharedScope<T>` |
+| `T::from_confer(store.clone()).await?` | `T::from_store(&store)?` |
+| `T::load(&module, store.clone()).await?` | `T::load(&scope, &store).await?` |
+| `T::save(&module, store.clone()).await?` | `T::save(&scope, &store).await?` |
+| `ConferTable` (trait and derive) | `ConfigTable` |
+| `ConferError` | `Error` |
+| `ConferError::value_parse_owned(...)` | `Error::value_parse(...)` |
+| paths through `conferencier::confer_module`, `conferencier::confer_table`, `conferencier::error` | the crate root, e.g. `conferencier::ConfigScope` |
+| feature `with-derive` | feature `derive` |
+| struct `ConferApp` relying on the default section `[App]` | add `#[confer(section = "App")]` to keep it, or add `#[confer(section = "ConferApp")]` and rename the TOML section to `[ConferApp]` |
+| a nested key with U+0080–U+009F reported literally in an error path | the character is reported as `\u0080`–`\u009F` |
+| `Error::MissingKey`, `TypeMismatch` or `ValueParse` with a `section` field | use the `path` field; constructor arguments use the formatted path |
+| a non-table section mismatch using `key == "<section>"` | an empty `path` and the raw section name in `key` |
+| `String` with `default = "localhost"` | `default = "localhost".into()` |
+| `f32` or `f64` with `default = 1` | `default = 1.0` |
+| `Vec<T>` with `default = [1, 2]`, or `default = []` | `default = vec![1, 2]`, or bare `default` |
+| `Vec<String>` with `default = ["a", "b"]` | `default = vec!["a".into(), "b".into()]` |
+| `Datetime` with `default = "2024-01-01T00:00:00Z"` | `default = "2024-01-01T00:00:00Z".parse().unwrap()` |
+| `Vec<Datetime>` with string literals in `default` | parse each string inside `vec![...]` |
+| `Option<T>` or `Option<Vec<T>>` with a `default` | use the inner type and an expression default to preserve the fallback; or keep `Option` and remove `default` to load a missing key as `None` |
+| `#[confer(table)] server: T` relying on an empty-table load | `#[confer(table, field_defaults)]` to preserve it, or use a Rust `default` if that value is intended |
+| `#[confer(table)] upstream: Vec<T>` relying on an empty vector | `#[confer(table, default)]` |
+| `#[confer(table)] server: Option<T>` | unchanged: a missing key is `None` |
+
+Manual scope implementations drop `#[async_trait]`, make `from_store` synchronous, borrow `&ConfigStore`, and keep `async fn load` and `async fn save`. Manual table implementations only need the new names. Existing helper attributes keep the `#[confer(...)]` name. See [RFC-0005](docs/RFC-0005_api_redesign.md) for the full rationale.
+
+Datetime defaults are parsed when needed; an invalid string in an expression using `unwrap()` panics on a missing key instead of failing at compile time.
+
+For a missing single table, choose the intended behavior explicitly:
+
+| Declaration | Missing table |
+| --- | --- |
+| `#[confer(table)] server: T` | `MissingKey` |
+| `#[confer(table, default)] server: T` | Rust `T::default()` |
+| `#[confer(table, field_defaults)] server: T` | decode an empty table, including inner defaults and required-key errors |
+| `#[confer(table)] server: Option<T>` | `None` |
+
+**Table migration warning:** A derived Rust `Default` produces `0` for a `u16` field with `#[confer(default = 8080)]`; a missing table decoded using `field_defaults` produces `8080`. Use `field_defaults` to preserve the old empty-table behavior, or check the `Default` implementation and supply an expression if a different value is intended. Migrate nested table fallbacks recursively.
+
+### Removed
+- The direct `toml` dependency of `conferencier-derive`; generated code and applications can use the `conferencier` re-exports.
+- The unused `serde` dependency, so builds of `conferencier` no longer compile the `serde_derive` proc-macro.
+
+### Fixed
+- `#[confer(deny_unknown_keys)]` now accepts following attributes and trailing commas in the same `#[confer(...)]` list instead of mistaking them for a value.
+- Concurrent `save_file` calls to the same path, including calls through cloned stores, use separate uniquely named temporary files instead of a shared `<filename>.tmp`, avoiding the previous temporary-file corruption. Every successful call installs one complete snapshot; which of several calls wins is unspecified. On platforms where replacement removes the existing target before retrying the rename, concurrent saves can still fail if another save removes the target first. The temporary file is removed when the write or rename fails.
+
 ## [0.0.4] - 2026-11-11
 
 ### Added

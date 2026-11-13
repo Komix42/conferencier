@@ -3,23 +3,16 @@ error[E0425]: cannot find value `store` in this scope
   |
 4 |     #[confer(ignore = store.clone())]
   |                       ^^^^^ not found in this scope
-  |
-help: an identifier with the same name is defined here, but is not accessible due to macro hygiene
- --> tests/trybuild/fail_ignore_expr_scope.rs:2:10
-  |
-2 | #[derive(conferencier_derive::ConferModule)]
-  |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  = note: this error originates in the derive macro `conferencier_derive::ConferModule` (in Nightly builds, run with -Z macro-backtrace for more info)
 
-error[E0425]: cannot find value `__confer_port` in this scope
+error[E0425]: cannot find value `__confer_field_port` in this scope
   --> tests/trybuild/fail_ignore_expr_scope.rs:11:23
    |
-11 |     #[confer(ignore = __confer_port)]
-   |                       ^^^^^^^^^^^^^ not found in this scope
+11 |     #[confer(ignore = __confer_field_port)]
+   |                       ^^^^^^^^^^^^^^^^^^^ not found in this scope
    |
 help: an identifier with the same name is defined here, but is not accessible due to macro hygiene
   --> tests/trybuild/fail_ignore_expr_scope.rs:8:10
    |
- 8 | #[derive(conferencier_derive::ConferModule)]
-   |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-   = note: this error originates in the derive macro `conferencier_derive::ConferModule` (in Nightly builds, run with -Z macro-backtrace for more info)
+ 8 | #[derive(conferencier_derive::ConfigScope)]
+   |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: this error originates in the derive macro `conferencier_derive::ConfigScope` (in Nightly builds, run with -Z macro-backtrace for more info)

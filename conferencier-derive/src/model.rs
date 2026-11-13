@@ -4,7 +4,7 @@ use syn::{Ident, Type};
 /// Derive macro being expanded; selects error messages and the generated trait.
 #[derive(Debug, Clone, Copy)]
 pub enum DeriveKind {
-    Module,
+    Scope,
     Table,
 }
 
@@ -12,20 +12,24 @@ impl DeriveKind {
     /// Name of the derive macro, used in error messages.
     pub fn name(self) -> &'static str {
         match self {
-            Self::Module => "ConferModule",
-            Self::Table => "ConferTable",
+            Self::Scope => "ConfigScope",
+            Self::Table => "ConfigTable",
         }
     }
 }
 
-/// Intermediate representation of a struct annotated with `#[derive(ConferModule)]` or
-/// `#[derive(ConferTable)]`.
+/// Intermediate representation of a struct annotated with `#[derive(ConfigScope)]` or
+/// `#[derive(ConfigTable)]`.
 #[derive(Debug, Clone)]
-pub struct Module {
+pub struct Scope {
     pub ident: Ident,
     pub generics: syn::Generics,
-    /// TOML section of a module; validated but unused for tables.
+    /// TOML section of a scope; validated but unused for tables.
     pub section: String,
+    /// Span of an explicit section attribute, if present.
+    pub section_span: Option<Span>,
+    /// Rejects keys not mapped to loaded fields during table conversion.
+    pub deny_unknown_keys: bool,
     pub fields: Vec<Field>,
 }
 
@@ -37,11 +41,20 @@ pub struct Field {
     pub key: String,
     /// Conversion of a loaded field; `None` for ignored fields.
     pub kind: Option<FieldKind>,
-    /// Literal fallback for a missing key; only present on loaded scalar fields.
-    pub default: Option<TokenStream>,
+    /// Explicit fallback for a missing key; only present on loaded fields.
+    pub default: Option<FieldDefault>,
+    /// Loads a missing single table from an empty table.
+    pub field_defaults: bool,
     /// Expression from `#[confer(ignore = <expr>)]`; only present on ignored fields.
     pub initializer: Option<TokenStream>,
     pub ignore: bool,
+    pub span: Span,
+}
+
+/// A bare `default` or an expression, with the attribute span for diagnostics.
+#[derive(Debug, Clone)]
+pub struct FieldDefault {
+    pub expr: Option<TokenStream>,
     pub span: Span,
 }
 
@@ -60,7 +73,7 @@ pub struct FieldType {
     pub scalar: ScalarKind,
 }
 
-/// Type of a `#[confer(table)]` field: a container around a type implementing `ConferTable`.
+/// Type of a `#[confer(table)]` field: a container around a type implementing `ConfigTable`.
 #[derive(Debug, Clone)]
 pub struct TableType {
     pub container: TableContainer,
@@ -130,24 +143,6 @@ impl IntegerKind {
             Self::U32 => quote::quote!(u32),
             Self::U64 => quote::quote!(u64),
             Self::Usize => quote::quote!(usize),
-        }
-    }
-
-    /// Returns `true` for unsigned integer types.
-    pub fn is_unsigned(&self) -> bool {
-        matches!(
-            self,
-            Self::U8 | Self::U16 | Self::U32 | Self::U64 | Self::Usize
-        )
-    }
-}
-
-impl FloatKind {
-    /// Returns the Rust type tokens for the floating-point variant.
-    pub fn type_tokens(&self) -> TokenStream {
-        match self {
-            Self::F32 => quote::quote!(f32),
-            Self::F64 => quote::quote!(f64),
         }
     }
 }

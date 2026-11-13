@@ -10,9 +10,12 @@ Thanks for your interest in improving **conferencier**! This quick guide explain
    ```powershell
    cargo test --workspace --all-features
    cargo test -p conferencier --no-default-features
+   cargo test -p conferencier --features toml/preserve_order --test scope_integration strict_scope_reports_smallest_unknown_key_with_preserved_order --locked -- --ignored
    ```
 
    The first command covers both crates, including the compile-fail tests of the derive macro. Their expected compiler output (`conferencier-derive/tests/trybuild/*.stderr`) follows the latest stable Rust. If you change a diagnostic on purpose, rerun the tests with the `TRYBUILD=overwrite` environment variable set and review the updated files.
+
+   The last command runs the otherwise ignored strict-ordering test with `toml/preserve_order`; it checks that the feature actually preserves insertion order before testing the reported key.
 
 3. **Check formatting, lints and docs**:
 

@@ -5,6 +5,7 @@ Status: Implemented
 Author: Komix42 <komix[at]ignore.cz>
 Target release: 0.0.4
 Amends: [RFC-0001](./RFC-0001_baseline_architecture.md)
+Amended by: [RFC-0005](./RFC-0005_api_redesign.md), [RFC-0007](./RFC-0007_default_expressions.md)
 
 ## Document Scope
 

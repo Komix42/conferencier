@@ -1,4 +1,4 @@
-error: unsupported field type `Server`; nested structs require #[confer(table)] on the field and #[derive(ConferTable)] on the type
+error: unsupported field type `Server`; nested structs require #[confer(table)] on the field and #[derive(ConfigTable)] on the type
  --> tests/trybuild/fail_table_missing_attribute.rs:8:13
   |
 8 |     server: Server,

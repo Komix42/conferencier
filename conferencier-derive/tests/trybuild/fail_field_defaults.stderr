@@ -1,0 +1,82 @@
+error: #[confer(field_defaults)] requires #[confer(table)]
+ --> tests/trybuild/fail_field_defaults.rs:8:14
+  |
+8 |     #[confer(field_defaults)]
+  |              ^^^^^^^^^^^^^^
+
+error: #[confer(field_defaults)] requires a single table field
+  --> tests/trybuild/fail_field_defaults.rs:14:21
+   |
+14 |     #[confer(table, field_defaults)]
+   |                     ^^^^^^^^^^^^^^
+
+error: #[confer(field_defaults)] requires a single table field
+  --> tests/trybuild/fail_field_defaults.rs:20:21
+   |
+20 |     #[confer(table, field_defaults)]
+   |                     ^^^^^^^^^^^^^^
+
+error: #[confer(field_defaults)] requires a single table field
+  --> tests/trybuild/fail_field_defaults.rs:26:21
+   |
+26 |     #[confer(table, field_defaults)]
+   |                     ^^^^^^^^^^^^^^
+
+error: #[confer(field_defaults)] cannot be combined with #[confer(default)]
+  --> tests/trybuild/fail_field_defaults.rs:32:21
+   |
+32 |     #[confer(table, field_defaults, default)]
+   |                     ^^^^^^^^^^^^^^
+
+error: #[confer(field_defaults)] cannot be combined with #[confer(default)]
+  --> tests/trybuild/fail_field_defaults.rs:39:14
+   |
+39 |     #[confer(field_defaults, table)]
+   |              ^^^^^^^^^^^^^^
+
+error: duplicate #[confer(field_defaults)] attribute
+  --> tests/trybuild/fail_field_defaults.rs:45:37
+   |
+45 |     #[confer(table, field_defaults, field_defaults)]
+   |                                     ^^^^^^^^^^^^^^
+
+error: duplicate #[confer(field_defaults)] attribute
+  --> tests/trybuild/fail_field_defaults.rs:52:14
+   |
+52 |     #[confer(field_defaults)]
+   |              ^^^^^^^^^^^^^^
+
+error: #[confer(field_defaults)] takes no value
+  --> tests/trybuild/fail_field_defaults.rs:58:21
+   |
+58 |     #[confer(table, field_defaults = true)]
+   |                     ^^^^^^^^^^^^^^
+
+error: #[confer(field_defaults)] takes no value
+  --> tests/trybuild/fail_field_defaults.rs:64:21
+   |
+64 |     #[confer(table, field_defaults(true))]
+   |                     ^^^^^^^^^^^^^^
+
+error: #[confer(table)] cannot be combined with #[confer(ignore)]
+  --> tests/trybuild/fail_field_defaults.rs:70:37
+   |
+70 |     #[confer(table, field_defaults, ignore)]
+   |                                     ^^^^^^
+
+error[E0277]: `Option<Child>` cannot be used as a nested configuration table
+  --> tests/trybuild/fail_field_defaults.rs:79:12
+   |
+79 |     child: MaybeChild,
+   |            ^^^^^^^^^^ the trait `ConfigTable` is not implemented for `Option<Child>`
+   |
+   = note: derive it with `#[derive(ConfigTable)]` or implement `ConfigTable` manually
+help: the following other types implement trait `ConfigTable`
+  --> tests/trybuild/fail_field_defaults.rs:1:10
+   |
+ 1 | #[derive(conferencier_derive::ConfigTable)]
+   |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Child`
+...
+76 | #[derive(conferencier_derive::ConfigTable)]
+   |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `OpaqueOption`
+   = note: this error originates in the derive macro `conferencier_derive::ConfigTable` (in Nightly builds, run with -Z macro-backtrace for more info)

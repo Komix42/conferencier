@@ -3,7 +3,7 @@ name = "conferencier-derive"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "Derive macros ConferModule and ConferTable for conferencier"
+description = "Derive macros ConfigScope and ConfigTable for conferencier"
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -19,7 +19,6 @@ proc-macro2 = "1"
 quote = "1"
 syn = { version = "3", features = ["full", "extra-traits"] }
 proc-macro-crate = "3"
-toml.workspace = true
 
 [dev-dependencies]
 trybuild = "1.0"

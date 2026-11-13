@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 #[allow(dead_code)]
-#[derive(conferencier_derive::ConferModule)]
+#[derive(conferencier_derive::ConfigScope)]
 struct Tagged<T: Send + Sync + 'static> {
     port: u16,
     #[confer(ignore = Vec::<T>::new())]

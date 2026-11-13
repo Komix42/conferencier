@@ -2,12 +2,12 @@ error[E0277]: `std::string::String` cannot be used as a nested configuration tab
  --> tests/trybuild/fail_table_not_implemented.rs:6:11
   |
 6 |     name: String,
-  |           ^^^^^^ the trait `ConferTable` is not implemented for `std::string::String`
+  |           ^^^^^^ the trait `ConfigTable` is not implemented for `std::string::String`
   |
-  = note: derive it with `#[derive(ConferTable)]` or implement `ConferTable` manually
-help: the trait `ConferTable` is implemented for `NotATable`
+  = note: derive it with `#[derive(ConfigTable)]` or implement `ConfigTable` manually
+help: the trait `ConfigTable` is implemented for `NotATable`
  --> tests/trybuild/fail_table_not_implemented.rs:3:10
   |
-3 | #[derive(conferencier_derive::ConferTable)]
+3 | #[derive(conferencier_derive::ConfigTable)]
   |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  = note: this error originates in the derive macro `conferencier_derive::ConferTable` (in Nightly builds, run with -Z macro-backtrace for more info)
+  = note: this error originates in the derive macro `conferencier_derive::ConfigTable` (in Nightly builds, run with -Z macro-backtrace for more info)

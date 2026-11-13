@@ -1,0 +1,11 @@
+error: #[confer(deny_unknown_keys)] takes no value
+ --> tests/trybuild/fail_deny_unknown_keys_value.rs:4:10
+  |
+4 | #[confer(deny_unknown_keys = true)]
+  |          ^^^^^^^^^^^^^^^^^
+
+error: #[confer(deny_unknown_keys)] takes no value
+  --> tests/trybuild/fail_deny_unknown_keys_value.rs:10:10
+   |
+10 | #[confer(deny_unknown_keys(true))]
+   |          ^^^^^^^^^^^^^^^^^

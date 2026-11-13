@@ -1,7 +1,7 @@
 // An ignored field has no TOML key, so it may share its name with the key of another field,
 // whichever of the two is declared first.
 #[allow(dead_code)]
-#[derive(conferencier_derive::ConferModule)]
+#[derive(conferencier_derive::ConfigScope)]
 struct Collision {
     #[confer(ignore)]
     id: u64,

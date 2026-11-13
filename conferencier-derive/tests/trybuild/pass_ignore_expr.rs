@@ -13,7 +13,7 @@ impl Pool {
 }
 
 #[allow(dead_code)]
-#[derive(conferencier_derive::ConferModule)]
+#[derive(conferencier_derive::ConfigScope)]
 struct Workers {
     threads: u32,
     #[confer(ignore = Pool::with_size(4))]

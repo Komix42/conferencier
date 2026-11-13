@@ -1,17 +1,15 @@
 use conferencier::toml::{Table, Value};
-use conferencier::{Confer, ConferError, Result};
+use conferencier::{ConfigStore, Error, Result};
 
 #[tokio::test]
 async fn load_and_save_roundtrip() -> Result<()> {
-    let store = Confer::from_string("[App]\nname = \"demo\"\n")?;
-    assert_eq!(store.get_string("App", "name").await?, "demo");
+    let store = ConfigStore::from_str("[App]\nname = \"demo\"\n")?;
+    assert_eq!(store.get_string("App", "name")?, "demo");
 
-    store.set_integer("App", "port", 8080).await?;
-    store
-        .set_string_vec("App", "langs", vec!["en".into(), "de".into()])
-        .await?;
+    store.set_integer("App", "port", 8080)?;
+    store.set_string_vec("App", "langs", vec!["en".into(), "de".into()])?;
 
-    let output = store.save_str().await?;
+    let output = store.save_str()?;
     assert!(output.contains("name = \"demo\""));
     assert!(output.contains("port = 8080"));
     assert!(output.contains("langs = ["));
@@ -20,7 +18,7 @@ async fn load_and_save_roundtrip() -> Result<()> {
 
 #[tokio::test]
 async fn legacy_toml_values_and_raw_api_roundtrip() -> Result<()> {
-    let store = Confer::from_string(
+    let store = ConfigStore::from_str(
         r#"[App]
 name = "demo"
 minimum = -9223372036854775808
@@ -36,25 +34,23 @@ empty = []
 nested = { host = "localhost", port = 8080 }
 "#,
     )?;
-    store
-        .set_value(
-            "App",
-            "raw",
-            Value::Array(vec![Value::String("custom".into()), Value::Integer(42)]),
-        )
-        .await?;
+    store.set_value(
+        "App",
+        "raw",
+        Value::Array(vec![Value::String("custom".into()), Value::Integer(42)]),
+    )?;
 
-    let before: Table = store.get_section_table("App").await.unwrap();
-    let serialized = store.save_str().await?;
-    let restored = Confer::from_string(&serialized)?;
+    let before: Table = store.get_section("App").unwrap();
+    let serialized = store.save_str()?;
+    let restored = ConfigStore::from_str(&serialized)?;
 
-    assert_eq!(restored.get_section_table("App").await, Some(before));
+    assert_eq!(restored.get_section("App"), Some(before));
     Ok(())
 }
 
 #[tokio::test]
 async fn toml_1_1_datetimes_preserve_omitted_components() -> Result<()> {
-    let store = Confer::from_string(
+    let store = ConfigStore::from_str(
         r#"[Schedule]
 minute = 07:30
 second = 07:30:00
@@ -72,26 +68,23 @@ times = ["07:30", 08:45:00.125]
     ];
 
     for (key, expected, second, nanosecond) in cases {
-        let value = store.get_datetime("Schedule", key).await?;
+        let value = store.get_datetime("Schedule", key)?;
         let time = value.time.as_ref().unwrap();
         assert_eq!(time.second, second);
         assert_eq!(time.nanosecond, nanosecond);
         assert_eq!(value.to_string(), expected);
     }
-    assert_eq!(
-        store.get_datetime("Schedule", "text").await?.to_string(),
-        "08:45"
-    );
-    let times = store.get_datetime_vec("Schedule", "times").await?;
+    assert_eq!(store.get_datetime("Schedule", "text")?.to_string(), "08:45");
+    let times = store.get_datetime_vec("Schedule", "times")?;
     assert_eq!(
         times.iter().map(ToString::to_string).collect::<Vec<_>>(),
         vec!["07:30", "08:45:00.125"]
     );
 
-    let restored = Confer::from_string(&store.save_str().await?)?;
+    let restored = ConfigStore::from_str(&store.save_str()?)?;
     assert_eq!(
-        restored.get_section_table("Schedule").await,
-        store.get_section_table("Schedule").await
+        restored.get_section("Schedule"),
+        store.get_section("Schedule")
     );
     Ok(())
 }
@@ -101,7 +94,7 @@ fn malformed_radix_numbers_return_parse_errors() {
     for literal in ["0x_g", "0b_2", "0o_8"] {
         let source = format!("[App]\nvalue = {literal}\n");
         assert!(
-            matches!(Confer::from_string(&source), Err(ConferError::Parse(_))),
+            matches!(ConfigStore::from_str(&source), Err(Error::Parse(_))),
             "expected a parse error for {literal}"
         );
     }
@@ -109,16 +102,13 @@ fn malformed_radix_numbers_return_parse_errors() {
 
 #[tokio::test]
 async fn concurrent_readers_and_writer() -> Result<()> {
-    let store = Confer::new();
-    store.add_section("Metrics").await?;
+    let store = ConfigStore::new();
+    store.ensure_section("Metrics")?;
 
     let writer = store.clone();
     let writer_task = tokio::spawn(async move {
         for value in 0..10 {
-            writer
-                .set_integer("Metrics", "counter", value)
-                .await
-                .unwrap();
+            writer.set_integer("Metrics", "counter", value).unwrap();
         }
     });
 
@@ -126,7 +116,7 @@ async fn concurrent_readers_and_writer() -> Result<()> {
     let reader_task = tokio::spawn(async move {
         let mut last = -1;
         loop {
-            match reader.get_integer("Metrics", "counter").await {
+            match reader.get_integer("Metrics", "counter") {
                 Ok(current) => {
                     if current == 9 {
                         break;
@@ -142,6 +132,6 @@ async fn concurrent_readers_and_writer() -> Result<()> {
 
     writer_task.await.unwrap();
     reader_task.await.unwrap();
-    assert_eq!(store.get_integer("Metrics", "counter").await?, 9);
+    assert_eq!(store.get_integer("Metrics", "counter")?, 9);
     Ok(())
 }

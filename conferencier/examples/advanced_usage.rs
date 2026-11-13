@@ -1,4 +1,4 @@
-//! Advanced example demonstrating multiple modules sharing the same `Confer` store,
+//! Advanced example demonstrating multiple scopes sharing the same `ConfigStore` store,
 //! attribute customisations, and coordinated persistence back to disk.
 //!
 //! Run with:
@@ -8,37 +8,37 @@
 
 use std::{fs, path::PathBuf};
 
-use conferencier::{Confer, ConferModule, Datetime, Result};
+use conferencier::{ConfigScope, ConfigStore, Datetime, Result};
 use tokio::try_join;
 
 /// Server runtime configuration.
-#[derive(ConferModule)]
+#[derive(ConfigScope)]
 #[confer(section = "Server")]
 struct ServerProfile {
     /// Rename demonstrates mapping struct fields to different TOML keys.
     #[confer(rename = "addr")]
-    #[confer(default = "0.0.0.0")]
+    #[confer(default = "0.0.0.0".into())]
     bind_address: String,
 
-    /// Required value – if the key is missing `from_confer` will return an error.
+    /// Required value – if the key is missing `from_store` will return an error.
     port: u16,
 
-    /// Default values for vectors come from array literals.
-    #[confer(default = ["api", "web"])]
+    /// Vector defaults are ordinary Rust expressions.
+    #[confer(default = vec!["api".into(), "web".into()])]
     roles: Vec<String>,
 
     /// Optional vector: absence of the key yields `None` and saving removes it again.
     #[confer(rename = "allow_ips")]
     allowed_ips: Option<Vec<String>>,
 
-    /// Operational state shared through the same module handle, but not loaded or saved;
+    /// Operational state shared through the same scope handle, but not loaded or saved;
     /// later `load` calls leave this field untouched.
     #[confer(ignore = Vec::with_capacity(16))]
     connection_log: Vec<String>,
 }
 
 /// Feature toggles that live in a different TOML section.
-#[derive(ConferModule)]
+#[derive(ConfigScope)]
 #[confer(section = "Features")]
 struct FeatureToggles {
     /// Simple boolean default.
@@ -51,7 +51,7 @@ struct FeatureToggles {
 
     /// Example of nested defaults and renames.
     #[confer(rename = "rollout")]
-    #[confer(default = "2025-01-01T00:00:00Z")]
+    #[confer(default = "2025-01-01T00:00:00Z".parse().unwrap())]
     rollout_start: Datetime,
 }
 
@@ -59,14 +59,12 @@ struct FeatureToggles {
 async fn main() -> Result<()> {
     let config_path = example_config_path();
     // Load configuration from disk so the example mirrors real-world usage.
-    let store = Confer::from_file(&config_path)?;
+    let store = ConfigStore::from_file(&config_path).await?;
     println!("Loaded configuration from {}", config_path.display());
 
-    // Load both modules concurrently – they share the same `Confer` instance.
-    let (server, toggles) = try_join!(
-        ServerProfile::from_confer(store.clone()),
-        FeatureToggles::from_confer(store.clone())
-    )?;
+    // Both scopes read their sections from the same `ConfigStore`.
+    let server = ServerProfile::from_store(&store)?;
+    let toggles = FeatureToggles::from_store(&store)?;
 
     print_configuration(&server, &toggles).await;
 
@@ -74,19 +72,19 @@ async fn main() -> Result<()> {
     update_server_roles(&server).await;
     retire_beta_features(&toggles).await;
 
-    // Persist both modules back into the shared store.
+    // Persist both scopes back into the shared store.
     try_join!(
-        ServerProfile::save(&server, store.clone()),
-        FeatureToggles::save(&toggles, store.clone())
+        ServerProfile::save(&server, &store),
+        FeatureToggles::save(&toggles, &store)
     )?;
 
     // Export the resulting TOML to stdout and to an output file inside `target/`.
-    let snapshot = store.save_str().await?;
+    let snapshot = store.save_str()?;
     println!("\nFinal snapshot:\n{}", snapshot);
 
     let snapshot_path = example_snapshot_path();
     if let Some(parent) = snapshot_path.parent() {
-        fs::create_dir_all(parent).map_err(conferencier::ConferError::from)?;
+        fs::create_dir_all(parent).map_err(conferencier::Error::from)?;
     }
     store.save_file(&snapshot_path).await?;
     println!("Snapshot also written to {}", snapshot_path.display());
@@ -96,8 +94,8 @@ async fn main() -> Result<()> {
 
 /// Helper that prints the current state with some lightweight formatting.
 async fn print_configuration(
-    server: &conferencier::confer_module::SharedConferModule<ServerProfile>,
-    toggles: &conferencier::confer_module::SharedConferModule<FeatureToggles>,
+    server: &conferencier::SharedScope<ServerProfile>,
+    toggles: &conferencier::SharedScope<FeatureToggles>,
 ) {
     use tokio::join;
 
@@ -117,9 +115,7 @@ async fn print_configuration(
 }
 
 /// Add a new deployment role and track an audit message in the ignored cache.
-async fn update_server_roles(
-    server: &conferencier::confer_module::SharedConferModule<ServerProfile>,
-) {
+async fn update_server_roles(server: &conferencier::SharedScope<ServerProfile>) {
     let mut guard = server.write().await;
     guard.roles.push("admin".into());
     guard
@@ -129,9 +125,7 @@ async fn update_server_roles(
 }
 
 /// Drop beta features once they have been fully rolled out.
-async fn retire_beta_features(
-    toggles: &conferencier::confer_module::SharedConferModule<FeatureToggles>,
-) {
+async fn retire_beta_features(toggles: &conferencier::SharedScope<FeatureToggles>) {
     let mut guard = toggles.write().await;
     guard.beta_features = None;
 }

@@ -1,17 +1,11 @@
-error: #[confer(table)] cannot be combined with #[confer(default)]
- --> tests/trybuild/fail_table_conflicts.rs:8:21
-  |
-8 |     #[confer(table, default = 5)]
-  |                     ^^^^^^^
-
 error: #[confer(table)] cannot be combined with #[confer(ignore)]
-  --> tests/trybuild/fail_table_conflicts.rs:15:14
-   |
-15 |     #[confer(ignore)]
-   |              ^^^^^^
+ --> tests/trybuild/fail_table_conflicts.rs:9:14
+  |
+9 |     #[confer(ignore)]
+  |              ^^^^^^
 
 error: duplicate #[confer(table)] attribute
-  --> tests/trybuild/fail_table_conflicts.rs:21:21
+  --> tests/trybuild/fail_table_conflicts.rs:15:21
    |
-21 |     #[confer(table, table)]
+15 |     #[confer(table, table)]
    |                     ^^^^^

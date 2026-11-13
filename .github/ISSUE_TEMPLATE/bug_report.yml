@@ -54,7 +54,7 @@ body:
     attributes:
       label: Features
       options:
-        - Default features (`with-derive`)
+        - Default features (`derive`)
         - "`default-features = false`"
         - "`default-features = false` + `conferencier-derive` used directly"
     validations:
