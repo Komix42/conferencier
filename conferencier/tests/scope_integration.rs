@@ -303,6 +303,24 @@ async fn strict_scope_checks_known_keys_before_conversion_and_keeps_failed_load_
     Ok(())
 }
 
+#[test]
+#[ignore = "requires toml/preserve_order; see CONTRIBUTING.md"]
+fn strict_scope_reports_smallest_unknown_key_with_preserved_order() -> Result<()> {
+    let store = ConfigStore::from_str("[StrictScope]\nzeta = 1\nruntime = \"known\"\nalpha = 2")?;
+    let section = store.get_section("StrictScope").expect("section exists");
+    let keys: Vec<_> = section.keys().map(String::as_str).collect();
+    assert_eq!(keys, ["zeta", "runtime", "alpha"]);
+
+    let error = StrictScope::from_store(&store).unwrap_err();
+    assert!(matches!(
+        error,
+        Error::UnknownKey { ref path, ref key }
+            if path == "StrictScope" && key == "alpha"
+    ));
+    assert_eq!(error.to_string(), "unknown key StrictScope.alpha");
+    Ok(())
+}
+
 #[derive(ConfigScope)]
 #[confer(section = "Nested")]
 struct NestedModule {

@@ -69,6 +69,10 @@ jobs:
       - name: Run ${{ matrix.test }} tests
         run: ${{ matrix.command }}
 
+      - name: Test strict key ordering with toml/preserve_order
+        if: matrix.test == 'workspace-all'
+        run: cargo test -p conferencier --features toml/preserve_order --test scope_integration strict_scope_reports_smallest_unknown_key_with_preserved_order --locked -- --ignored
+
   docs:
     runs-on: ubuntu-latest
     steps:
