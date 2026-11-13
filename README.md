@@ -32,7 +32,7 @@ If you need any of these, a general-purpose configuration crate is a better fit.
 
    ```toml
    [dependencies]
-   conferencier = "0.0.5"
+   conferencier = "0.0.6"
    tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
    ```
 
@@ -71,7 +71,7 @@ If you need any of these, a general-purpose configuration crate is a better fit.
 
 ### Features
 
-The default `derive` feature re-exports `#[derive(ConfigScope)]` and `#[derive(ConfigTable)]` alongside the traits. Disable it with `conferencier = { version = "0.0.5", default-features = false }` when you only need store access or manual trait implementations. `ConfigStore`, both traits, `SharedScope`, `Error`, `Result` and the TOML types remain available; Tokio is still used for file I/O and scope locks.
+The default `derive` feature re-exports `#[derive(ConfigScope)]` and `#[derive(ConfigTable)]` alongside the traits. Disable it with `conferencier = { version = "0.0.6", default-features = false }` when you only need store access or manual trait implementations. `ConfigStore`, both traits, `SharedScope`, `Error`, `Result` and the TOML types remain available; Tokio is still used for file I/O and scope locks.
 
 Migrating from 0.0.4: the feature formerly named `with-derive` is now `derive`. The [changelog](CHANGELOG.md) lists the API and signature changes.
 
