@@ -64,7 +64,9 @@ pub type SharedScope<T> = Arc<RwLock<T>>;
 /// trait for named-field structs. `#[confer(section = "App")]` selects the section;
 /// otherwise it is the full struct name. The temporary migration check for a name
 /// such as `ConferApp` requires an explicit section through 0.1.x and is removed
-/// in 0.2.0. See the crate's [attribute reference](crate#derive-attributes).
+/// in 0.2.0. `#[confer(deny_unknown_keys)]` rejects unmapped keys in this scope's
+/// section during loading; it does not apply to nested table types or other sections.
+/// See the crate's [attribute reference](crate#derive-attributes).
 ///
 /// Manual implementations can write `async fn load` and `async fn save`; the compiler
 /// checks that the returned futures are `Send`, so generic code can spawn them on Tokio tasks.
@@ -112,7 +114,8 @@ pub trait ConfigScope: Send + Sync + Sized + 'static {
     /// Builds a new shared scope from a snapshot of its section in `store`.
     ///
     /// A missing section is loaded as an empty table, so field defaults apply.
-    /// Required keys without defaults still fail. Unknown keys are ignored.
+    /// Required keys without defaults still fail. Derived scopes ignore unknown
+    /// keys unless `#[confer(deny_unknown_keys)]` is set.
     /// Ignored fields are initialized once, in declaration order, after all
     /// loaded fields convert successfully.
     ///
@@ -123,7 +126,8 @@ pub trait ConfigScope: Send + Sync + Sized + 'static {
     /// # Errors
     ///
     /// Returns a type mismatch if the section exists but is not a table, or the
-    /// error from a required key or field conversion. No store values are changed.
+    /// error from a required key, strict unknown-key check or field conversion.
+    /// No store values are changed.
     fn from_store(store: &ConfigStore) -> Result<SharedScope<Self>>;
 
     /// Reloads the loaded fields from the scope's section of the store.
@@ -147,7 +151,7 @@ pub trait ConfigScope: Send + Sync + Sized + 'static {
     ///
     /// # Errors
     ///
-    /// The same section and conversion errors as [`from_store`](Self::from_store).
+    /// The same section, unknown-key and conversion errors as [`from_store`](Self::from_store).
     /// On error the scope keeps all its previous values, and the store is unchanged.
     fn load(
         scope: &SharedScope<Self>,

@@ -8,10 +8,9 @@ Each entry states the problem, a possible direction and where it comes from.
 
 ## Planned for 0.0.5
 
-These entries are planned for the 0.0.5 release. The API redesign is implemented (see [Done](#done)), so the remaining RFCs use the final names.
+These entries are planned for the 0.0.5 release. The API redesign and RFC-0006 are implemented (see [Done](#done)), so the remaining RFC uses the final names.
 
-1. **Strict mode for unknown keys** ([Derive attributes and field types](#derive-attributes-and-field-types)): [RFC-0006](./RFC-0006_strict_unknown_keys.md), approved; also makes error paths unambiguous (`section` → `path`, quoted keys) and exposes diagnostic-path helpers.
-2. **Expressions in `default` and one rule for missing keys** ([Derive attributes and field types](#derive-attributes-and-field-types)): [RFC-0007](./RFC-0007_default_expressions.md), approved; also covers `default` on table fields and `field_defaults` for missing single tables.
+1. **Expressions in `default` and one rule for missing keys** ([Derive attributes and field types](#derive-attributes-and-field-types)): [RFC-0007](./RFC-0007_default_expressions.md), approved; also covers `default` on table fields and `field_defaults` for missing single tables.
 
 ## Technical debt
 
@@ -26,7 +25,6 @@ These entries are planned for the 0.0.5 release. The API redesign is implemented
 - **Generated `Default` from `confer` attributes.** With [RFC-0007](./RFC-0007_default_expressions.md) (M4), `#[confer(table, default)]` calls the table type's `Default`, and the standard `#[derive(Default)]` does not know `#[confer(default = ...)]`, so a type with `#[confer(default = 8080)] port: u16` gets `port == 0`. Direction: an opt-in way to generate a `Default` that uses each field's `confer` default (fields without one would need `Default` or fail to compile). Origin: the RFC-0007 discussion.
 - **Conversion hooks.** Types the derive does not support, such as maps, enums or newtypes, must be ignored and handled manually. Direction: `#[confer(with = ...)]` with user-defined conversions, or a `#[confer(serde)]` escape hatch for types implementing `Serialize` and `DeserializeOwned`. Origin: [RFC-0001](./RFC-0001_baseline_architecture.md#out-of-scope), [RFC-0004](./RFC-0004_nested_tables.md#out-of-scope--future-work).
 - **More table shapes.** Maps of tables (`BTreeMap<String, T>` ↔ `[App.servers.alpha]`, `[App.servers.beta]`), `Option<Vec<T>>` and `Box<T>` table fields, `default` on table fields (planned for 0.0.5 by [RFC-0007](./RFC-0007_default_expressions.md)), `#[confer(flatten)]`, and detecting table types without `#[confer(table)]`. Origin: [RFC-0004](./RFC-0004_nested_tables.md#out-of-scope--future-work).
-- **Strict mode for unknown keys.** A misspelled key or table is ignored on load, so its field silently falls back to the default, and the next save removes it. Direction: the opt-in `#[confer(deny_unknown_keys)]` in [RFC-0006](./RFC-0006_strict_unknown_keys.md), which also defines deterministic precedence, diagnostic paths and public path helpers. Planned for 0.0.5 (approved). Origin: [RFC-0004](./RFC-0004_nested_tables.md#out-of-scope--future-work).
 - **Scopes owning nested sections.** `#[confer(section = "App.server")]` names a top-level key that contains a dot. Direction: treat `section` as a path, with rules for which scope owns which sub-table. Origin: [RFC-0004](./RFC-0004_nested_tables.md#out-of-scope--future-work).
 - **Hooks around load and save**, for example to compute derived values or check invariants. Origin: [RFC-0001](./RFC-0001_baseline_architecture.md#limitations).
 
@@ -34,7 +32,7 @@ These entries are planned for the 0.0.5 release. The API redesign is implemented
 
 - **Inspecting unknown keys without rejecting them.** Strict scopes fail on the first unknown key, while lenient scopes currently provide no direct way to report leftovers for application logging or diagnostics. Direction: a non-mutating API that lists unmapped keys without changing lenient loading; define how it handles nested tables, strict and lenient table types, and manually implemented `ConfigTable`s before proposing an RFC. Origin: review feedback on [RFC-0006](./RFC-0006_strict_unknown_keys.md).
 - **Path-based typed getters and setters on `ConfigStore`**, for reading or writing a value such as `App.server.port` without a scope. Origin: [RFC-0004](./RFC-0004_nested_tables.md#out-of-scope--future-work).
-- **Structured error paths.** Errors inside nested tables carry the path as a string, such as `App.upstream[1]`; [RFC-0006](./RFC-0006_strict_unknown_keys.md#error-paths) defines an unambiguous diagnostic notation and includes public formatting helpers for manual implementations. Direction: a new `Error` variant with a structured path (`Error` is `#[non_exhaustive]`, so adding a variant is not breaking). Origin: [RFC-0004](./RFC-0004_nested_tables.md#alternatives-considered), [RFC-0006](./RFC-0006_strict_unknown_keys.md#out-of-scope).
+- **Structured error paths.** Errors inside nested tables carry diagnostic paths as strings, such as `App.upstream[1]`; [RFC-0006](./RFC-0006_strict_unknown_keys.md#error-paths) makes this notation unambiguous and adds public formatting helpers, but does not add a structured path type. Direction: consider a structured type if callers need to inspect path segments without parsing display notation. Origin: [RFC-0004](./RFC-0004_nested_tables.md#alternatives-considered), [RFC-0006](./RFC-0006_strict_unknown_keys.md#out-of-scope).
 
 ### Outside the current scope
 
@@ -52,6 +50,7 @@ The README's [Scope](../README.md#scope) lists these as intentionally left out. 
 
 ## Done
 
+- **Strict unknown-key rejection and diagnostic path formatting**: implemented in 0.0.5 ([RFC-0006](./RFC-0006_strict_unknown_keys.md)).
 - **Public API redesign**: implemented in 0.0.5 — names, shared store and async boundaries ([RFC-0005](./RFC-0005_api_redesign.md)).
 - **Bug: concurrent `save_file` calls can corrupt the file**: fixed in 0.0.5 with a unique temporary file per save.
 - **Unused `serde` dependency**: removed in 0.0.5; add it back if an idea such as a `#[confer(serde)]` escape hatch (see [Conversion hooks](#derive-attributes-and-field-types)) needs it.

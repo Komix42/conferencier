@@ -58,6 +58,107 @@ struct Server {
 }
 
 #[derive(Debug, Clone, PartialEq, ConfigTable)]
+struct LenientChild {
+    port: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, ConfigTable)]
+#[confer(deny_unknown_keys)]
+struct StrictChild {
+    port: u16,
+}
+
+#[derive(Debug, ConfigScope)]
+#[confer(section = "Outer", deny_unknown_keys)]
+struct StrictOuter {
+    #[confer(table)]
+    child: LenientChild,
+}
+
+#[derive(Debug, ConfigScope)]
+#[confer(section = "Outer")]
+struct LenientOuter {
+    #[confer(table)]
+    child: StrictChild,
+    #[confer(table)]
+    children: Vec<StrictChild>,
+}
+
+#[derive(Debug, PartialEq, ConfigTable)]
+#[confer(deny_unknown_keys)]
+struct StrictIgnoredTable {
+    #[confer(ignore)]
+    runtime: String,
+}
+
+#[derive(Debug)]
+struct ManualChild {
+    value: u16,
+}
+
+impl ConfigTable for ManualChild {
+    fn from_table(path: &str, mut table: Table) -> Result<Self> {
+        let value = match table.remove("value") {
+            Some(Value::Integer(value)) => u16::try_from(value)
+                .map_err(|_| Error::value_parse(path, "value", "value out of range for u16"))?,
+            Some(other) => {
+                return Err(Error::type_mismatch(
+                    path,
+                    "value",
+                    "integer",
+                    other.type_str(),
+                ));
+            }
+            None => return Err(Error::missing_key(path, "value")),
+        };
+        Ok(Self { value })
+    }
+
+    fn to_table(&self, _path: &str) -> Result<Table> {
+        let mut table = Table::new();
+        table.insert("value".into(), Value::Integer(i64::from(self.value)));
+        Ok(table)
+    }
+}
+
+#[derive(Debug)]
+struct ManualScope {
+    child: ManualChild,
+}
+
+impl ConfigScope for ManualScope {
+    fn from_store(store: &ConfigStore) -> Result<conferencier::SharedScope<Self>> {
+        let path = conferencier::table_path::section_path("Manual");
+        let mut section = store.get_section("Manual").unwrap_or_default();
+        let child = match section.remove("child") {
+            Some(Value::Table(table)) => table,
+            Some(other) => {
+                return Err(Error::type_mismatch(
+                    &path,
+                    "child",
+                    "table",
+                    other.type_str(),
+                ));
+            }
+            None => return Err(Error::missing_key(&path, "child")),
+        };
+        let child_path = conferencier::table_path::child_path(&path, "child");
+        let child = ManualChild::from_table(&child_path, child)?;
+        Ok(std::sync::Arc::new(tokio::sync::RwLock::new(Self {
+            child,
+        })))
+    }
+
+    async fn load(_scope: &conferencier::SharedScope<Self>, _store: &ConfigStore) -> Result<()> {
+        Ok(())
+    }
+
+    async fn save(_scope: &conferencier::SharedScope<Self>, store: &ConfigStore) -> Result<()> {
+        store.set_section("Manual", Table::new())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, ConfigTable)]
 struct Tls {
     cert: String,
     key: String,
@@ -424,6 +525,83 @@ async fn errors_report_nested_paths() -> Result<()> {
     assert_eq!(
         error.to_string(),
         "expected integer at App.\"my key\".port but found string"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn strictness_is_per_struct_and_reports_nested_paths() -> Result<()> {
+    let error = LenientOuter::from_store(&ConfigStore::from_str("[Outer]")?).unwrap_err();
+    assert!(matches!(
+        error,
+        Error::MissingKey { ref path, ref key }
+            if path == "Outer.child" && key == "port"
+    ));
+
+    let store = ConfigStore::from_str("[Outer]\nchild = { port = 80, typo = 1 }")?;
+    let scope = StrictOuter::from_store(&store)?;
+    assert_eq!(scope.read().await.child.port, 80);
+
+    let store = ConfigStore::from_str(
+        "[Outer]\nchild = { port = 80, typo = 1 }\nchildren = [{ port = 81 }]",
+    )?;
+    let error = LenientOuter::from_store(&store).unwrap_err();
+    assert!(matches!(
+        error,
+        Error::UnknownKey { ref path, ref key }
+            if path == "Outer.child" && key == "typo"
+    ));
+
+    let store = ConfigStore::from_str(
+        "[Outer]\nchild = { port = 80 }\nchildren = [{ port = 81, typo = 1 }]",
+    )?;
+    let error = LenientOuter::from_store(&store).unwrap_err();
+    assert!(matches!(
+        error,
+        Error::UnknownKey { ref path, ref key }
+            if path == "Outer.children[0]" && key == "typo"
+    ));
+
+    let mut table = Table::new();
+    table.insert("extra".into(), Value::Boolean(true));
+    let error = StrictChild::from_table("Manual", table).unwrap_err();
+    assert!(matches!(
+        error,
+        Error::UnknownKey { ref path, ref key }
+            if path == "Manual" && key == "extra"
+    ));
+
+    assert_eq!(
+        StrictIgnoredTable::from_table("Manual", Table::new())?,
+        StrictIgnoredTable {
+            runtime: String::new(),
+        }
+    );
+    let mut table = Table::new();
+    table.insert("extra".into(), Value::Boolean(true));
+    let error = StrictIgnoredTable::from_table("Manual", table).unwrap_err();
+    assert!(matches!(
+        error,
+        Error::UnknownKey { ref path, ref key }
+            if path == "Manual" && key == "extra"
+    ));
+    Ok(())
+}
+
+#[test]
+fn manual_scope_and_table_helpers_build_matching_error_paths() -> Result<()> {
+    let error = ManualScope::from_store(&ConfigStore::from_str("[Manual.child]")?).unwrap_err();
+    assert!(matches!(
+        error,
+        Error::MissingKey { ref path, ref key }
+            if path == "Manual.child" && key == "value"
+    ));
+    assert_eq!(error.to_string(), "missing key Manual.child.value");
+
+    let scope = ManualScope::from_store(&ConfigStore::from_str("[Manual.child]\nvalue = 7")?)?;
+    assert_eq!(
+        scope.try_read().expect("no other guard exists").child.value,
+        7
     );
     Ok(())
 }

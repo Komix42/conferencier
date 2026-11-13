@@ -1,7 +1,7 @@
 # RFC-0006: Strict mode for unknown keys and unambiguous error paths
 
 Date: 2026-11-12
-Status: Approved
+Status: Implemented
 Author: Komix42 <komix[at]ignore.cz>
 Target release: 0.0.5
 Amends: [RFC-0004](./RFC-0004_nested_tables.md)

@@ -84,6 +84,9 @@ The `#[derive(ConfigScope)]` macro understands a small set of field/struct attri
 - `#[confer(section = "Name")]` on the struct sets the TOML section name. If omitted, the section is the full struct name: `AppConfig` owns `[AppConfig]` (a raw identifier such as `r#AppConfig` too).
     - Until version 0.0.4, a leading `Confer` word was stripped from the default (`ConferApp` → `[App]`). To keep existing configuration files from silently moving to another section, a `ConfigScope` named `Confer` followed by an uppercase letter, such as `ConferApp`, does not compile without an explicit section: write `#[confer(section = "App")]` to keep the old section or `#[confer(section = "ConferApp")]` to use the full name. Names such as `ConferenceSettings` are not affected.
     - This migration check stays through the 0.1.x releases and is removed in 0.2.0; then `ConferApp` without `section` simply uses `[ConferApp]`.
+- `#[confer(deny_unknown_keys)]` on a struct rejects the smallest unknown key in that struct's table when loading. Loaded fields define the known keys after `rename`; ignored fields do not. Strictness is per type, not inherited: if `App` has a lenient nested `Server`, `typo = 1` in `[App.server]` is still accepted; put `deny_unknown_keys` on `Server` too to reject it.
+
+Strictness checks only the section or table being loaded. For example, a strict scope for `[App]` does not reject a misspelled top-level `[Ap]` section; a missing `[App]` is treated as empty and may load if its fields have defaults. Strictness is checked on load, not save; saving still replaces the scope's section and removes keys that do not map to loaded fields.
 
 Every field is either loaded from TOML or ignored by the configuration file.
 
@@ -133,6 +136,7 @@ TOML 1.1 times may omit seconds (for example `07:30`, also accepted as a datetim
 - "duplicate TOML key" → two loaded fields map to the same key; rename one via `#[confer(rename = ...)]`.
 - "`ConferApp` needs an explicit section" → choose `#[confer(section = "App")]` to keep the old section, or `#[confer(section = "ConferApp")]` and update the TOML section to use the full name. The compiler cannot check that your choice matches an existing file.
 - "`#[confer(init)]` was removed" → for an ignored field write `#[confer(ignore = <expr>)]` (no quotes); on a loaded field delete `init`, and add `#[confer(default = ...)]` only if a missing key should fall back to a value.
+- "`unknown key App.prot`" → the containing struct has `#[confer(deny_unknown_keys)]`; fix the key, rename a loaded field to it, or remove strictness if extra keys are intentional. Nested types need the attribute themselves; it is not inherited.
 - "cannot be combined with `#[confer(ignore)]`" → an ignored field has no TOML key; use `#[confer(ignore = <expr>)]` instead of `default`, and drop `rename`.
 - Defaults must have the right literal form (e.g., `"string"`, `[1, 2]`, or RFC 3339 for datetimes).
 
@@ -207,6 +211,7 @@ A table type takes the same field attributes as a scope (`rename`, `default`, `i
 - One struct can derive both `ConfigScope` and `ConfigTable`; `section` then applies only to the scope. `#[derive(ConfigScope)]` alone does not make a struct usable as a table field.
 - `#[confer(section = "App.server")]` does not refer to the nested table `[App.server]`: it names a top-level section whose name contains a dot (saved as `["App.server"]`). A nested table always belongs to the scope of its top-level section.
 - A generic table field needs an explicit bound such as `where T: ConfigTable`. `ConfigTable` can also be implemented manually; see its documentation. Manual implementations can build the same diagnostic paths as the derive with `conferencier::table_path::{section_path, child_path, element_path}`, which are available without the `derive` feature.
+- A strict outer struct does not make its nested table types strict. Add `#[confer(deny_unknown_keys)]` to each nested `ConfigTable` that should reject unknown keys; conversely, a strict table type remains strict wherever it is used.
 
 ## Reloading configuration
 
@@ -279,7 +284,7 @@ The handle's Tokio `RwLock` is not reentrant, so drop every guard of a scope bef
 Conferencier is primarily meant for reading configuration. Saving works, but it rewrites the configuration rather than editing it:
 
 - `ConfigStore::save_str` and `ConfigStore::save_file` regenerate the whole document from the stored values. Comments are lost, keys may be reordered, inline tables become `[section.table]` headers, and values are written in canonical notation (for example `0x1F90` becomes `8080` and `'text'` becomes `"text"`).
-- A scope's `save` owns its section, including all tables nested in it: it removes every key and sub-table that is not mapped to a non-ignored field, at any depth (also inside tables mapped with `#[confer(table)]`). A misspelled key such as `prot = 9090` is therefore ignored on load (`port` falls back to its default) and deleted by the next save. Other sections are not changed; keep data that no scope owns in a separate section.
+- A scope's `save` owns its section, including all tables nested in it: it removes every key and sub-table that is not mapped to a non-ignored field, at any depth (also inside tables mapped with `#[confer(table)]`). In lenient mode, a misspelled key such as `prot = 9090` is ignored on load (`port` falls back to its default) and deleted by the next save. A strict type rejects it on load, but save still replaces the section without rechecking. Other sections are not changed; keep data that no scope owns in a separate section.
 - Concurrent `save_file` calls to the same file, even through cloned stores, are safe: each call writes its own temporary file, so each successful call installs one complete snapshot, but which call wins is unspecified. Serialize saves yourself if their order matters. Replacement and durability limitations are described in the [API reference](https://docs.rs/conferencier/latest/conferencier/struct.ConfigStore.html#method.save_file).
 
 If people edit the configuration file by hand, prefer to only load it, and use saving mainly to generate an initial configuration file.

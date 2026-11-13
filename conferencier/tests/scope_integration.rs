@@ -46,6 +46,29 @@ struct Ratios {
     ratios: Vec<f32>,
 }
 
+#[derive(Debug, ConfigScope)]
+#[confer(deny_unknown_keys)]
+struct StrictScope {
+    #[confer(rename = "runtime")]
+    name: String,
+    #[confer(ignore)]
+    runtime: String,
+}
+
+#[derive(Debug, ConfigScope)]
+#[confer(deny_unknown_keys)]
+struct StrictEmpty {
+    #[confer(ignore)]
+    runtime: String,
+}
+
+#[derive(Debug, ConfigScope)]
+#[confer(deny_unknown_keys)]
+struct StrictDefaultScope {
+    #[confer(default = "fallback")]
+    name: String,
+}
+
 #[tokio::test]
 async fn module_from_store_loads_defaults_and_values() -> Result<()> {
     let store = ConfigStore::from_str(
@@ -206,6 +229,76 @@ async fn scalar_array_range_errors_include_the_element_index() -> Result<()> {
             .expect("no other guard exists")
             .ratios,
         vec![1.0]
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn strict_scope_checks_known_keys_before_conversion_and_keeps_failed_load_atomic()
+-> Result<()> {
+    let error = StrictScope::from_store(&ConfigStore::from_str("StrictScope = 7")?).unwrap_err();
+    assert!(matches!(
+        error,
+        Error::TypeMismatch { ref path, ref key, expected: "table", found: "integer" }
+            if path.is_empty() && key == "StrictScope"
+    ));
+
+    let store = ConfigStore::from_str("[StrictScope]\nzeta = 1\nalpha = 2")?;
+    let error = StrictScope::from_store(&store).unwrap_err();
+    assert!(matches!(
+        error,
+        Error::UnknownKey { ref path, ref key }
+            if path == "StrictScope" && key == "alpha"
+    ));
+    assert_eq!(error.to_string(), "unknown key StrictScope.alpha");
+
+    let store = ConfigStore::from_str("[StrictScope]\nruntime = \"before\"")?;
+    let scope = StrictScope::from_store(&store)?;
+    assert_eq!(scope.read().await.runtime, String::new());
+    scope.write().await.name = "unchanged".into();
+    store.set_integer("StrictScope", "extra", 1)?;
+    let error = StrictScope::load(&scope, &store).await.unwrap_err();
+    assert!(matches!(
+        error,
+        Error::UnknownKey { ref path, ref key }
+            if path == "StrictScope" && key == "extra"
+    ));
+    assert_eq!(scope.read().await.name, "unchanged");
+    StrictScope::save(&scope, &store).await?;
+    assert_eq!(store.get_string("StrictScope", "runtime")?, "unchanged");
+    assert!(store.get_value("StrictScope", "extra").is_none());
+
+    let error = StrictScope::from_store(&ConfigStore::from_str(
+        "[StrictScope]\nruntime = \"valid\"\nname = \"Rust name is not a TOML key\"",
+    )?)
+    .unwrap_err();
+    assert!(matches!(
+        error,
+        Error::UnknownKey { ref key, .. } if key == "name"
+    ));
+
+    let error = StrictEmpty::from_store(&ConfigStore::from_str("[StrictEmpty]\nextra = true")?)
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        Error::UnknownKey { ref path, ref key }
+            if path == "StrictEmpty" && key == "extra"
+    ));
+    assert!(
+        StrictEmpty::from_store(&ConfigStore::new())?
+            .try_read()
+            .expect("no other guard exists")
+            .runtime
+            .is_empty()
+    );
+    assert_eq!(
+        StrictDefaultScope::from_store(&ConfigStore::from_str(
+            "[StrictDefualtScope]\nextra = true"
+        )?)?
+        .try_read()
+        .expect("no other guard exists")
+        .name,
+        "fallback"
     );
     Ok(())
 }

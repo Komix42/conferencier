@@ -977,6 +977,32 @@ mod tests {
     }
 
     #[test]
+    fn scalar_array_type_and_datetime_errors_include_the_index() -> Result<()> {
+        let store = ConfigStore::from_str(
+            "[App]\nports = [1, true]\ntimes = [\"2024-01-01\", \"not-a-date\"]",
+        )?;
+
+        let error = store.get_integer_vec("App", "ports").unwrap_err();
+        assert!(matches!(
+            error,
+            Error::ValueParse { ref path, ref key, ref message }
+                if path == "App"
+                    && key == "ports"
+                    && message == "expected array elements of type integer, found boolean (at index 1)"
+        ));
+
+        let error = store.get_datetime_vec("App", "times").unwrap_err();
+        assert!(matches!(
+            error,
+            Error::ValueParse { ref path, ref key, ref message }
+                if path == "App"
+                    && key == "times"
+                    && message.ends_with("(at index 1)")
+        ));
+        Ok(())
+    }
+
+    #[test]
     fn missing_key_yields_error() {
         let store = ConfigStore::new();
         let err = store.get_string("Missing", "key").unwrap_err();

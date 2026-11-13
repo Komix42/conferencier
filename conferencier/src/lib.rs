@@ -70,6 +70,18 @@ pub mod __private {
         store.read_section(section)
     }
 
+    /// Rejects the first key not present in the struct's loaded field names.
+    pub fn deny_unknown_keys(path: &str, table: &toml::Table, known: &[&str]) -> crate::Result<()> {
+        match table
+            .keys()
+            .filter(|key| !known.contains(&key.as_str()))
+            .min()
+        {
+            Some(key) => Err(crate::Error::unknown_key(path, key.clone())),
+            None => Ok(()),
+        }
+    }
+
     /// Wraps `value` in the shared scope type used by the derive implementation.
     pub fn new_shared_scope<T>(value: T) -> SharedScope<T> {
         Arc::new(RwLock::new(value))

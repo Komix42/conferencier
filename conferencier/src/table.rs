@@ -19,7 +19,9 @@ use crate::Result;
 /// `ignore` and `table`. A table-only derive does not accept `section`.
 /// Mark an owning field `#[confer(table)]` and use `T`, `Option<T>` or `Vec<T>`
 /// to represent a table, an optional table or an array of tables respectively.
-/// Unknown keys are ignored on load and are not returned on save.
+/// Unknown keys are ignored on load and are not returned on save unless the type
+/// has `#[confer(deny_unknown_keys)]`. Strictness belongs to each type and is not
+/// inherited from its containing scope or table.
 ///
 /// Tables are plain values, not shared scope handles. Loading a scope rebuilds
 /// its nested tables, so ignored fields of a table are initialized on every

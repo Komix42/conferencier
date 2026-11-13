@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 - Expanded rustdoc for the complete public API, with examples, conversion and error semantics, snapshot behavior, scope lock guidance and the current file-write limitations. The READMEs explain scopes, the `derive` feature and `#[confer(...)]`, and include the updated reload examples.
 - Public `table_path::{section_path, child_path, element_path}` helpers build the derive's diagnostic paths in manual `ConfigScope` and `ConfigTable` implementations, with or without the `derive` feature ([RFC-0006](docs/RFC-0006_strict_unknown_keys.md)).
+- `#[confer(deny_unknown_keys)]` rejects unmapped keys during load, and `Error::UnknownKey` reports them with the formatted table path and raw key ([RFC-0006](docs/RFC-0006_strict_unknown_keys.md)).
 
 ### Changed
 - **Breaking:** `Error::MissingKey`, `TypeMismatch` and `ValueParse` now store the formatted table path in `path` instead of `section`. Their constructors also take a formatted path; diagnostics quote section and key segments when needed, and non-table top-level entries use an empty path with the entry name as the key. Scalar-array conversion errors identify the zero-based element index ([RFC-0006](docs/RFC-0006_strict_unknown_keys.md)).

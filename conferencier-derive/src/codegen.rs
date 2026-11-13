@@ -17,6 +17,7 @@ pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
         ident,
         generics,
         section,
+        deny_unknown_keys,
         fields,
     } = scope;
 
@@ -29,6 +30,10 @@ pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
     let guard = generated_local("guard");
 
     let loaded: Vec<_> = fields.iter().filter(|field| !field.ignore).collect();
+    let known_keys: Vec<_> = loaded
+        .iter()
+        .map(|field| LitStr::new(&field.key, field.span))
+        .collect();
     let loaded_idents: Vec<_> = loaded.iter().map(|field| &field.ident).collect();
     let loaded_locals: Vec<_> = loaded_idents
         .iter()
@@ -47,15 +52,28 @@ pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
 
     let read_section = quote! { #crate_private::read_section(#store, #section_lit)? };
     // Without loaded fields the section is only checked (R5); a binding would be unused.
-    let snapshot = if loaded.is_empty() {
+    let snapshot = if loaded.is_empty() && deny_unknown_keys {
+        quote! { let #table = #read_section; }
+    } else if loaded.is_empty() {
         quote! { #read_section; }
     } else {
         quote! { let mut #table = #read_section; }
     };
-    let path_binding = if loaded.is_empty() {
+    let path_binding = if loaded.is_empty() && !deny_unknown_keys {
         TokenStream::new()
     } else {
         quote! { let #path = #crate_private::section_path(#section_lit); }
+    };
+    let unknown_key_check = if deny_unknown_keys {
+        quote! {
+            #crate_private::deny_unknown_keys(
+                #path_expr,
+                &#table,
+                &[#(#known_keys),*],
+            )?;
+        }
+    } else {
+        TokenStream::new()
     };
 
     let assign = if loaded.is_empty() {
@@ -85,6 +103,7 @@ pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
             fn from_store(#store: &#store_type) -> #result_type<#shared_scope> {
                 #path_binding
                 #snapshot
+                #unknown_key_check
                 #( #load_statements )*
                 let value = Self { #(#struct_fields),* };
                 Ok(#crate_private::new_shared_scope(value))
@@ -93,6 +112,7 @@ pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
             async fn load(scope: &#shared_scope, #store: &#store_type) -> #result_type<()> {
                 #path_binding
                 #snapshot
+                #unknown_key_check
                 #( #load_statements )*
                 #assign
                 Ok(())
@@ -115,6 +135,7 @@ pub fn generate_table(scope: Scope, crate_path: syn::Path) -> Result<TokenStream
     let Scope {
         ident,
         generics,
+        deny_unknown_keys,
         fields,
         ..
     } = scope;
@@ -129,13 +150,31 @@ pub fn generate_table(scope: Scope, crate_path: syn::Path) -> Result<TokenStream
     let struct_fields = struct_fields(&fields);
     let table_type = quote! { #crate_path::toml::Table };
     let result_type = quote! { #crate_path::Result };
+    let known_keys: Vec<_> = fields
+        .iter()
+        .filter(|field| !field.ignore)
+        .map(|field| LitStr::new(&field.key, field.span))
+        .collect();
 
     // Unused parameters are left unnamed, so no lint fires in the user's crate.
     let has_loaded = fields.iter().any(|field| !field.ignore);
     let from_params = if has_loaded {
         quote! { #path: &str, mut #table: #table_type }
+    } else if deny_unknown_keys {
+        quote! { #path: &str, #table: #table_type }
     } else {
         quote! { _: &str, _: #table_type }
+    };
+    let unknown_key_check = if deny_unknown_keys {
+        quote! {
+            #crate_path::__private::deny_unknown_keys(
+                #path,
+                &#table,
+                &[#(#known_keys),*],
+            )?;
+        }
+    } else {
+        TokenStream::new()
     };
     let to_path = if fields
         .iter()
@@ -159,6 +198,7 @@ pub fn generate_table(scope: Scope, crate_path: syn::Path) -> Result<TokenStream
     Ok(quote! {
         impl #impl_generics #crate_path::ConfigTable for #ident #ty_generics #where_clause {
             fn from_table(#from_params) -> #result_type<Self> {
+                #unknown_key_check
                 #( #load_statements )*
                 Ok(Self { #(#struct_fields),* })
             }

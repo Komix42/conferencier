@@ -1,0 +1,5 @@
+error: duplicate #[confer(deny_unknown_keys)] attribute
+ --> tests/trybuild/fail_deny_unknown_keys_duplicate.rs:5:10
+  |
+5 | #[confer(deny_unknown_keys)]
+  |          ^^^^^^^^^^^^^^^^^

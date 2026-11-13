@@ -30,7 +30,7 @@ pub fn parse_scope(input: DeriveInput, derive: DeriveKind) -> Result<Scope> {
         ..
     } = input;
 
-    let section = parse_section_name(&attrs, &ident, derive)?;
+    let (section, deny_unknown_keys) = parse_section_name(&attrs, &ident, derive)?;
 
     let data = match data {
         syn::Data::Struct(data) => data,
@@ -66,11 +66,12 @@ pub fn parse_scope(input: DeriveInput, derive: DeriveKind) -> Result<Scope> {
         ident,
         generics,
         section,
+        deny_unknown_keys,
         fields: result_fields,
     })
 }
 
-/// Extracts the TOML section name from the `#[confer(...)]` attributes or generates a default.
+/// Extracts the TOML section name and strictness from the `#[confer(...)]` attributes.
 ///
 /// `ConfigTable` accepts and validates `section` but does not use it, so one struct can derive
 /// both macros.
@@ -78,8 +79,9 @@ fn parse_section_name(
     attrs: &[Attribute],
     ident: &syn::Ident,
     derive: DeriveKind,
-) -> Result<String> {
+) -> Result<(String, bool)> {
     let mut section: Option<String> = None;
+    let mut deny_unknown_keys = false;
 
     for attr in attrs {
         if !is_confer_attr(attr) {
@@ -94,6 +96,15 @@ fn parse_section_name(
                 let value: LitStr = meta.value()?.parse()?;
                 section = Some(value.value());
                 Ok(())
+            } else if meta.path.is_ident("deny_unknown_keys") {
+                if deny_unknown_keys {
+                    return Err(meta.error("duplicate #[confer(deny_unknown_keys)] attribute"));
+                }
+                if !meta.input.is_empty() {
+                    return Err(meta.error("#[confer(deny_unknown_keys)] takes no value"));
+                }
+                deny_unknown_keys = true;
+                Ok(())
             } else {
                 Err(meta.error(format!(
                     "unsupported attribute on struct for #[derive({})]",
@@ -104,7 +115,7 @@ fn parse_section_name(
     }
 
     if let Some(section) = section {
-        return Ok(section);
+        return Ok((section, deny_unknown_keys));
     }
     let name = ident.unraw().to_string();
     if matches!(derive, DeriveKind::Scope) {
@@ -120,7 +131,7 @@ fn parse_section_name(
             ));
         }
     }
-    Ok(name)
+    Ok((name, deny_unknown_keys))
 }
 
 /// Parses an individual struct field, tracking duplicate keys and metadata.
@@ -179,6 +190,8 @@ fn parse_field(
                 }
                 table = true;
                 Ok(())
+            } else if meta.path.is_ident("deny_unknown_keys") {
+                Err(meta.error("#[confer(deny_unknown_keys)] is a struct attribute"))
             } else {
                 Err(meta.error(format!(
                     "unsupported attribute for #[derive({})]",

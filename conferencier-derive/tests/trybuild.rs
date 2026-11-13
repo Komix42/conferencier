@@ -10,6 +10,7 @@ fn trybuild_suite() {
     t.pass("tests/trybuild/pass_table_shapes.rs");
     t.pass("tests/trybuild/pass_generic_table.rs");
     t.pass("tests/trybuild/pass_table_confer_prefix.rs");
+    t.pass("tests/trybuild/pass_deny_unknown_keys.rs");
     t.compile_fail("tests/trybuild/fail_duplicate_keys.rs");
     t.compile_fail("tests/trybuild/fail_unsupported_type.rs");
     t.compile_fail("tests/trybuild/fail_conflicting_attrs.rs");
@@ -30,4 +31,7 @@ fn trybuild_suite() {
     t.compile_fail("tests/trybuild/fail_table_struct.rs");
     t.compile_fail("tests/trybuild/fail_table_ignore_expr_scope.rs");
     t.compile_fail("tests/trybuild/fail_confer_prefix.rs");
+    t.compile_fail("tests/trybuild/fail_deny_unknown_keys_duplicate.rs");
+    t.compile_fail("tests/trybuild/fail_deny_unknown_keys_value.rs");
+    t.compile_fail("tests/trybuild/fail_deny_unknown_keys_field.rs");
 }

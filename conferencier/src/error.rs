@@ -23,7 +23,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// This enum is non-exhaustive: match the variants relevant to your application
 /// and keep a fallback arm for future variants. [`std::error::Error::source`]
 /// exposes the underlying I/O, TOML parsing or serialization error; field errors
-/// carry their diagnostic context directly.
+/// and [`UnknownKey`](Self::UnknownKey) carry their diagnostic context directly.
 ///
 /// ```
 /// use conferencier::{ConfigStore, Error};
@@ -67,7 +67,7 @@ pub enum Error {
     MissingKey {
         /// Formatted path of the table containing the key.
         path: String,
-        /// The missing key.
+        /// The missing key, without path formatting.
         key: String,
     },
     /// A value has a different TOML type than the field expects.
@@ -78,7 +78,7 @@ pub enum Error {
     TypeMismatch {
         /// Formatted path of the table containing the key.
         path: String,
-        /// The key holding the value.
+        /// The key holding the value, without path formatting.
         key: String,
         /// Expected TOML type, such as `integer` or `table`.
         expected: &'static str,
@@ -95,10 +95,18 @@ pub enum Error {
     ValueParse {
         /// Formatted path of the table containing the key.
         path: String,
-        /// The key holding the value.
+        /// The key holding the value, without path formatting.
         key: String,
         /// Description of the problem.
         message: String,
+    },
+    /// A strict struct found a key that no loaded field maps.
+    #[error("unknown key {}", display_key(.path, .key))]
+    UnknownKey {
+        /// Formatted path of the table containing the key.
+        path: String,
+        /// The unknown TOML key, without formatting.
+        key: String,
     },
 }
 
@@ -155,6 +163,17 @@ impl Error {
             message: message.into(),
         }
     }
+
+    /// Reports an unknown key in a strict table.
+    ///
+    /// Pass an already formatted diagnostic path and the raw TOML key. This
+    /// constructs an error; it does not inspect a table.
+    pub fn unknown_key(path: impl Into<String>, key: impl Into<String>) -> Self {
+        Self::UnknownKey {
+            path: path.into(),
+            key: key.into(),
+        }
+    }
 }
 
 fn display_key(path: &str, key: &str) -> String {
@@ -206,6 +225,10 @@ mod tests {
             "expected table at \"App.server\" but found integer"
         );
         assert_eq!(Error::missing_key("", "").to_string(), "missing key \"\"");
+        assert_eq!(
+            Error::unknown_key("App", "a.b").to_string(),
+            "unknown key App.\"a.b\""
+        );
     }
 
     #[test]

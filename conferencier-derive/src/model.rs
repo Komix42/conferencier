@@ -26,6 +26,8 @@ pub struct Scope {
     pub generics: syn::Generics,
     /// TOML section of a scope; validated but unused for tables.
     pub section: String,
+    /// Rejects keys not mapped to loaded fields during table conversion.
+    pub deny_unknown_keys: bool,
     pub fields: Vec<Field>,
 }
 
