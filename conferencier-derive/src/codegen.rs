@@ -438,7 +438,7 @@ fn table_from_value(
 
 /// Inserts the table field referenced by `value` into `table`.
 ///
-/// A plain table is always written; `None` and an empty vector are omitted.
+/// A plain table and every vector of tables are written; `None` is omitted.
 fn table_insert(
     table_type: &TableType,
     table: &Ident,
@@ -463,16 +463,14 @@ fn table_insert(
             }
         },
         TableContainer::Vec => quote! {
-            if !value.is_empty() {
-                let array_path = #private::child_path(#path, #key);
-                let mut array = ::std::vec::Vec::with_capacity(value.len());
-                for (index, value) in value.iter().enumerate() {
-                    array.push(#value_type::Table(
-                        #to_table(value, &#private::element_path(&array_path, index))?,
-                    ));
-                }
-                #table.insert(::std::string::String::from(#key), #value_type::Array(array));
+            let array_path = #private::child_path(#path, #key);
+            let mut array = ::std::vec::Vec::with_capacity(value.len());
+            for (index, value) in value.iter().enumerate() {
+                array.push(#value_type::Table(
+                    #to_table(value, &#private::element_path(&array_path, index))?,
+                ));
             }
+            #table.insert(::std::string::String::from(#key), #value_type::Array(array));
         },
     }
 }

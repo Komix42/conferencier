@@ -202,9 +202,9 @@ A table type takes the same field attributes as a scope (`rename`, `default`, `i
 | --- | --- | --- | --- |
 | `T` | table: `[App.server]` or `server = { ... }` | loaded from an empty table: the defaults of `T` apply, a required field of `T` fails with `MissingKey` | always written |
 | `Option<T>` | table | `None` | `None` removes the key |
-| `Vec<T>` | array of tables: `[[App.upstream]]` or `upstream = [{ ... }]` | empty `Vec` | an empty `Vec` removes the key |
+| `Vec<T>` | array of tables: `[[App.upstream]]` or `upstream = [{ ... }]` | empty `Vec` | always written, including as `upstream = []` |
 
-- An absent table `Vec<T>` loads as empty, while an absent scalar `Vec` without `default` (e.g. `Vec<String>`) fails with `MissingKey`. An empty `Vec<T>` is not saved as `upstream = []`, because TOML would then reject `[[App.upstream]]` entries added by hand.
+- An absent table `Vec<T>` loads as empty, while an absent scalar `Vec` without `default` (e.g. `Vec<String>`) fails with `MissingKey`. An empty `Vec<T>` is saved as `upstream = []`; TOML does not allow adding `[[App.upstream]]` entries after that array, so remove or replace it first.
 - `#[confer(table)]` cannot be combined with `default` or `ignore`; defaults belong to the fields of `T`. Other shapes such as `Option<Vec<T>>`, `Box<T>` or maps are not supported.
 - Errors keep a formatted table `path` and a logical key; diagnostic output quotes dotted or otherwise non-bare TOML key segments. For example, a missing `a.b` key reports `missing key App."a.b"`. Scalar-array conversion errors include the zero-based element index, e.g. `invalid value at App.ports: value out of range for u16 (at index 1)`.
 - Tables are plain values: every successful `load` builds them anew. Ignored fields inside a table type are therefore initialized again on each load (with `Default::default()` or their `ignore = <expr>` initializer), unlike ignored fields of the scope itself. If the load fails, the scope keeps its previous state, but side effects of initializers that have already run are not undone.

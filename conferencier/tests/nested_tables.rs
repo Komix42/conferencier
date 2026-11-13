@@ -401,7 +401,7 @@ y = 2
         other => panic!("unexpected upstream: {other:?}"),
     }
 
-    // `None` and an empty vector of tables remove their keys.
+    // `None` removes its key; an empty vector of tables is written as an empty array.
     {
         let mut guard = module.write().await;
         guard.tls = None;
@@ -410,11 +410,13 @@ y = 2
     }
     App::save(&module, &store).await?;
     let section = store.get_section("App").expect("saved section");
-    assert_eq!(sorted_keys(&section), ["name", "server"]);
+    assert_eq!(sorted_keys(&section), ["name", "server", "upstream"]);
+    assert!(matches!(section.get("upstream"), Some(Value::Array(array)) if array.is_empty()));
     assert_eq!(
         sorted_keys(sub_table(sub_table(&section, "server"), "limits")),
         ["burst"]
     );
+    assert!(reloaded::<App>(&store).await?.upstream.is_empty());
 
     // A plain table is always written, even when empty.
     let store = ConfigStore::new();
