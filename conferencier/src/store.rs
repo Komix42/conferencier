@@ -202,10 +202,11 @@ impl ConfigStore {
     /// # Write coordination and replacement
     ///
     /// Every call writes its own temporary sibling named
-    /// `<file name>.<process id>.<counter>.tmp`, so concurrent calls to the same target,
-    /// including calls through cloned handles, do not interfere: each successful call
-    /// installs one complete snapshot. Which of several concurrent calls wins is
-    /// unspecified; an application that needs an order serializes its own saves.
+    /// `.conferencier.<process id>.<counter>.tmp`, independent of the target filename,
+    /// so long target names remain usable. Concurrent calls to the same target, including
+    /// calls through cloned handles, do not interfere: each successful call installs one
+    /// complete snapshot. Which of several concurrent calls wins is unspecified; an
+    /// application that needs an order serializes its own saves.
     ///
     /// Replacement uses a rename. If the platform reports that the target already
     /// exists, it is removed before retrying the rename; atomic replacement is
@@ -796,18 +797,15 @@ fn write_and_replace(
     }
 }
 
-/// Computes a unique temporary sibling path, `<file name>.<process id>.<counter>.tmp`.
+/// Computes a unique temporary sibling path independent of the target filename.
 fn temporary_path(path: &Path) -> PathBuf {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
 
-    let mut file_name = path
-        .file_name()
-        .map(|name| name.to_os_string())
-        .unwrap_or_else(|| "conferencier".into());
     let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
-    file_name.push(format!(".{}.{counter}.tmp", std::process::id()));
-
-    path.with_file_name(file_name)
+    path.with_file_name(format!(
+        ".conferencier.{}.{counter}.tmp",
+        std::process::id()
+    ))
 }
 
 #[cfg(test)]
@@ -1076,6 +1074,26 @@ mod tests {
 
         let file_contents = tokio::fs::read_to_string(&path_buf).await?;
         assert!(file_contents.contains("enabled = false"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn save_file_supports_long_target_filenames() -> Result<()> {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let filename = format!("{}.toml", "a".repeat(245));
+        let path = dir.path().join(filename);
+        std::fs::write(&path, "original = true")?;
+
+        let store = ConfigStore::new();
+        store.set_integer("App", "value", 42)?;
+        store.save_file(&path).await?;
+
+        let saved = std::fs::read_to_string(&path)?;
+        assert!(saved.contains("value = 42"));
+        let entries: Vec<_> = std::fs::read_dir(dir.path())?
+            .map(|entry| entry.map(|entry| entry.file_name()))
+            .collect::<std::io::Result<_>>()?;
+        assert_eq!(entries, [path.file_name().unwrap()]);
         Ok(())
     }
 
