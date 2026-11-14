@@ -55,6 +55,12 @@ Non-goals:
 
 ## Proposed policy
 
+This policy applies only to targets accepted by RFC-0009 R4: an observed
+missing target or an existing regular file, excluding Windows reparse points.
+Final-component symlinks, including dangling links, and other unsupported
+types are rejected before temporary-file creation. Permission lookup does not
+follow a final-component link.
+
 For a **new target**, create the temporary file using the operating system's
 normal file-creation policy in the target directory, then publish it by rename.
 That policy may include a Unix umask or default ACL, or a Windows inherited
@@ -65,9 +71,12 @@ For an **existing target**, the preserved access settings are limited to those
 agreed in R1: Unix permission mode bits observed during preparation. Before
 writing data, set those bits on the temporary file. This does not guarantee
 equivalent effective access: ownership and ACLs can differ during staging and
-after publication. On Windows, no access settings are copied; the temporary
-file uses normal creation policy and is published by rename. Failures to read
-or apply the required permissions are handled as specified in R3.
+after publication. On Unix, a target lacking owner-write permission (such as
+mode `0444`) is not rejected for that reason alone: rename changes the directory
+entry and can succeed when the containing directory permits it. On Windows, no
+access settings are copied; the temporary file uses normal creation policy and
+is published by rename. Failures to read or apply the required permissions are
+handled as specified in R3.
 
 ## Alternatives considered
 
@@ -92,25 +101,40 @@ or apply the required permissions are handled as specified in R3.
 
 ## Compatibility
 
-The `save_file` signature and serialized contents remain unchanged. Replacing
-an existing Unix file should use its observed permission mode bits instead of
-process defaults, subject to the concurrency limits below. Access settings
-outside R1 keep their current behavior and must be documented. Some filesystems
-or permission configurations may not support the proposed policy; their
-behavior must be explicit, not a success-shaped fallback.
+The `save_file` signature and serialized contents remain unchanged. Target
+validation and its errors follow RFC-0009 R4 on every platform. Replacing an
+accepted existing Unix file should use its observed permission mode bits
+instead of process defaults, subject to the concurrency limits below. Access
+settings outside R1 keep their current behavior for accepted targets and must
+be documented. Some filesystems or permission configurations may not support
+the proposed policy; their behavior must be explicit, not a success-shaped
+fallback.
 
 ## Testing
 
 - On Linux and macOS, verify that replacing an existing target preserves its
   `rwx` mode bits, including when a normal new file would be more permissive.
+- On Linux and macOS, verify that a read-only regular target such as `0444`
+  can be replaced when directory permissions allow it, and that the replacement
+  retains the observed mode. Do not treat the target's owner-write bit as a
+  proxy for whether the rename is permitted.
+- On Linux and macOS, verify that the still-open temporary-file handle can
+  write the snapshot after its mode has been set to `0400` and `0000`. Restore
+  or clean up test fixtures safely; these cases verify writing through the
+  existing handle, not access by reopening the temporary path.
 - On Unix, check that a new target's mode follows normal file creation in the
   same environment, and verify the temporary file's mode before writing, as
   required by R2.
-- On Linux and macOS, verify that a final-component symlink to an existing
-  regular file is replaced at the link path using the referent's observed mode,
-  leaving the referent unchanged. Verify that a dangling link follows the
-  `NotFound` policy, uses the normal new-file mode and is replaced on a
-  successful save without creating the missing referent.
+- On Linux and macOS, verify rejection of both final-component symlinks to
+  existing regular files and dangling final-component symlinks under RFC-0009
+  R4 before temporary-file creation. No mode is copied from a referent, the
+  link and any referent remain unchanged, and a missing referent is not created.
+- On Linux and macOS, verify that reaching an accepted regular file through a
+  parent-directory symlink still preserves its observed mode and leaves the
+  parent link intact.
+- On Linux and macOS, verify that saving through one hard-link name preserves
+  its observed mode while the other name retains the original file and
+  contents. Do not infer ownership or ACL preservation from this test.
 - Deterministically simulate metadata-read and permission-setting failures.
   Verify that no data is written, the target remains unchanged, and the error
   and any cleanup attempt follow R3 and RFC-0009. Check that the I/O error
@@ -125,8 +149,13 @@ behavior must be explicit, not a success-shaped fallback.
 
 ## Documentation deliverables
 
-- Update the `save_file` rustdoc and README saving guidance with the exact
-  supported permission guarantees and every limitation listed in R1.
+- Update the `save_file` rustdoc and aligned root and crate READMEs with the
+  exact supported permission guarantees and every limitation listed in R1.
+  Explicitly describe unsupported-target errors and the fact that replacement
+  through one hard-link name does not update the other names or already-open
+  handles, which keep the old file's contents and permissions. Document that a
+  Unix read-only mode does not by itself prevent rename replacement when the
+  containing directory permits it.
 - Update the changelog if the user-visible permission behavior changes.
 
 ## Resolved questions
@@ -137,6 +166,12 @@ and others (`0o777`) observed when reading its metadata. A new target uses the
 operating system's normal creation policy. On Windows, no access settings,
 including the DACL, are copied from the replaced file. The project does not add
 Windows APIs or dependencies for this in 0.0.6.
+
+Do not reject an accepted Unix regular target solely because its owner-write
+bit is clear. Rename permission is governed by the containing directory and
+other applicable platform rules; a read-only file can therefore be replaced
+without opening it for writing. The replacement retains the observed mode
+bits, subject to R2 and the documented ownership and ACL limitations.
 
 This preserves basic Unix mode bits, not effective access. Different ownership
 or ACLs can allow additional users to read the temporary file during writing
@@ -155,61 +190,79 @@ limitations must be documented in the `save_file` rustdoc and aligned READMEs:
 - **Special mode bits** (`setuid`, `setgid`, sticky).
 - **Windows access control.** The temporary file receives the security settings
   assigned by Windows at creation; the replacement's final settings depend on
-  the platform's rename behavior. The old DACL is not copied, so access can
-  become broader. Owner, SACL and file attributes are not preserved either.
-  This includes the read-only attribute, even though Rust's standard library
-  can read and set it. Read-only is not a DACL or protection against reading.
+  the platform's rename behavior. For accepted regular targets, the old DACL
+  is not copied, so access can become broader. Owner, SACL and file attributes
+  are not preserved either. This includes the read-only attribute, even though
+  Rust's standard library can read and set it. Read-only is not a DACL or
+  protection against reading. A regular target with the read-only attribute
+  still passes RFC-0009 R4 validation, but Windows may reject publication
+  with an I/O error such as `PermissionDenied`; this RFC neither clears the
+  attribute nor promises that rename will succeed. Targets with the reparse
+  attribute are rejected under RFC-0009 R4, not handled through a
+  metadata-preservation fallback.
 - **Other metadata**, such as timestamps.
 - **New targets.** Normal creation and rename rules determine their settings.
   Callers that require private configuration files must arrange suitable
   access controls themselves, for example through directory permissions.
-- **Unix symlinks and hard links.** Under RFC-0009 R4, a final-component
-  symlink is replaced by a regular file on successful publication. If it points
-  to an existing regular file, its observed mode bits are used for the new
-  file; the referent is unchanged. For a dangling symlink, `metadata` returns
-  `NotFound`, so normal new-file creation rules apply; publication replaces the
-  link, not its missing referent. Other hard-link names and open handles keep
-  the old file with its old permissions. Windows reparse points remain outside
-  this guarantee.
+- **Unsupported targets.** RFC-0009 R4 rejects observed final-component
+  symlinks, including dangling links, other non-regular types and all Windows
+  reparse points, including cloud placeholders carrying that attribute.
+  A dangling link is not treated as a new target. Links in parent directories
+  are allowed; no final-component link is followed to obtain permissions.
+- **Hard links and open handles.** Regular files are not rejected based on
+  link count. A successful save replaces only the supplied name with a new
+  file. Other hard-link names and already-open handles keep referring to the
+  original file, with its old contents and permissions; changing the new
+  file's mode does not update those other names or handles.
 
 Broader preservation, including Windows DACLs, is deferred until there is a
 concrete need and would be specified by a later RFC.
 
-**R2 — Preparing the temporary file.** On Unix, establish the temporary file's
-mode before any serialized data is written:
+**R2 — Preparing the temporary file.** Validate the target on every platform
+before temporary-file creation. On Unix, establish the temporary file's mode
+before any serialized data is written:
 
-1. Read the target's metadata, following a final-component symlink as in R1,
-   before creating the temporary file.
-2. If the target exists, create the temporary file exclusively with the
-   observed permission bits (`mode & 0o777`). OS creation rules can restrict
-   the requested mode; on Linux a default directory ACL may apply instead of
-   the umask. Then set exactly those bits on the still-empty file through its
+1. Inspect the final component with `std::fs::symlink_metadata` as specified
+   in RFC-0009 R4. Reject unsupported observations and metadata failures other
+   than `NotFound`; do not follow a final-component link.
+2. On Unix, if validation observed an existing regular file, reuse that
+   metadata to create the temporary file exclusively with the observed
+   permission bits (`mode & 0o777`). OS creation rules can restrict the
+   requested mode; on Linux a default directory ACL may apply instead of the
+   umask. Then set exactly those bits on the still-empty file through its
    open handle.
-3. If the target does not exist (`NotFound`), create the temporary file as
-   today, with the normal creation permissions of a new file.
+3. If validation observed a missing target (`NotFound`), create the temporary
+   file as today, with normal new-file permissions. A dangling symlink is
+   rejected in step 1 and cannot enter this branch. On Windows, normal
+   creation policy also applies to an accepted existing regular target.
 4. Write the snapshot and publish it according to RFC-0009.
 
-The temporary file has the observed mode bits before it contains data, and the
-final mode is in place before publication, so no permission change is needed
-after rename. Equality of mode bits does not ensure equivalent effective access.
-This uses only the standard library (`OpenOptionsExt::mode`,
-`File::set_permissions`).
+For an accepted existing Unix target, the temporary file has the observed
+mode bits before it contains data, and the final mode is in place before
+publication, so no permission change is needed after rename. Equality of mode
+bits does not ensure equivalent effective access. This uses only the standard
+library (`OpenOptionsExt::mode`, `File::set_permissions`).
 
-The metadata is read once, before the temporary file is created. If the target
-or its permissions change during the save, the earlier observation is used;
-this includes concurrent saves, which RFC-0009 does not order. For example, two
-processes can both observe a missing target and use different creation
-policies; the later publication can replace a more restrictive file created
-by the other process. On Windows, the temporary file is created as today;
-effective access after rename is subject to platform behavior.
+Target validation reads metadata once, before temporary-file creation; the
+Unix mode comes from the same observation, not a second lookup that follows
+links. If the target or its permissions change during the save, the earlier
+observation is used; this includes concurrent saves, which RFC-0009 does not
+order. Validation is not atomic with publication and cannot enforce the
+observed type after another actor changes the path. For example, two processes
+can both observe a missing target and use different creation policies; the
+later publication can replace a more restrictive file created by the other
+process. On Windows, the temporary file is created as today after target
+validation; effective access after rename is subject to platform behavior.
 
-**R3 — Permission failures.** Any failure to read the target's metadata, other
-than `NotFound`, or to set the temporary file's permissions fails the save
-before serialized data is written:
+**R3 — Permission failures.** Target validation follows RFC-0009 R4 on every
+platform. Any failure to read the target's metadata, other than `NotFound`,
+or to set the Unix temporary file's permissions fails the save before
+serialized data is written:
 
-- If reading the target's metadata fails, its mode is unknown, so the save
-  stops before creating the temporary file. Continuing with default
-  permissions could broaden access.
+- If reading the target's metadata fails, its eligibility and, on Unix, mode
+  are unknown, so the save stops before creating the temporary file.
+  Continuing with normal creation permissions is not a fallback for a
+  validation failure and could broaden access.
 - If setting the mode on the still-empty temporary file fails, the file was
   created requesting the observed mode bits, and no data has been written.
   The save still fails because the exact mode required by R1 was not
@@ -220,10 +273,11 @@ attempt cleanup and return the error as specified in RFC-0009 R3. Callers
 cannot opt into a fallback that proceeds with different permissions.
 
 **R4 — CI verification.** Test library-controlled guarantees on applicable
-platforms. Run the Unix mode-preservation, symlink and staging tests on both
-Linux and macOS, exercise permission failures deterministically, and run
-applicable cross-platform saving tests on Windows. Review the relevant GitHub
-Actions results for all three platforms before marking this RFC implemented.
+platforms. Run the Unix mode-preservation, symlink-rejection and staging tests
+on both Linux and macOS, exercise permission failures deterministically, and
+run applicable cross-platform saving and Windows target-validation tests as
+specified in RFC-0009. Review the relevant GitHub Actions results for all
+three platforms before marking this RFC implemented.
 
 The Windows tests do not inspect DACLs: normal creation behavior is based on
 the operating system's documented rules, and DACL behavior after rename is
@@ -234,7 +288,7 @@ limitations remain part of the documentation required by R1.
 
 ## References
 
-- [Rust `metadata`](https://doc.rust-lang.org/1.85.0/std/fs/fn.metadata.html)
+- [Rust `symlink_metadata`](https://doc.rust-lang.org/1.85.0/std/fs/fn.symlink_metadata.html)
   and [`Permissions`](https://doc.rust-lang.org/1.85.0/std/fs/struct.Permissions.html).
 - [Linux `umask(2)`](https://man7.org/linux/man-pages/man2/umask.2.html)
   and [`acl(5)`](https://man7.org/linux/man-pages/man5/acl.5.html).

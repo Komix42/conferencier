@@ -50,9 +50,11 @@ Goals:
 - Define observable behavior for successful saves, errors and cancellation.
 - Do not delete or truncate the existing target as a separate prerequisite to
   publishing its replacement.
-- Preserve complete snapshot publication on filesystems whose replacement
-  operation supports it, without promising more than those operations provide.
+- Publish the prepared temporary file using the replacement operation where
+  supported, and describe atomicity only as a path-visibility property. Do
+  not promise durability or detection of delayed write/close errors.
 - Define temporary-file lifecycle and its interaction with RFC-0010.
+- Reject unsupported target types before creating a temporary file.
 - Verify behavior on the project's Windows, Linux and macOS CI platforms.
 
 Proposed non-goals for 0.0.6:
@@ -64,6 +66,8 @@ Proposed non-goals for 0.0.6:
   on every filesystem.
 - New saving methods or configuration, automatic parent-directory creation,
   backups or a journal. R3 adds one public error variant.
+- Following final-component links or preserving relationships between hard-link
+  names.
 - Defending against an adversary who can mutate entries in the target
   directory while a save is in progress.
 
@@ -72,20 +76,24 @@ Proposed non-goals for 0.0.6:
 1. **Snapshot.** Serialize the in-memory document before file I/O, as today.
    The store lock is not held during file I/O. Changes made later are not in
    this snapshot; unsaved scope changes are not included.
-2. **Prepare.** On Unix, read the target metadata as specified in RFC-0010
-   before creating the temporary file. Create a new temporary sibling without
-   opening an existing file, establish its access policy as agreed in
-   RFC-0010, and write all snapshot bytes. The target is not deliberately
-   modified during this phase.
+2. **Validate and prepare.** On every platform, inspect the final path
+   component with `std::fs::symlink_metadata` before creating the temporary
+   file. Accept an observed missing target or a regular file, excluding
+   Windows reparse points, and handle all other observations as specified in
+   R4. On Unix, reuse the accepted regular file's metadata for the permission
+   policy in RFC-0010. Create a new temporary sibling without opening an
+   existing file, establish its access policy as agreed in RFC-0010, and write
+   all snapshot bytes. The target is not deliberately modified during this
+   phase.
 3. **Publish.** Close the temporary handle as needed, then call
    `std::fs::rename` to publish the temporary file whether the target is
    missing or already exists. Do not select behavior through a prior
    `exists()` check, which can race with changes to the target. Do not add a
    fallback that removes the target before retrying.
 4. **Finish.** Return success after publication succeeds. On a preparation or
-   publication error, attempt to remove the temporary file by path and return
-   the original or combined error according to R3. The method does not modify
-   the in-memory store.
+   publication error, attempt to remove the temporary file by path if one was
+   created, and return the original or combined error according to R3.
+   The method does not modify the in-memory store.
 
 The temporary file is in the target directory so publication normally stays
 on the same filesystem. Its name must remain independent of the target
@@ -93,6 +101,23 @@ filename, preserving support for long valid target names. Exclusive creation
 prevents accidentally opening an existing temporary file; it does not by
 itself protect a named temporary file against interference by an actor who can
 change entries in the directory.
+
+Use a recognizable hidden sibling name such as
+`.conferencier.<pid>.<counter>.tmp`, independent of the target filename. If
+exclusive creation returns `AlreadyExists`, generate a fresh name and retry a
+bounded number of times; never remove or open the colliding entry. If all
+attempts collide, return the final creation error with its temporary path. The
+exact retry limit is an implementation detail, not a public API guarantee.
+Directory watchers may observe temporary-file creation and rename events; the
+library does not promise a particular event sequence or watcher behavior.
+
+Creating the temporary sibling and renaming it into place require sufficient
+access to the containing directory; write permission on the target file alone
+is not enough. On Unix, a read-only target can still be replaced if directory
+permissions and other applicable rules allow it. A single-file bind mount
+cannot generally be replaced by rename; on Linux this can fail with `EBUSY`.
+Such publication failures are returned rather than worked around by deleting
+the target.
 
 ## Proposed observable contract
 
@@ -103,9 +128,10 @@ discussed.
 | Event | Proposed behavior and limits |
 | --- | --- |
 | Serialization fails | Return `Error::Serialize` before creating a temporary file or touching the target. |
+| Target validation rejects the observed type or cannot read its metadata | Return the error specified in R4 before creating a temporary file or modifying the target. |
 | Permission preparation fails | Do not write snapshot data or modify the target. Attempt cleanup if a temporary file was created; return the error as specified in R3 and RFC-0010 R3. |
 | Temporary creation or writing fails before publication | The library has not modified the target. Attempt cleanup if a temporary file was created; return the error as specified in R3. |
-| Publication succeeds | The complete serialized snapshot was installed by the replacement operation. A later writer may replace it again before the caller observes it. |
+| Publication succeeds | `write_all` returned success and the rename returned success. Where the filesystem provides atomic replacement, the target path switches from the old file to the prepared file without an intermediate pathname gap; a later writer may replace it before the caller observes it. This does not guarantee that data reached stable storage or that delayed write/close errors were detected. |
 | Publication returns an error | Do not explicitly remove the old target and retry. The final state is subject to the OS and filesystem; an error does not universally prove that publication did not happen. Attempt temporary-file cleanup and return the error as specified in R3. |
 | Cleanup fails other than with `NotFound` | Return `Error::SaveFileCleanup` with both errors and the temporary path; the temporary file may remain. |
 | Cleanup succeeds or returns `NotFound` | Return the original save error unchanged; `NotFound` does not establish whether publication occurred. |
@@ -116,15 +142,18 @@ result. Dropping the future or terminating the process can leave no caller to
 receive an error; R3 does not introduce logging or another notification channel.
 
 On filesystems that provide atomic replacement of a regular file, a reader
-opening the target during publication sees either the old or the new file,
-not an intermediate pathname gap created by the library. Existing open
-handles can still refer to the old file. This is a visibility property, not a
-guarantee that data or directory changes survive a crash.
+opening the target during publication sees either the old file or the prepared
+file, not an intermediate pathname gap created by the library. Existing open
+handles can still refer to the old file. Success reports that `write_all` and
+rename returned success; it does not mean that file contents or the directory
+entry reached stable storage. Because dropping `File` ignores close errors, a
+failure first reported at close is not returned to the caller.
 
 `Ok(())` means publication completed, not that it is durable after power
-loss. Since `File`'s destructor ignores close errors, `write_all` followed by
-close also does not report every possible delayed storage error. This proposal
-does not add `sync_all` or claim that all writes have reached stable storage.
+loss. Depending on the filesystem and failure, a crash or power loss after
+`Ok(())` can leave the target missing, empty or otherwise damaged. This
+proposal does not add `sync_all` or claim that all writes have reached stable
+storage.
 
 An error before publication is different from an error returned by the
 publication operation itself. POSIX specifies that the destination is
@@ -136,21 +165,24 @@ target path.
 ## Paths, concurrency and cancellation
 
 - Each save prepares its own temporary file. Successful concurrent saves can
-  install different complete snapshots; their order is unspecified. Applications
-  requiring ordering must coordinate their own saves. Permission decisions use
-  the metadata observed during preparation, not necessarily the target's state
-  at publication; see RFC-0010.
+  install different prepared snapshots; their order is unspecified. Applications
+  requiring ordering must coordinate their own saves through completion of the
+  blocking file operation. A mutex held only by a waiting future may be released
+  when that future is dropped or times out, even though its detached blocking
+  task can still publish; releasing such a lock does not establish save order.
+  Permission decisions use the metadata observed during preparation, not
+  necessarily the target's state at publication; see RFC-0010.
 - These guarantees do not protect against another process editing, deleting or
   replacing the target, or changing the containing directory.
-- The library publishes to the path exactly as supplied, without canonicalizing
-  it to select a referent. On Unix, `load_file` through a final-component
-  symlink follows it, but renaming over that path replaces the symlink itself
-  with the new file; the referent remains unchanged. The metadata lookup for
-  permissions does follow the link, as specified in RFC-0010. Other hard-link
-  names and already-open handles can continue to refer to the old file. Callers
-  that want to replace a symlink's referent must resolve and pass that path
-  themselves. Windows reparse points and other non-regular targets have no
-  additional guarantee beyond the behavior of the underlying platform operation.
+- The library validates the final path component as specified in R4; it does
+  not canonicalize the path to select a referent. Final-component symlinks,
+  including dangling links, other non-regular targets and Windows reparse
+  points are rejected when observed. Links in parent directories are allowed.
+- Regular files with multiple hard-link names are not rejected. A successful
+  replacement changes only the supplied name; other hard-link names and
+  already-open handles can continue to refer to the old file, with its old
+  contents and permissions. This limitation must be documented in the
+  `save_file` rustdoc and both READMEs.
 - Dropping a Tokio `JoinHandle` detaches its task, and a started
   `spawn_blocking` task cannot be aborted. Thus a dropped `save_file` future
   is not evidence that no write happened. Runtime shutdown and queued tasks
@@ -185,6 +217,11 @@ restoring the destructive fallback. Network or unusual filesystems may have
 weaker or ambiguous failure semantics; do not infer their behavior from local
 or CI tests on standard filesystems.
 
+The current CI runs the stable test suite on Windows, Linux and macOS, while
+its MSRV job runs on Linux. Before marking this RFC implemented, add targeted
+Windows save tests under the MSRV toolchain as well as stable, so the selected
+rename and error behavior is exercised on both Rust versions.
+
 ## Durability and alternatives
 
 - **In-place overwrite:** preserves the file's identity but can leave partial
@@ -213,12 +250,29 @@ or CI tests on standard filesystems.
 
 The proposed `save_file` signature and serialized format are unchanged.
 Replacing an existing file may return an error where the old implementation
-would attempt the destructive fallback. R3 adds a public `Error` variant:
-the enum is non-exhaustive, but callers that handle only `Error::Io` must also
-consider the combined-error case. Atomicity, cancellation, cleanup,
-permissions, the documented Unix symlink behavior and durability must be
-described accurately in the `save_file` and `Error` rustdoc and aligned root
-and crate READMEs. Record user-visible changes in the changelog.
+would attempt the destructive fallback. R4 also narrows the accepted target
+types: an observed final-component symlink or other non-regular target now
+fails instead of being left to rename behavior. On Windows, all observed
+reparse points are rejected, including cloud placeholders carrying that
+attribute. `load_file` continues to follow symlinks; `save_file` does not
+silently follow or replace them. Callers intending to save to a referent must
+explicitly resolve and pass that path themselves.
+
+R3 adds a public `Error` variant: the enum is non-exhaustive, but callers that
+handle only `Error::Io` must also consider the combined-error case. Atomicity,
+cancellation, cleanup, permissions, target-type rejection and durability must
+be described accurately in the `save_file` and `Error` rustdoc and aligned root
+and crate READMEs. The `save_file` rustdoc and both READMEs must explicitly
+explain that replacing one hard-link name does not update the other names or
+existing open handles. Include a short example explaining that a
+final-component symlink is rejected while a symlink in a parent-directory path
+is allowed. Explain that saving requires suitable access to the containing
+directory, not just write access to the target, and that replacing a
+single-file bind mount may fail with `EBUSY` on Linux. Mention that transient
+Windows sharing conflicts may make rename fail with `PermissionDenied`; no
+automatic retry is promised. Mention that directory watchers may observe
+temporary-file creation and rename without promising specific events. Record
+user-visible changes in the changelog.
 
 The permission policy is specified separately in RFC-0010. Implementation of
 this protocol depends on resolving that policy, because it can affect the
@@ -229,9 +283,21 @@ coordination if another writer changes the target during a save.
 
 - Retain successful saves to new and existing targets, long target names and
   concurrent snapshot tests.
+- Force temporary-name collisions deterministically. Verify each retry uses a
+  fresh name, never opens or removes the colliding file, stops after a bounded
+  number of attempts, and returns the final `AlreadyExists` error with its
+  temporary path.
 - Verify that `save_file` replaces an existing target with `std::fs::rename`
   on local Windows, then review the focused test results in GitHub Actions for
   Windows, Linux and macOS before marking the RFC implemented.
+- Run the focused save tests on Windows with both stable and the MSRV
+  toolchain. Exercise ordinary sharing-conflict failures and confirm they are
+  surfaced as errors; do not add a rename retry based only on
+  `PermissionDenied`.
+- Exercise a Windows read-only regular target. It passes target-type
+  validation, but the result of rename is platform/filesystem-dependent; if
+  rename fails, verify that the error is surfaced and the old target is not
+  removed. Do not clear the read-only attribute or retry the rename.
 - Deterministically simulate a publication error such as `AlreadyExists`:
   assert the error is surfaced and the existing target is not removed by the
   library. Use a narrow test seam if needed rather than relying on a race.
@@ -240,23 +306,43 @@ coordination if another writer changes the target during a save.
 - Deterministically simulate both a save failure and a cleanup failure. Check
   that the combined error preserves the original error and its source, the
   temporary path and the cleanup error, and that its display reports both
-  failures. Do not assert unconditional cleanup after a crash or failed
-  cleanup operation.
+  failures. When the original error is `Error::Io`, verify its `ErrorKind` and
+  raw OS code (when present) remain available in `save_error`. Do not assert
+  unconditional cleanup after a crash or failed cleanup operation.
 - Test cancellation with controlled synchronization: pause a started blocking
   task, drop the waiter, then release the task and verify it can still publish.
-- Document and test Unix final-component symlink behavior and its interaction
-  with permissions under RFC-0010, including dangling links. No publication
-  to the referent or cross-platform reparse-point guarantee is required.
+- Verify that final-component symlinks to existing files and dangling links
+  are rejected with `Error::Io`, `InvalidInput`, the target path and a clear
+  reason. Assert that the link and any referent remain unchanged and no
+  temporary file is created. Run these tests on Linux and macOS, and on
+  Windows where the fixtures can be created.
+- Reject directories and Unix special-file fixtures, such as a socket created
+  in a temporary directory, before temporary-file creation. No privileged
+  device-node fixture is required.
+- On Windows, verify rejection of reparse-point fixtures such as a junction.
+  Exercise the reparse attribute independently of `FileType::is_file` through
+  a narrow metadata test seam if a suitable file fixture is unavailable.
+  Distinguish real filesystem coverage from simulated metadata checks; do not
+  silently skip unavailable fixtures or claim coverage of every reparse tag.
+- Verify that an ordinary file reached through a parent-directory symlink or
+  junction remains eligible; the parent link must not be replaced.
+- Verify that replacing one of two hard-link names leaves the other name
+  referring to the original contents; do not reject the file based on its
+  link count.
+- Simulate target-metadata failures other than `NotFound`. Assert that the
+  original I/O kind and OS code are preserved with the target path, without
+  temporary-file creation or a fallback to the new-target policy.
 - Run focused tests on Windows, Linux and macOS; document behavior that cannot
   be established by those tests.
 
 ## Resolved questions
 
-**R1 — Protection scope for 0.0.6.** Prepare the complete new snapshot before
-publication, without deliberately modifying the target during preparation.
-Do not separately delete or truncate the target before replacing it. This
-protects the existing file from the library's destructive fallback during
-ordinary saving.
+**R1 — Protection scope for 0.0.6.** Serialize and write the snapshot to a
+temporary file before publication, without deliberately modifying the target
+during preparation. Do not separately delete or truncate the target before
+replacing it. This protects the existing file from the library's destructive
+fallback during ordinary saving; it does not promise detection of delayed
+write/close errors or crash durability.
 
 Crash durability is not a goal for 0.0.6: this decision does not require file
 or directory synchronization and does not promise recovery after a crash or
@@ -272,9 +358,10 @@ addressed separately.
 **R2 — Replacement operation.** Use `std::fs::rename` to publish the prepared
 temporary file both when the target is absent and when it already exists.
 Rely on the documented standard-library behavior rather than adding a
-platform-specific API or dependency in advance. Do not check whether the
-target exists before calling rename, and do not restore the remove-and-retry
-fallback.
+platform-specific replacement API or dependency in advance. The metadata
+inspection required by R4 validates target eligibility; it does not select a
+different publication operation for missing and existing targets. Do not add an
+`exists()` check or restore the remove-and-retry fallback.
 
 The implementation must be tested locally on Windows and its GitHub Actions
 test results on Windows, Linux and macOS reviewed before this RFC is marked
@@ -298,22 +385,73 @@ If removal fails for another reason, return a new public
 
 The variant's display includes the original failure, temporary path and cleanup
 failure. The original error remains the primary cause; the cleanup error is
-inspectable separately rather than discarded or converted into text only. This
-preserves the original error's kind and OS code and requires no logging
-dependency. A failed cleanup does not guarantee that the temporary file still
-exists when the caller inspects it.
+inspectable separately rather than discarded or converted into text only. If
+the original error is `Error::Io`, its `std::io::ErrorKind` and OS code remain
+available through `save_error`; no logging dependency is required. A failed
+cleanup does not guarantee that the temporary file still exists when the
+caller inspects it.
 
-**R4 — Path and symlink behavior.** `save_file` publishes to the path exactly
-as provided; it does not canonicalize it to select the referent. On Unix,
-`load_file` through a final-component symlink follows the link, while
-publishing with rename replaces the link itself with the new file and leaves
-its referent unchanged. The Unix permission metadata lookup follows the link,
-as described in RFC-0010. Other hard-link names can continue to refer to the
-old file. This behavior will be documented; 0.0.6 does not add publication to
-the referent or preserve the link. A caller that intends to replace the
-referent must resolve and pass its path. Behavior for Windows reparse points
-and other non-regular targets remains unspecified beyond the underlying
-platform operation.
+The `Error` rustdoc must include a concise example matching
+`Error::SaveFileCleanup` and inspecting a nested `Error::Io` in `save_error`,
+including its `std::io::ErrorKind` and optional raw OS code. This demonstrates
+how callers can recover the original failure without depending on the combined
+variant's display string.
+
+**R4 — Accepted targets and path behavior.** Support saving to an observed
+missing target or an existing regular file. Reject unsupported target types
+rather than silently replacing them or adding referent-selection behavior.
+
+After serialization and before temporary-file creation, call
+`std::fs::symlink_metadata` on the supplied path on every platform. Inspect
+the final component without following it:
+
+| Observation | Action |
+| --- | --- |
+| `NotFound` | Proceed with normal new-file creation policy. Missing parent directories are not created; temporary-file creation still fails if the parent is absent. |
+| Existing regular file, without the Windows reparse attribute | Proceed; on Unix reuse this metadata for RFC-0010's mode policy. |
+| Symlink, including a dangling link | Reject; do not follow or replace the link. |
+| Directory, FIFO, socket, device or another non-regular type | Reject. |
+| Windows `FILE_ATTRIBUTE_REPARSE_POINT`, regardless of `FileType::is_file` | Reject. |
+| Any other metadata error | Return the original I/O error with the target path. |
+
+For an unsupported observed type, return `Error::Io` carrying the target path
+and a `std::io::Error` with kind `InvalidInput`. Its message identifies the
+unsupported type or reparse point. This adds no public error variant beyond
+R3. No temporary file is created, no snapshot data is written, and the target
+and any referent are left unchanged under the no-external-changes assumption.
+A dangling symlink is an observed link, not an absent target: using
+`metadata` instead would incorrectly treat its missing referent as `NotFound`.
+
+On Windows, inspect `FILE_ATTRIBUTE_REPARSE_POINT` (`0x00000400`) through
+`std::os::windows::fs::MetadataExt::file_attributes`, available on the MSRV.
+`FileType::is_file` alone is not sufficient to exclude all reparse points.
+This intentionally conservative policy also rejects cloud placeholders and
+other regular-looking entries carrying that attribute; there is no tag
+allowlist or automatic hydration/reparse handling added by this RFC.
+
+The restriction applies only to the final component. Symlinks and junctions
+in parent directories are traversed normally and are not themselves
+replaced. The library does not canonicalize the supplied path. `load_file`
+may still follow a final-component symlink, while `save_file` rejects it.
+Callers intending to save to a referent must explicitly resolve and pass that
+path themselves.
+
+Regular files with multiple hard links remain eligible; no link-count check
+is added. Replacement installs a new file at the supplied name, not new
+contents in the original file. Other hard-link names and already-open handles
+keep referring to the old file with its old contents and permissions. This
+must be explicit in the `save_file` rustdoc and aligned root and crate READMEs.
+
+Validation is an observation, not an atomic condition on rename. If another
+actor changes the target after inspection, publication can still replace an
+entry that would have been rejected if observed then. The no-external-changes
+assumption and directory security boundary remain unchanged. Nor does an
+accepted regular-file type prove that replacement is possible: permissions,
+mount points and filesystem restrictions can still make publication fail. A
+Windows regular file with the read-only attribute is still eligible under
+R4, but rename may fail, for example with `PermissionDenied`. The RFC does not
+clear that attribute or retry; return the publication error and do not infer
+that Windows will always replace or always reject such a target.
 
 ## References
 
@@ -325,3 +463,8 @@ platform operation.
   and [`JoinHandle`](https://docs.rs/tokio/latest/tokio/task/struct.JoinHandle.html).
 - [Microsoft `ReplaceFileW`](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-replacefilew):
   metadata handling and documented failure cases.
+- [Rust `symlink_metadata`](https://doc.rust-lang.org/1.85.0/std/fs/fn.symlink_metadata.html)
+  and [`FileType`](https://doc.rust-lang.org/1.85.0/std/fs/struct.FileType.html).
+- [Windows `MetadataExt`](https://doc.rust-lang.org/1.85.0/std/os/windows/fs/trait.MetadataExt.html),
+  [file attributes](https://learn.microsoft.com/en-us/windows/win32/fileio/file-attribute-constants)
+  and [reparse points](https://learn.microsoft.com/en-us/windows/win32/fileio/reparse-points).
