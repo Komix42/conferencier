@@ -28,8 +28,8 @@ temporary file's access policy matters while its contents are being written,
 not only after replacement.
 
 The Unix behavior follows from the current create-and-rename code path; the
-Windows behavior has been reproduced during review. The exact policy and
-guarantees should be verified per platform before implementation.
+Windows behavior has been reproduced during review. Verify the guarantees on
+each platform as part of implementation, as specified in R4.
 
 ## Goals and non-goals
 
@@ -218,13 +218,18 @@ limitations must be documented in the `save_file` rustdoc and aligned READMEs:
   access controls themselves. On Unix, the recommended recipe is to create
   the file once before the first save with `OpenOptions::create_new` and
   `OpenOptionsExt::mode(0o600)`; later saves then preserve its mode bits.
-  `create_new` fails instead of reusing an existing file with broader
-  permissions. The umask can only narrow the requested mode, while a default
-  ACL inherited from the directory can still grant additional access;
-  ownership follows the creating process. The pre-created file is empty and
-  `load_file` parses it as an empty TOML document. On Windows,
-  the file's DACL is determined by the directory's inheritable ACEs or the
-  token default, so private files require suitable directory permissions.
+  `create_new` fails instead of reusing an existing file. If a file already
+  exists, first confirm that it is the intended file, then set its permissions
+  explicitly with `std::fs::set_permissions` and
+  `PermissionsExt::from_mode(0o600)` before saving. The umask can narrow the
+  requested mode. On Linux, the requested mode also constrains the
+  inherited POSIX ACL mask, so named ACL entries do not grant access beyond
+  that mode; on systems with ACLs independent of mode bits, such as macOS,
+  review inherited ACL entries separately. The owner and group follow the
+  operating system's file-creation rules. The pre-created file is empty and
+  `load_file` parses it as an empty TOML document. On Windows, the file's DACL
+  is determined by the directory's inheritable ACEs or the token default, so
+  private files require suitable directory permissions.
 - **Unsupported targets.** RFC-0009 R4 rejects observed final-component
   symlinks, including dangling links, other non-regular types and all Windows
   reparse points, including cloud placeholders carrying that attribute.

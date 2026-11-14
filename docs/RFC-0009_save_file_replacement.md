@@ -151,9 +151,9 @@ failure first reported at close is not returned to the caller.
 
 `Ok(())` means publication completed, not that it is durable after power
 loss. Depending on the filesystem and failure, a crash or power loss after
-`Ok(())` can leave the target missing, empty or otherwise damaged. This
-proposal does not add `sync_all` or claim that all writes have reached stable
-storage.
+`Ok(())` can leave the target missing, empty, incomplete or otherwise damaged.
+This proposal does not add `sync_all` or claim that all writes have reached
+stable storage.
 
 Two different synchronization steps are deliberately left out:
 
@@ -294,9 +294,9 @@ single-file bind mount may fail with `EBUSY` on Linux. Mention that transient
 Windows sharing conflicts may make rename fail with `PermissionDenied`; no
 automatic retry is promised. State that no file or directory synchronization
 is performed, so a delayed write error can go unreported and a crash after
-`Ok(())` can leave an empty or incomplete target. Mention that directory watchers may observe
-temporary-file creation and rename without promising specific events. Record
-user-visible changes in the changelog.
+`Ok(())` can leave the target missing, empty or incomplete. Mention that
+directory watchers may observe temporary-file creation and rename without
+promising specific events. Record user-visible changes in the changelog.
 
 The permission policy is specified separately in RFC-0010. Implementation of
 this protocol depends on resolving that policy, because it can affect the
@@ -371,10 +371,11 @@ write/close errors or crash durability.
 Crash durability is not a goal for 0.0.6: this decision does not require file
 or directory synchronization and does not promise recovery after a crash or
 power loss. The two steps are considered separately (see Proposed observable
-contract and Durability and alternatives); file synchronization before rename remains a possible later
-improvement for reporting delayed write errors. Successful publication is not proof that the data has reached
-stable storage. Nor does an error from the publication operation universally
-prove that the old contents remain at the target path.
+contract and Durability and alternatives); file synchronization before rename
+remains a possible later improvement for reporting delayed write errors.
+Successful publication is not proof that the data has reached stable storage.
+Nor does an error from the publication operation universally prove that the
+old contents remain at the target path.
 
 This keeps the protection appropriate for ordinary configuration saving
 without committing the project to platform-specific durability and recovery
