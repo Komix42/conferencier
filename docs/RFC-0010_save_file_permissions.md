@@ -47,7 +47,10 @@ Non-goals:
 - Guaranteeing unchanged effective access to the target or temporary file:
   ownership and ACLs can make access broader or narrower despite equal bits.
 - Preserving ownership, extended ACLs, special mode bits, the Windows security
-  descriptor or other metadata, as listed in R1.
+  descriptor, extended attributes, security labels or other metadata, as
+  listed in R1.
+- Creating new targets with caller-specified permissions; R1 documents a
+  recipe for pre-creating a private file instead.
 - Preventing access that is already allowed by the intended final permissions.
 - Changing the public API.
 - Adding dependencies or operating-system APIs beyond the Rust standard
@@ -156,6 +159,9 @@ fallback.
   handles, which keep the old file's contents and permissions. Document that a
   Unix read-only mode does not by itself prevent rename replacement when the
   containing directory permits it.
+- Document the recipe for private new targets from R1 with a short Unix
+  example guarded by `#[cfg(unix)]`, so that the README doctest compiles and
+  passes on every CI platform, and state its Windows limitation in prose.
 - Update the changelog if the user-visible permission behavior changes.
 
 ## Resolved questions
@@ -200,10 +206,25 @@ limitations must be documented in the `save_file` rustdoc and aligned READMEs:
   attribute nor promises that rename will succeed. Targets with the reparse
   attribute are rejected under RFC-0009 R4, not handled through a
   metadata-preservation fallback.
+- **Extended attributes and security labels.** Extended attributes (including
+  macOS attributes such as quarantine or Finder information) and Windows
+  alternate data streams are not copied. A mandatory access control label,
+  such as an SELinux context, is assigned to the new file by the system's
+  policy for files created in the target directory and can differ from the
+  replaced file's label, which can change access or deny it.
 - **Other metadata**, such as timestamps.
 - **New targets.** Normal creation and rename rules determine their settings.
   Callers that require private configuration files must arrange suitable
-  access controls themselves, for example through directory permissions.
+  access controls themselves. On Unix, the recommended recipe is to create
+  the file once before the first save with `OpenOptions::create_new` and
+  `OpenOptionsExt::mode(0o600)`; later saves then preserve its mode bits.
+  `create_new` fails instead of reusing an existing file with broader
+  permissions. The umask can only narrow the requested mode, while a default
+  ACL inherited from the directory can still grant additional access;
+  ownership follows the creating process. The pre-created file is empty and
+  `load_file` parses it as an empty TOML document. On Windows,
+  the file's DACL is determined by the directory's inheritable ACEs or the
+  token default, so private files require suitable directory permissions.
 - **Unsupported targets.** RFC-0009 R4 rejects observed final-component
   symlinks, including dangling links, other non-regular types and all Windows
   reparse points, including cloud placeholders carrying that attribute.

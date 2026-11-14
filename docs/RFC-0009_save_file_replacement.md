@@ -155,6 +155,22 @@ loss. Depending on the filesystem and failure, a crash or power loss after
 proposal does not add `sync_all` or claim that all writes have reached stable
 storage.
 
+Two different synchronization steps are deliberately left out:
+
+- **File synchronization** (`File::sync_all` on the temporary file before
+  rename) would turn some delayed write errors, such as `ENOSPC`, `EDQUOT` or
+  `EIO` on filesystems that defer allocation or write-back (including NFS),
+  into preparation failures that leave the target unchanged. It does not
+  report every error that close could report and does not make the new
+  directory entry durable. Its cost depends on the platform and storage; on
+  macOS the standard library uses `F_FULLFSYNC`, which can be slow.
+- **Directory synchronization** after rename would make the new directory
+  entry durable on platforms that support it. It is not portable through the
+  standard library, and a failure would be reported only after publication.
+
+Without them, a delayed write error can be hidden from the caller, and after
+a crash the target can contain a file that was never completely written.
+
 An error before publication is different from an error returned by the
 publication operation itself. POSIX specifies that the destination is
 unaffected by rename failures other than `EIO`; on NFS a server can perform a
@@ -241,10 +257,16 @@ rename and error behavior is exercised on both Rust versions.
   guarantee.
 - **Backup or journal:** can support recovery, but requires additional
   files, recovery rules and error handling; it is not proposed for 0.0.6.
-- **Synchronize file and directory:** strengthens crash durability on
-  platforms where the required operations are supported, but has performance,
-  portability and post-publication error implications. It is not required for
-  the agreed 0.0.6 protection scope (R1).
+- **Synchronize the temporary file before rename:** reports some delayed
+  write errors as preparation failures, before the target is replaced. It adds
+  latency to every save, does not catch every close error and does not make
+  the directory entry durable. It is not required for the agreed 0.0.6
+  protection scope (R1) and can be added later without changing the API.
+- **Synchronize the containing directory after rename:** strengthens crash
+  durability of the published name on platforms where the required operations
+  are supported, but has portability implications, and its errors occur only
+  after publication. It is not required for the agreed 0.0.6 protection scope
+  (R1).
 
 ## Compatibility and documentation
 
@@ -270,7 +292,9 @@ is allowed. Explain that saving requires suitable access to the containing
 directory, not just write access to the target, and that replacing a
 single-file bind mount may fail with `EBUSY` on Linux. Mention that transient
 Windows sharing conflicts may make rename fail with `PermissionDenied`; no
-automatic retry is promised. Mention that directory watchers may observe
+automatic retry is promised. State that no file or directory synchronization
+is performed, so a delayed write error can go unreported and a crash after
+`Ok(())` can leave an empty or incomplete target. Mention that directory watchers may observe
 temporary-file creation and rename without promising specific events. Record
 user-visible changes in the changelog.
 
@@ -346,7 +370,9 @@ write/close errors or crash durability.
 
 Crash durability is not a goal for 0.0.6: this decision does not require file
 or directory synchronization and does not promise recovery after a crash or
-power loss. Successful publication is not proof that the data has reached
+power loss. The two steps are considered separately (see Proposed observable
+contract and Durability and alternatives); file synchronization before rename remains a possible later
+improvement for reporting delayed write errors. Successful publication is not proof that the data has reached
 stable storage. Nor does an error from the publication operation universally
 prove that the old contents remain at the target path.
 
