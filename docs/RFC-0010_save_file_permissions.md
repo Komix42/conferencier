@@ -1,9 +1,10 @@
 # RFC-0010: File permissions in `ConfigStore::save_file`
 
 Date: 2026-11-14
-Status: Draft
+Status: Approved
 Author: Komix42 <komix[at]ignore.cz>
 Target release: 0.0.6
+Amends: [RFC-0001](./RFC-0001_baseline_architecture.md)
 Related: [RFC-0009](./RFC-0009_save_file_replacement.md)
 
 ## Document Scope
@@ -17,6 +18,12 @@ Today the temporary file is created with the operating system's default file
 permissions and then renamed over the target. Consequently, an existing
 target's permissions are replaced along with its contents. The temporary file
 also contains the serialized configuration before it is renamed.
+
+This RFC amends the temporary-file saving policy in
+[RFC-0001](./RFC-0001_baseline_architecture.md#asynchronous-execution-model)
+with the access-control rules below. RFC-0001 remains a historical record;
+add a reciprocal `Amended by` link when this RFC is implemented, without
+changing its body.
 
 ## Motivation
 
@@ -62,7 +69,8 @@ This policy applies only to targets accepted by RFC-0009 R4: an observed
 missing target or an existing regular file, excluding Windows reparse points.
 Final-component symlinks, including dangling links, and other unsupported
 types are rejected before temporary-file creation. Permission lookup does not
-follow a final-component link.
+follow a final-component link. Target names reserved by RFC-0009 R5 are
+unsupported; this policy does not make them safe.
 
 For a **new target**, create the temporary file using the operating system's
 normal file-creation policy in the target directory, then publish it by rename.
@@ -128,6 +136,9 @@ fallback.
 - On Unix, check that a new target's mode follows normal file creation in the
   same environment, and verify the temporary file's mode before writing, as
   required by R2.
+- Run RFC-0009's staging tests with this permission policy in place. In
+  particular, a new, non-reserved target must remain absent while the
+  separate temporary file is prepared and written.
 - On Linux and macOS, verify rejection of both final-component symlinks to
   existing regular files and dangling final-component symlinks under RFC-0009
   R4 before temporary-file creation. No mode is copied from a referent, the
@@ -163,6 +174,8 @@ fallback.
   example guarded by `#[cfg(unix)]`, so that the README doctest compiles and
   passes on every CI platform, and state its Windows limitation in prose.
 - Update the changelog if the user-visible permission behavior changes.
+- Add this RFC to RFC-0001's `Amended by` header when implemented; keep the
+  historical body unchanged.
 
 ## Resolved questions
 
@@ -251,16 +264,16 @@ before any serialized data is written:
 1. Inspect the final component with `std::fs::symlink_metadata` as specified
    in RFC-0009 R4. Reject unsupported observations and metadata failures other
    than `NotFound`; do not follow a final-component link.
-2. On Unix, if validation observed an existing regular file, reuse that
-   metadata to create the temporary file exclusively with the observed
-   permission bits (`mode & 0o777`). OS creation rules can restrict the
-   requested mode; on Linux a default directory ACL may apply instead of the
-   umask. Then set exactly those bits on the still-empty file through its
-   open handle.
-3. If validation observed a missing target (`NotFound`), create the temporary
-   file as today, with normal new-file permissions. A dangling symlink is
-   rejected in step 1 and cannot enter this branch. On Windows, normal
-   creation policy also applies to an accepted existing regular target.
+2. Name the temporary sibling under RFC-0009 R5. On Unix, if validation
+   observed an existing regular file, reuse that metadata to create the
+   temporary file exclusively with the observed permission bits
+   (`mode & 0o777`). OS creation rules can restrict the requested mode; on
+   Linux a default directory ACL may apply instead of the umask. Then set
+   exactly those bits on the still-empty file through its open handle.
+3. If validation observed a missing target (`NotFound`), or on Windows an
+   existing regular target, create the temporary file with normal new-file
+   permissions. A dangling symlink is rejected in step 1 and cannot enter
+   either branch.
 4. Write the snapshot and publish it according to RFC-0009.
 
 For an accepted existing Unix target, the temporary file has the observed
@@ -277,8 +290,10 @@ order. Validation is not atomic with publication and cannot enforce the
 observed type after another actor changes the path. For example, two processes
 can both observe a missing target and use different creation policies; the
 later publication can replace a more restrictive file created by the other
-process. On Windows, the temporary file is created as today after target
-validation; effective access after rename is subject to platform behavior.
+process. For relative paths, the current-directory assumption in RFC-0009
+also applies to this metadata observation and all later operations. On
+Windows, normal creation policy applies after target validation; effective
+access after rename is subject to platform behavior.
 
 **R3 — Permission failures.** Target validation follows RFC-0009 R4 on every
 platform. Any failure to read the target's metadata, other than `NotFound`,
