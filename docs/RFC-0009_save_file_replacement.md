@@ -1,7 +1,7 @@
 # RFC-0009: Reliable file saving with `ConfigStore::save_file`
 
 Date: 2026-11-14
-Status: Approved
+Status: Implemented
 Author: Komix42 <komix[at]ignore.cz>
 Target release: 0.0.6
 Amends: [RFC-0001](./RFC-0001_baseline_architecture.md)

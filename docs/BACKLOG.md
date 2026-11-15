@@ -6,22 +6,9 @@ Unlike the RFCs and implementation reports in this folder, this is a living docu
 
 Each entry states the problem, a possible direction and where it comes from.
 
-## Planned for 0.0.6
-
-Focus on the reliability of existing file saving, not new configuration features:
-
-1. **Implement the `save_file` protocol.** Remove the remove-and-retry fallback, validate the target type, report cleanup failures and document the snapshot, publication, cancellation and reserved temporary names. See [RFC-0009](./RFC-0009_save_file_replacement.md) (approved).
-2. **Implement the `save_file` permission policy.** Preserve an existing Unix target's mode bits on the temporary file before writing and document the limitations. See [RFC-0010](./RFC-0010_save_file_permissions.md) (approved).
-
-Both items are described under [Technical debt](#technical-debt) and are implemented together; the RFCs define the required regression tests, CI verification and API documentation. They do not promise universal atomicity, crash durability or full filesystem metadata preservation.
-
-The section-name migration guard stays until 0.2.0. New features remain under [Ideas](#ideas); revise the README after 0.0.6 for the 0.1.0 release.
-
 ## Technical debt
 
 - **Temporary section-name migration guard.** Following [RFC-0005](./RFC-0005_api_redesign.md), `ConfigScope` derives in 0.0.5 and later 0.0.x and 0.1.x releases whose implicit section was affected by the old `Confer` prefix rule require an explicit section. Remove the guard in 0.2.0, and warn in its migration notes that a direct upgrade from 0.0.4 bypasses the guard. Origin: RFC-0005 N7.
-- **`save_file` does not preserve the target file's permissions.** The temporary file is created with default permissions (the directory's inherited ACL on Windows, the process umask on Unix) and the rename replaces the target together with its permissions. A file restricted to its owner can therefore become readable by others after a save. The temporary file can also expose content before the rename. Reproduced on Windows; the Unix case follows from the same code path. See [RFC-0010](./RFC-0010_save_file_permissions.md) (approved). Origin: the 0.0.5 review; present since the original atomic save.
-- **`save_file` replacement fallback can lose the original file.** When a platform reports `AlreadyExists` for a rename over an existing target, the fallback removes the target and retries. If the second rename fails, the original is gone even without concurrent saves; concurrent calls can also race in this fallback. This is conditional on the platform using that path, which has not been verified across supported platforms. See [RFC-0009](./RFC-0009_save_file_replacement.md) (approved). Origin: the 0.0.5 review of `write_and_replace`.
 
 ## Ideas
 
@@ -64,6 +51,8 @@ The README's [Scope](../README.md#scope) lists these as intentionally left out. 
 
 ## Done
 
+- **Reliable `ConfigStore::save_file` replacement and target validation**: implemented in 0.0.6 ([RFC-0009](./RFC-0009_save_file_replacement.md)).
+- **Preserve existing Unix file mode bits when saving**: implemented in 0.0.6 ([RFC-0010](./RFC-0010_save_file_permissions.md)).
 - **Reject `section` on table-only derives**: implemented in 0.0.5 ([RFC-0008](./RFC-0008_table_section.md)).
 - **Expressions in `default` and one rule for missing keys**: implemented in 0.0.5 ([RFC-0007](./RFC-0007_default_expressions.md)).
 - **Strict unknown-key rejection and diagnostic path formatting**: implemented in 0.0.5 ([RFC-0006](./RFC-0006_strict_unknown_keys.md)).
