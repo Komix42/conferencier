@@ -1,6 +1,7 @@
 //! The [`Error`] type and the [`Result`] alias used throughout the crate.
 
 use std::fmt;
+use std::io::ErrorKind;
 use std::path::PathBuf;
 
 /// Result type returned by conferencier operations.
@@ -23,6 +24,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// and keep a fallback arm for future variants. [`std::error::Error::source`]
 /// exposes the underlying I/O, TOML parsing or serialization error; field errors
 /// and [`UnknownKey`](Self::UnknownKey) carry their diagnostic context directly.
+/// For [`SaveFileCleanup`](Self::SaveFileCleanup), the source is the original
+/// save error; the cleanup error and temporary path are available as fields.
 ///
 /// ```
 /// use conferencier::{ConfigStore, Error};
@@ -33,6 +36,32 @@ pub type Result<T> = std::result::Result<T, Error>;
 ///         assert_eq!((path.as_str(), key.as_str()), ("App", "port"));
 ///     }
 ///     other => panic!("unexpected error: {other}"),
+/// }
+/// ```
+///
+/// When saving and cleanup both fail, inspect the original error through
+/// `save_error`; its I/O kind and optional OS code remain available:
+///
+/// ```
+/// use conferencier::Error;
+/// use std::io::{Error as IoError, ErrorKind};
+///
+/// let error = Error::SaveFileCleanup {
+///     save_error: Box::new(Error::Io {
+///         path: Some("config.toml".into()),
+///         source: IoError::new(ErrorKind::PermissionDenied, "save failed"),
+///     }),
+///     temporary_path: ".conferencier.123.0.tmp".into(),
+///     cleanup_error: IoError::new(ErrorKind::PermissionDenied, "cleanup failed"),
+/// };
+///
+/// if let Error::SaveFileCleanup { save_error, .. } = error {
+///     if let Error::Io { source, .. } = save_error.as_ref() {
+///         assert_eq!(source.kind(), ErrorKind::PermissionDenied);
+///         if let Some(code) = source.raw_os_error() {
+///             eprintln!("save failed with OS error {code}");
+///         }
+///     }
 /// }
 /// ```
 ///
@@ -48,6 +77,18 @@ pub enum Error {
         path: Option<PathBuf>,
         /// The underlying I/O error.
         source: std::io::Error,
+    },
+    /// Saving failed and removing its temporary file also failed.
+    ///
+    /// The original save failure remains the error source. The cleanup failure
+    /// and temporary path are available separately.
+    SaveFileCleanup {
+        /// The original save failure, including its path and underlying cause.
+        save_error: Box<Error>,
+        /// The temporary file path that cleanup attempted to remove.
+        temporary_path: PathBuf,
+        /// The failure to remove the temporary file.
+        cleanup_error: std::io::Error,
     },
     /// The input is not a valid TOML document.
     ///
@@ -99,6 +140,22 @@ impl Error {
     /// Creates a [`Error::Io`] with the provided optional path context.
     pub(crate) fn io_error(path: Option<PathBuf>, source: std::io::Error) -> Self {
         Self::Io { path, source }
+    }
+
+    pub(crate) fn with_save_file_cleanup(
+        save_error: Self,
+        temporary_path: PathBuf,
+        cleanup_result: std::io::Result<()>,
+    ) -> Self {
+        match cleanup_result {
+            Ok(()) => save_error,
+            Err(error) if error.kind() == ErrorKind::NotFound => save_error,
+            Err(cleanup_error) => Self::SaveFileCleanup {
+                save_error: Box::new(save_error),
+                temporary_path,
+                cleanup_error,
+            },
+        }
     }
 
     /// Reports that `key` is required but absent from the table at `path`.
@@ -169,6 +226,14 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Io { path, source } => write!(f, "I/O error (path: {path:?}): {source}"),
+            Self::SaveFileCleanup {
+                save_error,
+                temporary_path,
+                cleanup_error,
+            } => write!(
+                f,
+                "failed to save file: {save_error}; failed to remove temporary file {temporary_path:?}: {cleanup_error}"
+            ),
             Self::Parse(source) => write!(f, "failed to parse TOML: {source}"),
             Self::Serialize(source) => write!(f, "failed to serialize TOML: {source}"),
             Self::MissingKey { path, key } => {
@@ -198,6 +263,7 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Io { source, .. } => Some(source),
+            Self::SaveFileCleanup { save_error, .. } => Some(save_error.as_ref()),
             Self::Parse(source) => Some(source),
             Self::Serialize(source) => Some(source),
             Self::MissingKey { .. }
@@ -285,6 +351,113 @@ mod tests {
             let source = error.source().unwrap().downcast_ref::<IoError>().unwrap();
             assert_eq!(source.kind(), ErrorKind::NotFound);
             assert_eq!(source.to_string(), "missing config");
+        }
+    }
+
+    #[test]
+    fn successful_save_file_cleanup_returns_original_error() {
+        let error = Error::io_error(
+            Some(PathBuf::from("config.toml")),
+            IoError::new(ErrorKind::PermissionDenied, "save failed"),
+        );
+        let error =
+            Error::with_save_file_cleanup(error, PathBuf::from(".conferencier.123.0.tmp"), Ok(()));
+
+        match error {
+            Error::Io { path, source } => {
+                assert_eq!(path, Some(PathBuf::from("config.toml")));
+                assert_eq!(source.kind(), ErrorKind::PermissionDenied);
+                assert_eq!(source.to_string(), "save failed");
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
+    fn missing_save_file_cleanup_returns_original_error() {
+        let error = Error::io_error(
+            Some(PathBuf::from("config.toml")),
+            IoError::new(ErrorKind::WriteZero, "save failed"),
+        );
+        let error = Error::with_save_file_cleanup(
+            error,
+            PathBuf::from(".conferencier.123.0.tmp"),
+            Err(IoError::new(ErrorKind::NotFound, "already removed")),
+        );
+
+        match error {
+            Error::Io { path, source } => {
+                assert_eq!(path, Some(PathBuf::from("config.toml")));
+                assert_eq!(source.kind(), ErrorKind::WriteZero);
+                assert_eq!(source.to_string(), "save failed");
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
+    fn failed_save_file_cleanup_preserves_both_errors() {
+        let error = Error::io_error(
+            Some(PathBuf::from("config.toml")),
+            IoError::new(ErrorKind::PermissionDenied, "save failed"),
+        );
+        let error = Error::with_save_file_cleanup(
+            error,
+            PathBuf::from(".conferencier.123.0.tmp"),
+            Err(IoError::new(ErrorKind::PermissionDenied, "cleanup failed")),
+        );
+
+        assert!(error.to_string().contains("config.toml"));
+        assert!(error.to_string().contains("save failed"));
+        assert!(error.to_string().contains(".conferencier.123.0.tmp"));
+        assert!(error.to_string().contains("cleanup failed"));
+
+        match &error {
+            Error::SaveFileCleanup {
+                save_error,
+                temporary_path,
+                cleanup_error,
+            } => {
+                assert_eq!(temporary_path, &PathBuf::from(".conferencier.123.0.tmp"));
+                assert_eq!(cleanup_error.kind(), ErrorKind::PermissionDenied);
+                match save_error.as_ref() {
+                    Error::Io { path, source } => {
+                        assert_eq!(path.as_deref(), Some(std::path::Path::new("config.toml")));
+                        assert_eq!(source.kind(), ErrorKind::PermissionDenied);
+                        assert_eq!(source.to_string(), "save failed");
+                    }
+                    other => panic!("unexpected save error: {other}"),
+                }
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+
+        let expected_source = match &error {
+            Error::SaveFileCleanup { save_error, .. } => save_error.to_string(),
+            other => panic!("unexpected error: {other}"),
+        };
+        let source = error.source().expect("save error is the error source");
+        assert!(source.downcast_ref::<Error>().is_some());
+        assert_eq!(source.to_string(), expected_source);
+    }
+
+    #[test]
+    fn failed_save_file_cleanup_preserves_raw_os_code() {
+        let error = Error::with_save_file_cleanup(
+            Error::io_error(
+                Some(PathBuf::from("config.toml")),
+                IoError::from_raw_os_error(123),
+            ),
+            PathBuf::from(".conferencier.123.0.tmp"),
+            Err(IoError::new(ErrorKind::PermissionDenied, "cleanup failed")),
+        );
+
+        match error {
+            Error::SaveFileCleanup { save_error, .. } => match save_error.as_ref() {
+                Error::Io { source, .. } => assert_eq!(source.raw_os_error(), Some(123)),
+                other => panic!("unexpected save error: {other}"),
+            },
+            other => panic!("unexpected error: {other}"),
         }
     }
 

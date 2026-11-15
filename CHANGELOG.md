@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+- `Error::SaveFileCleanup` reports both the original save failure and a failure to remove its temporary file.
+
 ### Changed
 - Implemented the public error traits with the standard library, removing the `thiserror` dependency.
 

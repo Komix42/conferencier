@@ -219,7 +219,9 @@ impl ConfigStore {
     ///
     /// Returns [`Error::Serialize`] before any file is written if serialization fails.
     /// Write or replacement failures return [`Error::Io`] with the relevant target
-    /// or temporary path. An I/O failure does not change the in-memory store.
+    /// or temporary path. If removing a temporary file also fails, returns
+    /// [`Error::SaveFileCleanup`] with the original error, temporary path and cleanup
+    /// error. An I/O failure does not change the in-memory store.
     pub async fn save_file(&self, path: impl AsRef<Path> + Send + Sync) -> Result<()> {
         let serialized = self.save_str()?;
         write_atomic(path.as_ref(), serialized).await
@@ -751,10 +753,14 @@ async fn write_atomic(path: &Path, contents: String) -> Result<()> {
 fn write_atomic_blocking(path: &Path, contents: &[u8]) -> Result<()> {
     let (tmp_path, file) = create_temporary(path)?;
     let result = write_and_replace(file, &tmp_path, path, contents);
-    if result.is_err() {
-        let _ = std::fs::remove_file(&tmp_path);
+    match result {
+        Ok(()) => Ok(()),
+        Err(save_error) => Err(Error::with_save_file_cleanup(
+            save_error,
+            tmp_path.clone(),
+            std::fs::remove_file(&tmp_path),
+        )),
     }
-    result
 }
 
 /// Creates a new temporary sibling of `path`, never opening an existing file.
