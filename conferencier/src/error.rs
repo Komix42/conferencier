@@ -1,8 +1,7 @@
 //! The [`Error`] type and the [`Result`] alias used throughout the crate.
 
+use std::fmt;
 use std::path::PathBuf;
-
-use thiserror::Error;
 
 /// Result type returned by conferencier operations.
 ///
@@ -40,30 +39,25 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// File methods attach the relevant path to [`Error::Io`]. Converting a plain
 /// [`std::io::Error`] with `?` or `Error::from` leaves `path` as `None`; construct
 /// the public `Io` variant to attach a path, as shown in [`ConfigStore::from_file`](crate::ConfigStore::from_file).
-#[derive(Debug, Error)]
+#[derive(Debug)]
 #[non_exhaustive]
 pub enum Error {
     /// Reading or writing a file failed.
-    #[error("I/O error (path: {path:?}): {source}")]
     Io {
         /// The file involved, if known.
         path: Option<PathBuf>,
         /// The underlying I/O error.
-        #[source]
         source: std::io::Error,
     },
     /// The input is not a valid TOML document.
     ///
     /// The source contains the parser's location and diagnostic details.
-    #[error("failed to parse TOML: {0}")]
-    Parse(#[from] toml::de::Error),
+    Parse(toml::de::Error),
     /// The in-memory document could not be serialized to TOML.
     ///
     /// Serialization happens before file writes; this error leaves the file untouched.
-    #[error("failed to serialize TOML: {0}")]
-    Serialize(#[from] toml::ser::Error),
+    Serialize(toml::ser::Error),
     /// A required key is absent.
-    #[error("missing key {}", display_key(.path, .key))]
     MissingKey {
         /// Formatted path of the table containing the key.
         path: String,
@@ -71,10 +65,6 @@ pub enum Error {
         key: String,
     },
     /// A value has a different TOML type than the field expects.
-    #[error(
-        "expected {expected} at {} but found {found}",
-        display_key(.path, .key)
-    )]
     TypeMismatch {
         /// Formatted path of the table containing the key.
         path: String,
@@ -88,10 +78,6 @@ pub enum Error {
     /// A value has an acceptable TOML type but cannot be converted, for example an
     /// integer out of range for the field type, an invalid datetime string or an
     /// array element of the wrong type.
-    #[error(
-        "invalid value at {}: {message}",
-        display_key(.path, .key)
-    )]
     ValueParse {
         /// Formatted path of the table containing the key.
         path: String,
@@ -101,7 +87,6 @@ pub enum Error {
         message: String,
     },
     /// A strict struct found a key that no loaded field maps.
-    #[error("unknown key {}", display_key(.path, .key))]
     UnknownKey {
         /// Formatted path of the table containing the key.
         path: String,
@@ -180,10 +165,65 @@ fn display_key(path: &str, key: &str) -> String {
     crate::table_path::child_path(path, key)
 }
 
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io { path, source } => write!(f, "I/O error (path: {path:?}): {source}"),
+            Self::Parse(source) => write!(f, "failed to parse TOML: {source}"),
+            Self::Serialize(source) => write!(f, "failed to serialize TOML: {source}"),
+            Self::MissingKey { path, key } => {
+                write!(f, "missing key {}", display_key(path, key))
+            }
+            Self::TypeMismatch {
+                path,
+                key,
+                expected,
+                found,
+            } => write!(
+                f,
+                "expected {expected} at {} but found {found}",
+                display_key(path, key)
+            ),
+            Self::ValueParse { path, key, message } => {
+                write!(f, "invalid value at {}: {message}", display_key(path, key))
+            }
+            Self::UnknownKey { path, key } => {
+                write!(f, "unknown key {}", display_key(path, key))
+            }
+        }
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io { source, .. } => Some(source),
+            Self::Parse(source) => Some(source),
+            Self::Serialize(source) => Some(source),
+            Self::MissingKey { .. }
+            | Self::TypeMismatch { .. }
+            | Self::ValueParse { .. }
+            | Self::UnknownKey { .. } => None,
+        }
+    }
+}
+
 impl From<std::io::Error> for Error {
     /// Converts a plain [`std::io::Error`] into [`Error::Io`] without path context.
     fn from(source: std::io::Error) -> Self {
         Self::Io { path: None, source }
+    }
+}
+
+impl From<toml::de::Error> for Error {
+    fn from(source: toml::de::Error) -> Self {
+        Self::Parse(source)
+    }
+}
+
+impl From<toml::ser::Error> for Error {
+    fn from(source: toml::ser::Error) -> Self {
+        Self::Serialize(source)
     }
 }
 
