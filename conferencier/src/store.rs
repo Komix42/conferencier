@@ -218,11 +218,60 @@ impl ConfigStore {
     /// or rename fails, but a crash or cleanup failure can leave the temporary file
     /// behind.
     ///
+    /// # Targets and permissions
+    ///
+    /// Before creating the temporary file, the final path component is inspected
+    /// with [`std::fs::symlink_metadata`]. Only a missing target or a regular file
+    /// is accepted. Final-component symlinks (including dangling links), directories,
+    /// other non-regular files and all Windows reparse points are rejected. This
+    /// includes regular-looking cloud placeholders carrying the reparse attribute.
+    /// Parent-directory symlinks and junctions are allowed; the path is not
+    /// canonicalized. For example, `config-link.toml` pointing to a file is rejected,
+    /// but `directory-link/config.toml` may be saved through a linked parent.
+    /// [`load_file`](Self::load_file) can still follow a final-component symlink.
+    /// To save to a referent, explicitly resolve and pass its path.
+    ///
+    /// On Unix, an existing target's observed owner/group/other `rwx` bits (`0o777`)
+    /// are requested at temporary-file creation and set exactly through its open
+    /// handle before any data is written. Special mode bits are not preserved.
+    /// A read-only mode does not itself prevent replacement: saving needs suitable
+    /// access to the containing directory, not write access to the target alone.
+    /// A new target uses normal creation policy. On Windows, no access settings
+    /// are copied; creation policy and rename behavior determine the result.
+    /// A regular Windows read-only target is accepted, but publication may fail;
+    /// its read-only attribute is not cleared or otherwise preserved.
+    ///
+    /// Preserving Unix mode bits does not preserve effective access. The new owner
+    /// and group follow creation policy; for example, saving a user's `0600` file as
+    /// root can make it unreadable by that user. Unix extended ACLs are not copied:
+    /// inherited directory ACLs can grant a named user access to a new `0640` file
+    /// that the old `0640` file denied. Windows DACLs, owner, SACL and file attributes
+    /// are not copied, so access can become broader. Extended attributes, alternate
+    /// data streams, security labels and timestamps are not preserved either.
+    /// A system-assigned security label can change access or deny it.
+    ///
+    /// For a private new Unix file, pre-create it with `create_new` and
+    /// `std::os::unix::fs::OpenOptionsExt::mode` set to `0o600`; the umask can narrow
+    /// that request. Later saves preserve its observed mode bits. On Linux the
+    /// requested mode also constrains the inherited POSIX ACL mask; on systems
+    /// with ACLs independent of mode bits, such as macOS, review inherited ACLs
+    /// separately. On Windows, private files require suitable directory permissions.
+    /// See the README for a complete pre-creation example.
+    ///
+    /// Metadata is observed once, not atomically with publication. Another actor
+    /// can change the target or its permissions after inspection. Regular files
+    /// with multiple hard links are accepted, but replacement changes only the
+    /// supplied name: other hard-link names and already-open handles keep the old
+    /// file's contents and permissions.
+    ///
     /// # Errors
     ///
     /// Returns [`Error::Serialize`] before any file is written if serialization fails.
-    /// Write or replacement failures return [`Error::Io`] with the relevant target
-    /// or temporary path. If removing a temporary file also fails, returns
+    /// Unsupported targets return [`Error::Io`] with [`ErrorKind::InvalidInput`],
+    /// the target path and a reason, before creating a temporary file. Metadata,
+    /// permission, write or replacement failures return [`Error::Io`] with the relevant
+    /// target or temporary path; metadata and permission failures stop before writing
+    /// data. If removing a temporary file also fails, returns
     /// [`Error::SaveFileCleanup`] with the original error, temporary path and cleanup
     /// error. An I/O failure does not change the in-memory store.
     pub async fn save_file(&self, path: impl AsRef<Path> + Send + Sync) -> Result<()> {
@@ -753,16 +802,34 @@ async fn write_atomic(path: &Path, contents: String) -> Result<()> {
 }
 
 fn write_atomic_blocking(path: &Path, contents: &[u8]) -> Result<()> {
-    write_atomic_blocking_with_rename(path, contents, |from, to| std::fs::rename(from, to))
+    write_atomic_blocking_with(
+        path,
+        contents,
+        std::fs::symlink_metadata(path),
+        prepare_temporary,
+        Write::write_all,
+        |from, to| std::fs::rename(from, to),
+    )
 }
 
-fn write_atomic_blocking_with_rename(
+fn write_atomic_blocking_with(
     path: &Path,
     contents: &[u8],
-    rename: impl FnMut(&Path, &Path) -> std::io::Result<()>,
+    metadata: std::io::Result<std::fs::Metadata>,
+    prepare: impl FnOnce(&std::fs::File, Option<&std::fs::Metadata>) -> std::io::Result<()>,
+    write: impl FnOnce(&mut std::fs::File, &[u8]) -> std::io::Result<()>,
+    mut rename: impl FnMut(&Path, &Path) -> std::io::Result<()>,
 ) -> Result<()> {
-    let (tmp_path, file) = create_temporary(path)?;
-    let result = write_and_replace(file, &tmp_path, path, contents, rename);
+    let metadata = validate_target_metadata(path, metadata)?;
+    let (tmp_path, mut file) = create_temporary(metadata.as_ref(), || temporary_path(path))?;
+    let result = (|| {
+        let temporary_error = |err| Error::io_error(Some(tmp_path.clone()), err);
+        prepare(&file, metadata.as_ref()).map_err(temporary_error)?;
+        write(&mut file, contents).map_err(temporary_error)?;
+        // Close the handle before the rename, which Windows requires.
+        drop(file);
+        rename(&tmp_path, path).map_err(|err| Error::io_error(Some(path.to_path_buf()), err))
+    })();
     match result {
         Ok(()) => Ok(()),
         Err(save_error) => Err(Error::with_save_file_cleanup(
@@ -773,16 +840,93 @@ fn write_atomic_blocking_with_rename(
     }
 }
 
-/// Creates a new temporary sibling of `path`, never opening an existing file.
-fn create_temporary(path: &Path) -> Result<(PathBuf, std::fs::File)> {
+fn validate_target_metadata(
+    path: &Path,
+    metadata: std::io::Result<std::fs::Metadata>,
+) -> Result<Option<std::fs::Metadata>> {
+    let metadata = match metadata {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(Error::io_error(Some(path.to_path_buf()), err)),
+    };
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        validate_windows_attributes(path, metadata.file_attributes())?;
+    }
+
+    let file_type = metadata.file_type();
+    let unsupported = if file_type.is_file() {
+        None
+    } else if file_type.is_symlink() {
+        Some("symlink")
+    } else if file_type.is_dir() {
+        Some("directory")
+    } else {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::FileTypeExt;
+            Some(if file_type.is_socket() {
+                "socket"
+            } else if file_type.is_fifo() {
+                "FIFO"
+            } else if file_type.is_char_device() {
+                "character device"
+            } else if file_type.is_block_device() {
+                "block device"
+            } else {
+                "non-regular file"
+            })
+        }
+        #[cfg(not(unix))]
+        {
+            Some("non-regular file")
+        }
+    };
+    if let Some(kind) = unsupported {
+        return Err(unsupported_target(path, kind));
+    }
+    Ok(Some(metadata))
+}
+
+fn unsupported_target(path: &Path, kind: &str) -> Error {
+    Error::io_error(
+        Some(path.to_path_buf()),
+        std::io::Error::new(
+            ErrorKind::InvalidInput,
+            format!("unsupported save target: {kind}"),
+        ),
+    )
+}
+
+#[cfg(windows)]
+fn validate_windows_attributes(path: &Path, attributes: u32) -> Result<()> {
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x00000400;
+    if attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Err(unsupported_target(path, "Windows reparse point"));
+    }
+    Ok(())
+}
+
+/// Creates a new temporary file, never opening an existing entry.
+fn create_temporary(
+    metadata: Option<&std::fs::Metadata>,
+    mut next_path: impl FnMut() -> PathBuf,
+) -> Result<(PathBuf, std::fs::File)> {
     const ATTEMPTS: usize = 16;
     let mut attempt = 1;
     loop {
-        let tmp_path = temporary_path(path);
-        let opened = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&tmp_path);
+        let tmp_path = next_path();
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        if let Some(metadata) = metadata {
+            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+            options.mode(metadata.permissions().mode() & 0o777);
+        }
+        #[cfg(not(unix))]
+        let _ = metadata;
+        let opened = options.open(&tmp_path);
         match opened {
             Ok(file) => return Ok((tmp_path, file)),
             // A stale file from an earlier process can hold the name; the next name differs.
@@ -794,19 +938,26 @@ fn create_temporary(path: &Path) -> Result<(PathBuf, std::fs::File)> {
     }
 }
 
-fn write_and_replace(
-    mut file: std::fs::File,
-    tmp_path: &Path,
-    path: &Path,
-    contents: &[u8],
-    mut rename: impl FnMut(&Path, &Path) -> std::io::Result<()>,
-) -> Result<()> {
-    file.write_all(contents)
-        .map_err(|err| Error::io_error(Some(tmp_path.to_path_buf()), err))?;
-    // Close the handle before the rename, which Windows requires.
-    drop(file);
+#[cfg(unix)]
+fn prepare_temporary(
+    file: &std::fs::File,
+    metadata: Option<&std::fs::Metadata>,
+) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    if let Some(metadata) = metadata {
+        file.set_permissions(std::fs::Permissions::from_mode(
+            metadata.permissions().mode() & 0o777,
+        ))?;
+    }
+    Ok(())
+}
 
-    rename(tmp_path, path).map_err(|err| Error::io_error(Some(path.to_path_buf()), err))
+#[cfg(not(unix))]
+fn prepare_temporary(
+    _file: &std::fs::File,
+    _metadata: Option<&std::fs::Metadata>,
+) -> std::io::Result<()> {
+    Ok(())
 }
 
 /// Computes a unique temporary sibling path independent of the target filename.
@@ -819,6 +970,9 @@ fn temporary_path(path: &Path) -> PathBuf {
         std::process::id()
     ))
 }
+
+#[cfg(test)]
+mod save_tests;
 
 #[cfg(test)]
 mod tests {
@@ -1097,16 +1251,23 @@ mod tests {
         let mut attempts = 0;
         let mut temporary_path = None;
 
-        let error = write_atomic_blocking_with_rename(&path, b"replacement", |from, to| {
-            attempts += 1;
-            assert_eq!(to, path);
-            assert_eq!(std::fs::read(from)?, b"replacement");
-            temporary_path = Some(from.to_path_buf());
-            Err(std::io::Error::new(
-                ErrorKind::AlreadyExists,
-                "rename failed",
-            ))
-        })
+        let error = write_atomic_blocking_with(
+            &path,
+            b"replacement",
+            std::fs::symlink_metadata(&path),
+            prepare_temporary,
+            Write::write_all,
+            |from, to| {
+                attempts += 1;
+                assert_eq!(to, path);
+                assert_eq!(std::fs::read(from)?, b"replacement");
+                temporary_path = Some(from.to_path_buf());
+                Err(std::io::Error::new(
+                    ErrorKind::AlreadyExists,
+                    "rename failed",
+                ))
+            },
+        )
         .unwrap_err();
 
         assert_eq!(attempts, 1);

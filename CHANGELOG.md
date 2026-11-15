@@ -10,6 +10,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `Error::SaveFileCleanup` reports both the original save failure and a failure to remove its temporary file.
 
 ### Changed
+- **Breaking:** `ConfigStore::save_file` validates the final path component before creating a temporary file and rejects symlinks (including dangling links), other non-regular targets and all Windows reparse points with `InvalidInput`. Parent-directory links and regular files with multiple hard links remain supported.
+- On Unix, `ConfigStore::save_file` establishes an existing target's observed `rwx` mode bits on the temporary file before writing, instead of replacing them with creation defaults. New targets still use normal creation policy; ownership, ACLs and other metadata are not preserved.
 - `ConfigStore::save_file` no longer deletes the target and retries when replacement fails with `AlreadyExists`; it returns the error instead.
 - Implemented the public error traits with the standard library, removing the `thiserror` dependency.
 
