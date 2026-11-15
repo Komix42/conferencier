@@ -1,0 +1,593 @@
+# RFC-0009: Reliable file saving with `ConfigStore::save_file`
+
+Date: 2026-11-14
+Status: Implemented
+Author: Komix42 <komix[at]ignore.cz>
+Target release: 0.0.6
+Amends: [RFC-0001](./RFC-0001_baseline_architecture.md)
+Related: [RFC-0010](./RFC-0010_save_file_permissions.md)
+
+## Document Scope
+
+This RFC reviews the complete [`ConfigStore::save_file`](../conferencier/src/store.rs)
+protocol: capturing a snapshot, preparing a temporary file, publishing it,
+handling failures and cancellation, and documenting its limits. It originated
+in the [replacement fallback debt](./BACKLOG.md#technical-debt), but is not
+limited to that fallback.
+
+The proposed direction is to prepare a complete file in the target directory
+and publish it by renaming it over the target, without a separate deletion.
+This is a draft, not a claim that the current implementation meets every
+proposed guarantee. Permission policy is specified separately in
+[RFC-0010](./RFC-0010_save_file_permissions.md); the two drafts must be
+reviewed together.
+
+This RFC amends the `save_file` atomicity and snapshot description in
+[RFC-0001](./RFC-0001_baseline_architecture.md#asynchronous-execution-model)
+and its [store-level error model](./RFC-0001_baseline_architecture.md#store-level-operations).
+RFC-0001 remains a historical record; add a reciprocal `Amended by` link when
+this RFC is implemented, without changing its body.
+
+## Motivation and current behavior
+
+The store serializes one consistent in-memory snapshot under a read lock. It
+then releases the lock, creates a uniquely named temporary sibling with
+`create_new`, writes the snapshot, closes the file, and renames it to the
+target on Tokio's blocking pool.
+
+This separates preparation from publication, but several details need a
+clearer contract:
+
+- If rename reports `AlreadyExists`, the current fallback removes the target
+  and retries. A failed retry can lose the original, even without concurrent
+  saves. When this branch occurs on supported filesystems remains unverified.
+- The temporary file uses default permissions and can be more accessible than
+  an existing target; replacement can also change the target's permissions.
+- If an absent target has the same name as the generated temporary file, the
+  target can be created and written during preparation instead of publication.
+  Different path spellings can also designate the same entry on Windows. This
+  restriction on target names is not documented today.
+- Cleanup after a write or rename failure is attempted, but cleanup errors are
+  ignored. A crash can also leave a temporary file behind.
+- Neither the file nor its containing directory is synchronized to storage.
+  `File`'s destructor ignores close errors.
+- Dropping the waiting future does not necessarily stop the blocking task.
+  The caller may stop waiting before a save completes.
+
+## Goals and boundaries
+
+Goals:
+
+- Define observable behavior for successful saves, errors and cancellation.
+- Do not delete or truncate the existing target as a separate prerequisite to
+  publishing its replacement.
+- Do not create or modify the target during preparation. Document the target
+  names reserved for temporary files (R5) instead of detecting filesystem
+  aliases.
+- Publish the prepared temporary file using the replacement operation where
+  supported, and describe atomicity only as a path-visibility property. Do
+  not promise durability or detection of delayed write/close errors.
+- Define temporary-file lifecycle and its interaction with RFC-0010.
+- Reject unsupported target types before creating a temporary file.
+- Verify behavior on the project's Windows, Linux and macOS CI platforms.
+
+Proposed non-goals for 0.0.6:
+
+- Ordering or coordinating writers, including across processes.
+- Crash durability or recovery after power loss; no file or directory sync
+  guarantee is proposed here. This boundary is agreed in R1 below.
+- Universal atomicity, metadata preservation, or rollback after every error
+  on every filesystem.
+- New saving methods or configuration, automatic parent-directory creation,
+  backups or a journal. R3 adds one public error variant.
+- Following final-component links or preserving relationships between hard-link
+  names.
+- Defending against an adversary who can mutate entries in the target
+  directory while a save is in progress.
+- Detecting or rejecting target names that a filesystem resolves to a
+  temporary name; R5 documents them as unsupported.
+
+## Proposed protocol
+
+1. **Snapshot.** Serialize the in-memory document before file I/O, as today.
+   The store lock is not held during file I/O. Changes made later are not in
+   this snapshot; unsaved scope changes are not included.
+2. **Validate and prepare.** On every platform, inspect the final path
+   component with `std::fs::symlink_metadata` before creating the temporary
+   file. Accept an observed missing target or a regular file, excluding
+   Windows reparse points, and handle all other observations as specified in
+   R4. On Unix, reuse the accepted regular file's metadata for the permission
+   policy in RFC-0010. Create a temporary sibling named as specified in R5
+   without opening an existing file, establish its access policy as agreed in
+   RFC-0010, and write all snapshot bytes. For a target name not reserved by
+   R5, the target is not created or modified during this phase.
+3. **Publish.** Close the temporary handle as needed, then call
+   `std::fs::rename` to publish the temporary file whether the target is
+   missing or already exists. Do not select behavior through a prior
+   `exists()` check, which can race with changes to the target. Do not add a
+   fallback that removes the target before retrying.
+4. **Finish.** Return success after publication succeeds. On a preparation or
+   publication error, attempt to remove the temporary file by path if one was
+   created, and return the original or combined error according to R3.
+   The method does not modify the in-memory store.
+
+The temporary file is in the target directory so publication normally stays
+on the same filesystem. Its name pattern, independent of the target name, is
+specified and documented in R5.
+
+Exclusive creation prevents opening an existing temporary file, but does not
+prevent a new temporary file from being created at an absent target path that
+the filesystem resolves to the same name. R5 therefore reserves such target
+names and specifies bounded retries. Exclusive creation also
+does not protect a named temporary file against interference by an actor who
+can change entries in the directory. Directory watchers may observe
+temporary-file creation and rename events; the library does not promise a
+particular event sequence or watcher behavior.
+
+Creating the temporary sibling and renaming it into place require sufficient
+access to the containing directory; write permission on the target file alone
+is not enough. On Unix, a read-only target can still be replaced if directory
+permissions and other applicable rules allow it. A single-file bind mount
+cannot generally be replaced by rename; on Linux this can fail with `EBUSY`.
+Such publication failures are returned rather than worked around by deleting
+the target.
+
+## Proposed observable contract
+
+The following assumes no external actor changes the target or its parent
+directory during the operation, except where concurrent saves are explicitly
+discussed, and that the target name is not reserved by R5. For a relative path
+it also assumes the process's current directory does not change during the
+operation; see Paths, concurrency and cancellation.
+
+| Event | Proposed behavior and limits |
+| --- | --- |
+| Serialization fails | Return `Error::Serialize` before creating a temporary file or touching the target. |
+| Target validation rejects the observed type or cannot read its metadata | Return the error specified in R4 before creating a temporary file or modifying the target. |
+| Temporary-name collisions exhaust the retry limit | Return the final `AlreadyExists` error with its temporary path, as specified in R5. The target has not been modified. |
+| Permission preparation fails | Do not write snapshot data or modify the target. Attempt cleanup if a temporary file was created; return the error as specified in R3 and RFC-0010 R3. |
+| Temporary creation or writing fails before publication | The library has not modified the target. Attempt cleanup if a temporary file was created; return the error as specified in R3. |
+| Publication succeeds | `write_all` returned success and the rename returned success. Where the filesystem provides atomic replacement, the target path switches from the old file to the prepared file without an intermediate pathname gap; a later writer may replace it before the caller observes it. This does not guarantee that data reached stable storage or that delayed write/close errors were detected. |
+| Publication returns an error | Do not explicitly remove the old target and retry. The final state is subject to the OS and filesystem; an error does not universally prove that publication did not happen. Attempt temporary-file cleanup and return the error as specified in R3. |
+| Cleanup fails other than with `NotFound` | Return `Error::SaveFileCleanup` with both errors and the temporary path; the temporary file may remain. |
+| Cleanup succeeds or returns `NotFound` | Return the original save error unchanged; `NotFound` does not establish whether publication occurred. |
+| Waiting future is dropped or times out | The caller has no result. A dispatched blocking task can still run and publish the file; cancellation is not a rollback. |
+
+The combined error is returned only while the caller is still waiting for the
+result. Dropping the future or terminating the process can leave no caller to
+receive an error; R3 does not introduce logging or another notification channel.
+
+On filesystems that provide atomic replacement of a regular file, a reader
+opening the target during publication sees either the old file or the prepared
+file, not an intermediate pathname gap created by the library. Existing open
+handles can still refer to the old file. Success reports that `write_all` and
+rename returned success; it does not mean that file contents or the directory
+entry reached stable storage. Because dropping `File` ignores close errors, a
+failure first reported at close is not returned to the caller.
+
+`Ok(())` means publication completed, not that it is durable after power
+loss. Depending on the filesystem and failure, a crash or power loss after
+`Ok(())` can leave the target missing, empty, incomplete or otherwise damaged.
+This proposal does not add `sync_all` or claim that all writes have reached
+stable storage.
+
+Two different synchronization steps are deliberately left out:
+
+- **File synchronization** (`File::sync_all` on the temporary file before
+  rename) would turn some delayed write errors, such as `ENOSPC`, `EDQUOT` or
+  `EIO` on filesystems that defer allocation or write-back (including NFS),
+  into preparation failures that leave the target unchanged. It does not
+  report every error that close could report and does not make the new
+  directory entry durable. Its cost depends on the platform and storage; on
+  macOS the standard library uses `F_FULLFSYNC`, which can be slow.
+- **Directory synchronization** after rename would make the new directory
+  entry durable on platforms that support it. It is not portable through the
+  standard library, and a failure would be reported only after publication.
+
+Without them, a delayed write error can be hidden from the caller, and after
+a crash the target can contain a file that was never completely written.
+
+An error before publication is different from an error returned by the
+publication operation itself. POSIX specifies that the destination is
+unaffected by rename failures other than `EIO`; on NFS a server can perform a
+rename and then report failure after a retry. Consequently the RFC must not
+promise that every failed publication leaves the original contents at the
+target path.
+
+## Paths, concurrency and cancellation
+
+- Each save prepares its own temporary file. Successful concurrent saves can
+  install different prepared snapshots; their order is unspecified. Applications
+  requiring ordering must coordinate their own saves through completion of the
+  blocking file operation. A mutex held only by a waiting future may be released
+  when that future is dropped or times out, even though its detached blocking
+  task can still publish; releasing such a lock does not establish save order.
+  Permission decisions use the metadata observed during preparation, not
+  necessarily the target's state at publication; see RFC-0010.
+- These guarantees do not protect against another process editing, deleting or
+  replacing the target, or changing the containing directory.
+- Relative paths are resolved using process-wide current-directory state. The
+  application must keep that state unchanged from the first poll of
+  `save_file` until its blocking operation finishes, including after the
+  waiting future is dropped. A fully qualified absolute path avoids this
+  dependency; on Windows, a drive-relative path such as `C:config.toml` is
+  not fully qualified.
+- The library validates the final path component as specified in R4; it does
+  not canonicalize the path to select a referent. Final-component symlinks,
+  including dangling links, other non-regular targets and Windows reparse
+  points are rejected when observed. Links in parent directories are allowed.
+- Regular files with multiple hard-link names are not rejected. A successful
+  replacement changes only the supplied name; other hard-link names and
+  already-open handles can continue to refer to the old file, with its old
+  contents and permissions. This limitation must be documented in the
+  `save_file` rustdoc and both READMEs.
+- Dropping a Tokio `JoinHandle` detaches its task, and a started
+  `spawn_blocking` task cannot be aborted. Thus a dropped `save_file` future
+  is not evidence that no write happened. Runtime shutdown and queued tasks
+  also require the limitations described by Tokio.
+
+The intended security boundary is a directory whose entries are not being
+manipulated by an untrusted actor during the save. A predictable temporary name
+and path-based operations are not a defense against such an actor. File and
+temporary-file access permissions within that boundary are addressed by
+RFC-0010.
+
+## Platform evidence and open verification
+
+[`std::fs::rename`](https://doc.rust-lang.org/1.85.0/std/fs/fn.rename.html)
+documents replacement of an existing destination and uses platform-specific
+operations. POSIX specifies atomic pathname replacement for its `rename`
+operation; this does not establish a universal filesystem or durability
+guarantee.
+
+A direct local probe on Windows/NTFS, using Rust 1.85 and the installed stable
+toolchain, replaced an existing file successfully. With the destination held
+without sharing, the probe returned `PermissionDenied` and the old contents
+remained. This is evidence for those cases only: it does not prove that the
+current `AlreadyExists` fallback is unreachable on every filesystem.
+
+A separate local NTFS probe exposed an 8.3 alias for a long temporary name and
+confirmed that `filename::$DATA`, as well as a non-verbatim path with a
+trailing dot or space, can name the same file as `filename`. Creating the long
+name also made its previously absent short alias resolve to that file.
+Short-name generation depends on the filesystem and its configuration. These
+observations show that path-string comparison cannot detect aliases reliably,
+and they do not establish naming rules for every filesystem. R5 therefore
+documents reserved target names rather than attempting detection.
+
+As an implementation acceptance condition, verify the chosen operation and
+its error and visibility behavior through the project's test suite on Windows,
+Linux and macOS. Try the implementation locally on Windows and review the
+relevant GitHub Actions results before RFC-0009 is marked implemented. If CI
+reveals a platform incompatibility, revisit this decision rather than
+restoring the destructive fallback. Network or unusual filesystems may have
+weaker or ambiguous failure semantics; do not infer their behavior from local
+or CI tests on standard filesystems.
+
+The current CI runs the stable test suite on Windows, Linux and macOS, while
+its MSRV job runs on Linux. Before marking this RFC implemented, add targeted
+Windows save tests under the MSRV toolchain as well as stable, so the selected
+rename and error behavior is exercised on both Rust versions.
+
+## Durability and alternatives
+
+- **In-place overwrite:** preserves the file's identity but can leave partial
+  contents after a write error or interruption. A cooperative lock does not
+  make that write crash-safe.
+- **Temporary file and rename:** the proposed baseline. It avoids modifying
+  the target while preparing the snapshot, but has the platform, permissions
+  and error limitations above.
+- **A dedicated crate:** for example, [`tempfile::persist`](https://docs.rs/tempfile/3.23.0/tempfile/struct.NamedTempFile.html#method.persist)
+  manages temporary files and documents atomic replacement. It adds a runtime
+  dependency and its default Unix mode differs from the current behavior.
+  Any candidate must also be assessed against RFC-0010 and the MSRV.
+- **Windows `ReplaceFileW`:** can preserve a DACL on success, but does not
+  protect the temporary file during writing. Microsoft documents failure
+  cases in which the replaced file no longer has its original name or, without
+  a backup, no longer exists; it is not automatically a stronger failure
+  guarantee.
+- **Backup or journal:** can support recovery, but requires additional
+  files, recovery rules and error handling; it is not proposed for 0.0.6.
+- **Synchronize the temporary file before rename:** reports some delayed
+  write errors as preparation failures, before the target is replaced. It adds
+  latency to every save, does not catch every close error and does not make
+  the directory entry durable. It is not required for the agreed 0.0.6
+  protection scope (R1) and can be added later without changing the API.
+- **Synchronize the containing directory after rename:** strengthens crash
+  durability of the published name on platforms where the required operations
+  are supported, but has portability implications, and its errors occur only
+  after publication. It is not required for the agreed 0.0.6 protection scope
+  (R1).
+
+## Compatibility and documentation
+
+The proposed `save_file` signature and serialized format are unchanged.
+Replacing an existing file may return an error where the old implementation
+would attempt the destructive fallback. R4 also narrows the accepted target
+types: an observed final-component symlink or other non-regular target now
+fails instead of being left to rename behavior. On Windows, all observed
+reparse points are rejected, including cloud placeholders carrying that
+attribute. `load_file` continues to follow symlinks; `save_file` does not
+silently follow or replace them. Callers intending to save to a referent must
+explicitly resolve and pass that path themselves.
+
+R3 adds a public `Error` variant: the enum is non-exhaustive, but callers that
+handle only `Error::Io` must also consider the combined-error case.
+Atomicity, cancellation, cleanup, permissions, target-type rejection and
+durability must be described accurately in the `save_file` and `Error`
+rustdoc and aligned root and crate READMEs. The `save_file` rustdoc and both
+READMEs must explicitly explain that replacing one hard-link name does not
+update the other names or existing open handles. Include a short example
+explaining that a final-component symlink is rejected while a symlink in a
+parent-directory path is allowed. Explain that saving requires suitable
+access to the containing directory, not just write access to the target, and
+that replacing a single-file bind mount may fail with `EBUSY` on Linux.
+Mention that transient Windows sharing conflicts may make rename fail with
+`PermissionDenied`; no automatic retry is promised. State that no file or
+directory synchronization is performed, so a delayed write error can go
+unreported and a crash after `Ok(())` can leave the target missing, empty or
+incomplete. Mention that directory watchers may observe temporary-file
+creation and rename without promising specific events. Explain the
+current-directory requirement for relative paths, including after
+cancellation, and the alternative of a fully qualified absolute path.
+Document the temporary-name pattern, the reserved target names and the
+consequences of using them, and when leftover temporary files can be removed,
+as specified in R5. Record user-visible changes in the changelog.
+
+The permission policy is specified separately in RFC-0010. Both RFCs are
+implemented together, because that policy affects the preparation steps and
+their failure behavior. Neither RFC promises writer
+coordination if another writer changes the target during a save.
+
+## Testing
+
+- Retain successful saves to new and existing targets, long target names and
+  concurrent snapshot tests.
+- Force temporary-name collisions deterministically. Verify each retry uses a
+  fresh name, never opens or removes the colliding file, stops after a bounded
+  number of attempts, and returns the final `AlreadyExists` error with its
+  temporary path.
+- For a missing, non-reserved target, pause after temporary-file creation and
+  during writing. Verify the target stays absent until publication, a forced
+  preparation failure and cleanup leave it absent, and successful publication
+  installs the complete snapshot. Reserved target names (R5) are unsupported
+  and need no tests.
+- Verify that `save_file` replaces an existing target with `std::fs::rename`
+  on local Windows, then review the focused test results in GitHub Actions for
+  Windows, Linux and macOS before marking the RFC implemented.
+- On the standard CI filesystems, repeatedly replace an existing target while
+  a concurrent reader opens and reads it. Ensure the reader actually runs
+  during the writes, permits delete sharing on Windows, and sees only complete
+  published snapshots, never a missing path or partial contents. This is
+  empirical coverage, not proof of atomicity on every filesystem.
+- Run the focused save tests on Windows with both stable and the MSRV
+  toolchain. Exercise ordinary sharing-conflict failures and confirm they are
+  surfaced as errors; do not add a rename retry based only on
+  `PermissionDenied`.
+- Exercise a Windows read-only regular target. It passes target-type
+  validation, but the result of rename is platform/filesystem-dependent; if
+  rename fails, verify that the error is surfaced and the old target is not
+  removed. Do not clear the read-only attribute or retry the rename.
+- Deterministically simulate a publication error such as `AlreadyExists`:
+  assert the error is surfaced and the existing target is not removed by the
+  library. Use a narrow test seam if needed rather than relying on a race.
+- Cover failure before publication and cleanup attempts. Verify that successful
+  cleanup and `NotFound` return the original error unchanged.
+- Deterministically simulate both a save failure and a cleanup failure. Check
+  that the combined error preserves the original error and its source, the
+  temporary path and the cleanup error, and that its display reports both
+  failures. When the original error is `Error::Io`, verify its `ErrorKind` and
+  raw OS code (when present) remain available in `save_error`. Do not assert
+  unconditional cleanup after a crash or failed cleanup operation.
+- Test cancellation with controlled synchronization: pause a started blocking
+  task, drop the waiter, then release the task and verify it can still publish.
+- Verify that final-component symlinks to existing files and dangling links
+  are rejected with `Error::Io`, `InvalidInput`, the target path and a clear
+  reason. Assert that the link and any referent remain unchanged and no
+  temporary file is created. Run these tests on Linux and macOS, and on
+  Windows where the fixtures can be created.
+- Reject directories and Unix special-file fixtures, such as a socket created
+  in a temporary directory, before temporary-file creation. No privileged
+  device-node fixture is required.
+- On Windows, verify rejection of reparse-point fixtures such as a junction.
+  Exercise the reparse attribute independently of `FileType::is_file` through
+  a narrow metadata test seam if a suitable file fixture is unavailable.
+  Distinguish real filesystem coverage from simulated metadata checks; do not
+  silently skip unavailable fixtures or claim coverage of every reparse tag.
+- Verify that an ordinary file reached through a parent-directory symlink or
+  junction remains eligible; the parent link must not be replaced.
+- Verify that replacing one of two hard-link names leaves the other name
+  referring to the original contents; do not reject the file based on its
+  link count.
+- Simulate target-metadata failures other than `NotFound`. Assert that the
+  original I/O kind and OS code are preserved with the target path, without
+  temporary-file creation or a fallback to the new-target policy.
+- Run focused tests on Windows, Linux and macOS; document behavior that cannot
+  be established by those tests.
+
+## Resolved questions
+
+**R1 — Protection scope for 0.0.6.** Serialize and write the snapshot to a
+temporary file before publication, without creating or modifying a target
+whose name is not reserved by R5 during preparation. Do not separately delete
+or truncate the target before replacing it. This protects the existing file
+from the library's destructive fallback during ordinary saving; it does not
+promise detection of delayed write/close errors or crash durability.
+
+Crash durability is not a goal for 0.0.6: this decision does not require file
+or directory synchronization and does not promise recovery after a crash or
+power loss. The two steps are considered separately (see Proposed observable
+contract and Durability and alternatives); file synchronization before rename
+remains a possible later improvement for reporting delayed write errors.
+Successful publication is not proof that the data has reached stable storage.
+Nor does an error from the publication operation universally prove that the
+old contents remain at the target path.
+
+This keeps the protection appropriate for ordinary configuration saving
+without committing the project to platform-specific durability and recovery
+work. The replacement mechanism, cleanup, special paths and permissions are
+addressed separately.
+
+**R2 — Replacement operation.** Use `std::fs::rename` to publish the prepared
+temporary file both when the target is absent and when it already exists.
+Rely on the documented standard-library behavior rather than adding a
+platform-specific replacement API or dependency in advance. The metadata
+inspection required by R4 validates target eligibility; it does not select a
+different publication operation for missing and existing targets. Do not add an
+`exists()` check or restore the remove-and-retry fallback.
+
+The implementation must be tested locally on Windows and its GitHub Actions
+test results on Windows, Linux and macOS reviewed before this RFC is marked
+implemented. If those results reveal an incompatibility, revisit R2 and
+document the evidence; a CI failure is not a reason to silently delete the
+target before retrying.
+
+**R3 — Reporting cleanup failures.** If saving fails after creating a temporary
+file, attempt to remove it. If removal succeeds or returns `NotFound`, return
+the original save error unchanged. `NotFound` means there is no file to remove
+at that path; it does not prove whether publication occurred.
+
+If removal fails for another reason, return a new public
+`Error::SaveFileCleanup` variant containing:
+
+- `save_error: Box<Error>`: the original failure, retaining its path and
+  underlying error; it is the variant's `std::error::Error::source`.
+- `temporary_path: PathBuf`: the path the library attempted to clean up.
+- `cleanup_error: std::io::Error`: the removal failure, available as a
+  structured field.
+
+The variant's display includes the original failure, temporary path and cleanup
+failure. The original error remains the primary cause; the cleanup error is
+inspectable separately rather than discarded or converted into text only. If
+the original error is `Error::Io`, its `std::io::ErrorKind` and OS code remain
+available through `save_error`; no logging dependency is required. A failed
+cleanup does not guarantee that the temporary file still exists when the
+caller inspects it.
+
+The `Error` rustdoc must include a concise example matching
+`Error::SaveFileCleanup` and inspecting a nested `Error::Io` in `save_error`,
+including its `std::io::ErrorKind` and optional raw OS code. This demonstrates
+how callers can recover the original failure without depending on the combined
+variant's display string.
+
+**R4 — Accepted targets and path behavior.** Support saving to an observed
+missing target or an existing regular file. Reject unsupported target types
+rather than silently replacing them or adding referent-selection behavior.
+
+After serialization and before temporary-file creation, call
+`std::fs::symlink_metadata` on the supplied path on every platform. Inspect
+the final component without following it:
+
+| Observation | Action |
+| --- | --- |
+| `NotFound` | Create the temporary file named under R5 with normal new-file creation policy. Missing parent directories are not created; temporary-file creation still fails if the parent is absent. |
+| Existing regular file, without the Windows reparse attribute | Proceed; on Unix reuse this metadata for RFC-0010's mode policy. |
+| Symlink, including a dangling link | Reject; do not follow or replace the link. |
+| Directory, FIFO, socket, device or another non-regular type | Reject. |
+| Windows `FILE_ATTRIBUTE_REPARSE_POINT`, regardless of `FileType::is_file` | Reject. |
+| Any other metadata error | Return the original I/O error with the target path. |
+
+For an unsupported observed type, return `Error::Io` carrying the target path
+and a `std::io::Error` with kind `InvalidInput`. Its message identifies the
+unsupported type or reparse point. This adds no public error variant beyond
+R3. No temporary file is created, no snapshot data is written, and the target
+and any referent are left unchanged under the no-external-changes assumption.
+A dangling symlink is an observed link, not an absent target: using
+`metadata` instead would incorrectly treat its missing referent as `NotFound`.
+
+On Windows, inspect `FILE_ATTRIBUTE_REPARSE_POINT` (`0x00000400`) through
+`std::os::windows::fs::MetadataExt::file_attributes`, available on the MSRV.
+`FileType::is_file` alone is not sufficient to exclude all reparse points.
+This intentionally conservative policy also rejects cloud placeholders and
+other regular-looking entries carrying that attribute; there is no tag
+allowlist or automatic hydration/reparse handling added by this RFC.
+
+The restriction applies only to the final component. Symlinks and junctions
+in parent directories are traversed normally and are not themselves
+replaced. The library does not canonicalize the supplied path. `load_file`
+may still follow a final-component symlink, while `save_file` rejects it.
+Callers intending to save to a referent must explicitly resolve and pass that
+path themselves.
+
+Regular files with multiple hard links remain eligible; no link-count check
+is added. Replacement installs a new file at the supplied name, not new
+contents in the original file. Other hard-link names and already-open handles
+keep referring to the old file with its old contents and permissions. This
+must be explicit in the `save_file` rustdoc and aligned root and crate READMEs.
+
+Validation is an observation, not an atomic condition on rename. If another
+actor changes the target after inspection, publication can still replace an
+entry that would have been rejected if observed then. The no-external-changes
+assumption and directory security boundary remain unchanged. Nor does an
+accepted regular-file type prove that replacement is possible: permissions,
+mount points and filesystem restrictions can still make publication fail. A
+Windows regular file with the read-only attribute is still eligible under
+R4, but rename may fail, for example with `PermissionDenied`. The RFC does not
+clear that attribute or retry; return the publication error and do not infer
+that Windows will always replace or always reject such a target.
+
+**R5 — Temporary names and reserved target names.** A temporary file is
+named `.conferencier.<pid>.<counter>.tmp` in the target's directory, where
+`<pid>` is the decimal process ID and `<counter>` a decimal counter shared
+by all saves in the process, as today. The name does not depend on the
+target name, so long valid target names remain usable. The `.conferencier.`
+prefix and `.tmp` suffix are documented so users can avoid them; the format
+of the numeric parts is not a public guarantee. On Windows the leading dot does not set the hidden attribute.
+
+Create each temporary file with `create_new`. On `AlreadyExists`, try a fresh
+counter value without opening or removing the existing entry. After a bounded
+number of attempts (16, as today), return the final `AlreadyExists` error with
+its temporary path. An existing entry, including an existing target that the
+filesystem resolves to the same name, therefore only causes a retry.
+
+The library does not detect whether a temporary name resolves to an absent
+target. Path comparison cannot establish this reliably: filesystems may
+compare names case-insensitively, including non-ASCII case mappings, and
+Windows can also resolve 8.3 short names, the `::$DATA` default-stream
+spelling and, in non-verbatim paths, names with trailing dots or spaces. A
+short name may appear only when the temporary file is created. Instead, the
+following final-component names are reserved and unsupported as `save_file`
+targets:
+
+- a name beginning with `.conferencier.` in any letter case, as compared by
+  the filesystem;
+- on Windows, a name containing `~` with the extension `.tmp` in any letter
+  case, which can be the 8.3 short name of a temporary file (for example
+  `CONFER~1.TMP`);
+- on Windows, either of the above followed by trailing dots or spaces, or by
+  a `:` stream suffix such as `::$DATA`.
+
+No check rejects these names; no ordinary configuration file needs them.
+Saving to a missing target with a reserved name may create the temporary file
+at the target path: partial snapshot contents can become visible there before
+publication, and cleanup after a failed save can remove the file. An existing
+target with a reserved name is not overwritten during preparation, but is
+still unsupported, because users and tools may treat it as a leftover
+temporary file.
+
+A temporary file can remain after a crash, after a cleanup failure, or while a
+detached save is still running (see Paths, concurrency and cancellation). A
+file named `.conferencier.*.tmp` can be removed when no save into that
+directory is in progress.
+
+The `save_file` rustdoc and both READMEs must document the temporary-name
+pattern, the reserved target names with the consequences above, and the
+removal of leftover temporary files.
+
+## References
+
+- [POSIX `rename`](https://pubs.opengroup.org/onlinepubs/9799919799/functions/rename.html)
+  and [Linux `rename(2)` NFS caveat](https://man7.org/linux/man-pages/man2/rename.2.html).
+- [Linux `fsync(2)`](https://man7.org/linux/man-pages/man2/fsync.2.html):
+  synchronizing a file does not necessarily synchronize its directory entry.
+- [Tokio `spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html)
+  and [`JoinHandle`](https://docs.rs/tokio/latest/tokio/task/struct.JoinHandle.html).
+- [Microsoft `ReplaceFileW`](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-replacefilew):
+  metadata handling and documented failure cases.
+- [Rust `symlink_metadata`](https://doc.rust-lang.org/1.85.0/std/fs/fn.symlink_metadata.html)
+  and [`FileType`](https://doc.rust-lang.org/1.85.0/std/fs/struct.FileType.html).
+- [Windows `MetadataExt`](https://doc.rust-lang.org/1.85.0/std/os/windows/fs/trait.MetadataExt.html),
+  [file attributes](https://learn.microsoft.com/en-us/windows/win32/fileio/file-attribute-constants)
+  and [reparse points](https://learn.microsoft.com/en-us/windows/win32/fileio/reparse-points).
+- [Windows naming rules and 8.3 aliases](https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file)
+  and [file stream names](https://learn.microsoft.com/en-us/windows/win32/fileio/file-streams).

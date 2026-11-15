@@ -6,15 +6,9 @@ Unlike the RFCs and implementation reports in this folder, this is a living docu
 
 Each entry states the problem, a possible direction and where it comes from.
 
-## Planned for 0.0.5
-
-The planned RFCs for 0.0.5 are implemented; see [Done](#done).
-
 ## Technical debt
 
 - **Temporary section-name migration guard.** Following [RFC-0005](./RFC-0005_api_redesign.md), `ConfigScope` derives in 0.0.5 and later 0.0.x and 0.1.x releases whose implicit section was affected by the old `Confer` prefix rule require an explicit section. Remove the guard in 0.2.0, and warn in its migration notes that a direct upgrade from 0.0.4 bypasses the guard. Origin: RFC-0005 N7.
-- **`save_file` does not preserve the target file's permissions.** The temporary file is created with default permissions (the directory's inherited ACL on Windows, the process umask on Unix) and the rename replaces the target together with its permissions. A file restricted to its owner can therefore become readable by others after a save, for example a file with explicit owner-only access in a directory that grants read access to the Users group on Windows, or a `0600` file under umask `022` on Unix. The content is also exposed through the temporary file before the rename. Reproduced on Windows; the Unix case follows from the same code path. Direction: create the temporary file with the target's permissions (on Unix, open it with the target's mode before writing; on Windows, copy the security descriptor or use `ReplaceFileW`), or document that callers restrict the directory instead. Origin: the 0.0.5 review; present since the original atomic save.
-- **Concurrent `save_file` fallback can race.** When a platform reports `AlreadyExists` for a rename over an existing target, the fallback removes the target and retries. If two saves enter this branch together, one can remove the target before the other's `remove_file`, causing the latter to fail with `NotFound`; the target is also absent between removal and the retry. This is conditional on the platform using that fallback and the race was not reproduced in review. Direction: use an atomic replacement operation where available, or coordinate replacement without deleting the target first. Origin: the 0.0.5 review of `write_and_replace`.
 
 ## Ideas
 
@@ -32,6 +26,10 @@ The planned RFCs for 0.0.5 are implemented; see [Done](#done).
 - **Inspecting unknown keys without rejecting them.** Strict scopes fail on the first unknown key, while lenient scopes currently provide no direct way to report leftovers for application logging or diagnostics. Direction: a non-mutating API that lists unmapped keys without changing lenient loading; define how it handles nested tables, strict and lenient table types, and manually implemented `ConfigTable`s before proposing an RFC. Origin: review feedback on [RFC-0006](./RFC-0006_strict_unknown_keys.md).
 - **Path-based typed getters and setters on `ConfigStore`**, for reading or writing a value such as `App.server.port` without a scope. Origin: [RFC-0004](./RFC-0004_nested_tables.md#out-of-scope--future-work).
 - **Structured error paths.** Errors inside nested tables carry diagnostic paths as strings, such as `App.upstream[1]`; [RFC-0006](./RFC-0006_strict_unknown_keys.md#error-paths) makes this notation unambiguous and adds public formatting helpers, but does not add a structured path type. Direction: consider a structured type if callers need to inspect path segments without parsing display notation. Origin: [RFC-0004](./RFC-0004_nested_tables.md#alternatives-considered), [RFC-0006](./RFC-0006_strict_unknown_keys.md#out-of-scope).
+- **Caller-specified permissions for new files.** [RFC-0010](./RFC-0010_save_file_permissions.md) preserves the mode bits of an existing Unix target, but a new target gets the operating system's default permissions, so a private file must be pre-created by the caller. Direction: an option to request a Unix mode for a file created by `save_file`, applied to the temporary file before writing; decide what it means on Windows before proposing an RFC. Origin: review feedback on the RFC-0010 draft.
+- **Preserving Windows access control on replacement.** [RFC-0010](./RFC-0010_save_file_permissions.md) copies no DACL or other access settings on Windows, so a replaced file gets the directory's inherited access, which can be broader. Direction: copy the target's DACL to the temporary file before writing, which needs Windows APIs or a dependency. Origin: RFC-0010 R1.
+- **Synchronizing saved files.** `save_file` performs no file or directory synchronization, so a delayed write error can go unreported and a crash after success can leave the target incomplete. Direction: `sync_all` on the temporary file before rename reports more write errors without an API change; directory synchronization after rename is less portable. Origin: [RFC-0009](./RFC-0009_save_file_replacement.md#durability-and-alternatives) R1.
+- **Rejecting reserved temporary-file target names.** [RFC-0009](./RFC-0009_save_file_replacement.md) R5 documents target names that can resolve to a temporary file as unsupported, without checking them. Direction: reject at least names beginning with `.conferencier.` (ASCII case-insensitively) with a clear error; a check cannot detect every filesystem alias. Origin: the RFC-0009 review; deferred because no ordinary configuration file uses such names.
 
 ### Outside the current scope
 
@@ -43,12 +41,18 @@ The README's [Scope](../README.md#scope) lists these as intentionally left out. 
 - **Layered sources** such as environment variables, command-line arguments or several files. Origin: the README's Scope.
 - **Formats other than TOML.** Origin: [RFC-0001](./RFC-0001_baseline_architecture.md#out-of-scope).
 
+### Documentation
+
+- **Revise the README for 0.1.0.** The README has accumulated attribute details, migration notes, edge cases and operational guidance, making it harder to understand the crate at a glance. Direction: make the introduction and quick start a clear showcase of the crate's purpose and typical use; move detailed reference material and migration guidance to appropriate documentation, keeping important limitations discoverable through links. Keep the root and crate READMEs aligned and preserve runnable examples and doctest coverage; review the derive crate's README for its distinct audience too. Timing: after the 0.0.6 release, for 0.1.0. Origin: the post-0.0.5 planning discussion.
+
 ### Examples
 
 - An example integrated with an HTTP server, and a command-line workflow for exporting and importing configuration snapshots. Origin: [RFC-0002](./RFC-0002_baseline_examples.md#future-work).
 
 ## Done
 
+- **Reliable `ConfigStore::save_file` replacement and target validation**: implemented in 0.0.6 ([RFC-0009](./RFC-0009_save_file_replacement.md)).
+- **Preserve existing Unix file mode bits when saving**: implemented in 0.0.6 ([RFC-0010](./RFC-0010_save_file_permissions.md)).
 - **Reject `section` on table-only derives**: implemented in 0.0.5 ([RFC-0008](./RFC-0008_table_section.md)).
 - **Expressions in `default` and one rule for missing keys**: implemented in 0.0.5 ([RFC-0007](./RFC-0007_default_expressions.md)).
 - **Strict unknown-key rejection and diagnostic path formatting**: implemented in 0.0.5 ([RFC-0006](./RFC-0006_strict_unknown_keys.md)).
