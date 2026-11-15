@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `Error::SaveFileCleanup` reports both the original save failure and a failure to remove its temporary file.
 
 ### Changed
+- `ConfigStore::save_file` no longer deletes the target and retries when replacement fails with `AlreadyExists`; it returns the error instead.
 - Implemented the public error traits with the standard library, removing the `thiserror` dependency.
 
 ## [0.0.5] - 2026-11-13

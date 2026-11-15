@@ -208,12 +208,15 @@ impl ConfigStore {
     /// installs one complete snapshot. Which of several concurrent calls wins is
     /// unspecified; an application that needs an order serializes its own saves.
     ///
-    /// Replacement uses a rename. If the platform reports that the target already
-    /// exists, it is removed before retrying the rename; atomic replacement is
-    /// therefore not guaranteed on that path. Concurrent saves can fail in this
-    /// fallback if another save removes the target first. This method does not promise
-    /// crash durability. The temporary file is removed when a write or rename fails,
-    /// but a crash can leave it behind.
+    /// Replacement uses a single rename; the target is never explicitly removed
+    /// to retry a failed rename. On filesystems that provide atomic replacement,
+    /// readers opening the target see either the old or the complete new file.
+    /// A rename error does not guarantee that the target was unchanged: its final
+    /// state depends on the operating system and filesystem. On Windows, sharing
+    /// conflicts can cause rename to fail; no automatic retry is performed. This
+    /// method does not promise crash durability. Cleanup is attempted when a write
+    /// or rename fails, but a crash or cleanup failure can leave the temporary file
+    /// behind.
     ///
     /// # Errors
     ///
@@ -736,12 +739,11 @@ async fn read_file(path: &Path) -> Result<String> {
         .map_err(|err| Error::io_error(Some(path.to_path_buf()), err))
 }
 
-/// Persists `contents` to `path` through a temporary sibling and a rename, so a successful
-/// call leaves the complete contents; the replacement is atomic only when the first rename
-/// succeeds (see [`ConfigStore::save_file`]).
+/// Persists `contents` to `path` through a temporary sibling and a rename
+/// (see [`ConfigStore::save_file`]).
 ///
 /// Every call writes its own temporary sibling, so concurrent saves to the same path never
-/// share a temporary file; on error the temporary file is removed. The blocking file
+/// share a temporary file; on error cleanup is attempted. The blocking file
 /// operations run on Tokio's blocking pool, like those of [`tokio::fs`].
 async fn write_atomic(path: &Path, contents: String) -> Result<()> {
     let path = path.to_path_buf();
@@ -751,8 +753,16 @@ async fn write_atomic(path: &Path, contents: String) -> Result<()> {
 }
 
 fn write_atomic_blocking(path: &Path, contents: &[u8]) -> Result<()> {
+    write_atomic_blocking_with_rename(path, contents, |from, to| std::fs::rename(from, to))
+}
+
+fn write_atomic_blocking_with_rename(
+    path: &Path,
+    contents: &[u8],
+    rename: impl FnMut(&Path, &Path) -> std::io::Result<()>,
+) -> Result<()> {
     let (tmp_path, file) = create_temporary(path)?;
-    let result = write_and_replace(file, &tmp_path, path, contents);
+    let result = write_and_replace(file, &tmp_path, path, contents, rename);
     match result {
         Ok(()) => Ok(()),
         Err(save_error) => Err(Error::with_save_file_cleanup(
@@ -789,21 +799,14 @@ fn write_and_replace(
     tmp_path: &Path,
     path: &Path,
     contents: &[u8],
+    mut rename: impl FnMut(&Path, &Path) -> std::io::Result<()>,
 ) -> Result<()> {
     file.write_all(contents)
         .map_err(|err| Error::io_error(Some(tmp_path.to_path_buf()), err))?;
     // Close the handle before the rename, which Windows requires.
     drop(file);
 
-    let path_error = |err| Error::io_error(Some(path.to_path_buf()), err);
-    match std::fs::rename(tmp_path, path) {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == ErrorKind::AlreadyExists => {
-            std::fs::remove_file(path).map_err(path_error)?;
-            std::fs::rename(tmp_path, path).map_err(path_error)
-        }
-        Err(err) => Err(path_error(err)),
-    }
+    rename(tmp_path, path).map_err(|err| Error::io_error(Some(path.to_path_buf()), err))
 }
 
 /// Computes a unique temporary sibling path independent of the target filename.
@@ -1083,6 +1086,160 @@ mod tests {
 
         let file_contents = tokio::fs::read_to_string(&path_buf).await?;
         assert!(file_contents.contains("enabled = false"));
+        Ok(())
+    }
+
+    #[test]
+    fn publication_error_does_not_remove_or_retry_target() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "original")?;
+        let mut attempts = 0;
+        let mut temporary_path = None;
+
+        let error = write_atomic_blocking_with_rename(&path, b"replacement", |from, to| {
+            attempts += 1;
+            assert_eq!(to, path);
+            assert_eq!(std::fs::read(from)?, b"replacement");
+            temporary_path = Some(from.to_path_buf());
+            Err(std::io::Error::new(
+                ErrorKind::AlreadyExists,
+                "rename failed",
+            ))
+        })
+        .unwrap_err();
+
+        assert_eq!(attempts, 1);
+        match error {
+            Error::Io {
+                path: error_path,
+                source,
+            } => {
+                assert_eq!(error_path.as_deref(), Some(path.as_path()));
+                assert_eq!(source.kind(), ErrorKind::AlreadyExists);
+                assert_eq!(source.to_string(), "rename failed");
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+        assert_eq!(std::fs::read(&path)?, b"original");
+        assert!(!temporary_path.expect("rename was called").exists());
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn save_file_reports_windows_sharing_conflict() -> Result<()> {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "original")?;
+        let locked = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0x00000003) // Share reads and writes, but not deletion.
+            .open(&path)?;
+        let store = ConfigStore::new();
+        store.set_integer("App", "value", 42)?;
+
+        match store.save_file(&path).await.unwrap_err() {
+            Error::Io {
+                path: error_path,
+                source,
+            } => {
+                assert_eq!(error_path.as_deref(), Some(path.as_path()));
+                assert!(source.raw_os_error().is_some());
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+        assert_eq!(std::fs::read(&path)?, b"original");
+        drop(locked);
+        let entries: Vec<_> = std::fs::read_dir(dir.path())?
+            .map(|entry| entry.map(|entry| entry.file_name()))
+            .collect::<std::io::Result<_>>()?;
+        assert_eq!(entries, ["config.toml"]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn concurrent_reader_sees_complete_replacements() -> Result<()> {
+        use std::io::Read;
+        use std::sync::atomic::AtomicBool;
+        use std::sync::mpsc::{channel, sync_channel};
+        use std::time::Duration;
+
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("config.toml");
+        let mut stores = Vec::new();
+        let mut snapshots = Vec::new();
+        for value in ["a", "b"] {
+            let store = ConfigStore::new();
+            store.set_string("App", "payload", value.repeat(64 * 1024))?;
+            snapshots.push(store.save_str()?.into_bytes());
+            stores.push(store);
+        }
+        std::fs::write(&path, &snapshots[0])?;
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let reader_stop = Arc::clone(&stop);
+        let reader_path = path.clone();
+        let (ready_tx, ready_rx) = sync_channel(0);
+        let (resume_tx, resume_rx) = channel();
+        let reader = std::thread::spawn(move || {
+            let mut reads = 0;
+            while !reader_stop.load(Ordering::Acquire) {
+                let mut options = std::fs::OpenOptions::new();
+                options.read(true);
+                #[cfg(windows)]
+                {
+                    use std::os::windows::fs::OpenOptionsExt;
+                    options.share_mode(0x00000007); // Allow replacement while reading.
+                }
+                let mut file = options.open(&reader_path)?;
+                let mut contents = Vec::new();
+                file.read_to_end(&mut contents)?;
+                assert!(
+                    snapshots.contains(&contents),
+                    "reader saw a partial snapshot"
+                );
+                reads += 1;
+                if reads == 2 {
+                    assert_eq!(
+                        contents, snapshots[1],
+                        "reader missed the first replacement"
+                    );
+                }
+                if reads <= 2 && ready_tx.send(()).is_err() {
+                    break;
+                }
+                if reads == 1 && resume_rx.recv().is_err() {
+                    break;
+                }
+            }
+            Ok::<_, std::io::Error>(reads)
+        });
+
+        let result: Result<()> = async {
+            ready_rx
+                .recv_timeout(Duration::from_secs(10))
+                .expect("reader did not start");
+            for index in 0..100 {
+                stores[(index + 1) % stores.len()].save_file(&path).await?;
+                if index == 0 {
+                    resume_tx.send(()).expect("reader stopped");
+                    ready_rx
+                        .recv_timeout(Duration::from_secs(10))
+                        .expect("reader did not run during saves");
+                }
+            }
+            Ok(())
+        }
+        .await;
+        stop.store(true, Ordering::Release);
+        drop(ready_rx);
+        drop(resume_tx);
+        let reads = reader.join().expect("reader failed")?;
+        result?;
+        assert!(reads >= 2);
         Ok(())
     }
 
