@@ -6,6 +6,16 @@ Unlike the RFCs and implementation reports in the version folders such as [`deve
 
 Each entry states the problem, a possible direction and where it comes from.
 
+## Planned for 0.0.8
+
+Build a runnable, realistic example application to demonstrate conferencier in a multi-component Tokio application:
+
+1. **Uptime monitor.** Add an Axum-based web server and a background worker that checks configured TCP targets. Use separate configuration scopes for the HTTP server and monitor, sharing one `ConfigStore`; expose the latest check results over HTTP and keep runtime state out of the TOML configuration.
+2. **Configuration workflow.** Support explicit reload and runtime pause/resume commands. Export the effective configuration to a separate file and load it on the next start when present, leaving the commented example configuration untouched.
+3. **Runnable package and documentation.** Put the application in `examples/uptime-monitor/` as a separate, unpublished workspace package, with its setup, usage, configuration and architecture explained in its `README.md`. Keep application-only dependencies out of the library crates.
+
+No RFC will be written for 0.0.8; the example's README will document its design and architecture. The example is illustrative and does not expand the library's scope.
+
 ## Technical debt
 
 - **Temporary section-name migration guard.** Following [RFC-0005](./devel-0.0.x/RFC-0005_api_redesign.md), `ConfigScope` derives in 0.0.5 and later 0.0.x and 0.1.x releases whose implicit section was affected by the old `Confer` prefix rule require an explicit section. Remove the guard in 0.2.0, and warn in its migration notes that a direct upgrade from 0.0.4 bypasses the guard. Origin: RFC-0005 N7.
@@ -43,8 +53,7 @@ The README's [Project scope](../README.md#project-scope) lists these as intentio
 
 ### Examples
 
-- **Hyper HTTP server example.** A complete, runnable example configuring a Hyper-based web server and demonstrating several components. Keep Hyper specific to the example, not a runtime dependency of the library. The detailed scenario will be decided separately. Origin: [RFC-0002](./devel-0.0.x/RFC-0002_baseline_examples.md#future-work).
-- **Configuration snapshot workflow.** A command-line workflow for exporting and importing configuration snapshots. Origin: [RFC-0002](./devel-0.0.x/RFC-0002_baseline_examples.md#future-work).
+- **Uptime monitor application.** A complete, runnable example configuring a web server and a background worker, demonstrating multiple components that share configuration. The 0.0.8 plan uses Axum and TCP checks; keep application dependencies out of the library crates. Its explicit configuration reload and separate effective-config export also demonstrate a basic snapshot workflow. Origin: [RFC-0002](./devel-0.0.x/RFC-0002_baseline_examples.md#future-work).
 
 ## Done
 
