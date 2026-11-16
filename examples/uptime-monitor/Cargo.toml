@@ -9,4 +9,4 @@ description = "Example application: an uptime monitor configured with conferenci
 [dependencies]
 conferencier = { path = "../../conferencier" }
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
-tokio = { version = "1.39", features = ["macros", "rt-multi-thread", "net", "time", "io-std", "io-util", "signal", "sync"] }
+tokio = { version = "1.39", features = ["macros", "rt-multi-thread", "net", "time", "signal", "sync"] }

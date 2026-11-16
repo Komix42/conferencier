@@ -1,13 +1,35 @@
 //! Uptime monitor: an example application configured with conferencier.
+//!
+//! A background worker checks the configured TCP targets and an HTTP server
+//! shows the results. Console commands reload, pause, resume and export the
+//! configuration. See `README.md` for usage and architecture.
 
 mod config;
+mod http;
+mod monitor;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::Arc;
 
-use conferencier::{ConfigScope, ConfigStore};
+use conferencier::{ConfigScope, ConfigStore, SharedScope};
+use tokio::net::TcpListener;
+use tokio::sync::{Notify, mpsc, watch};
 
 use crate::config::{HttpConfig, MonitorConfig};
+
+type AppResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
+
+/// What the console commands work with.
+struct App {
+    store: ConfigStore,
+    http: SharedScope<HttpConfig>,
+    monitor: SharedScope<MonitorConfig>,
+    /// Starts the worker's next round immediately.
+    wake: Arc<Notify>,
+    /// The address the HTTP server listens on; it changes only with a restart.
+    listening: (String, u16),
+}
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -20,32 +42,176 @@ async fn main() -> ExitCode {
     }
 }
 
-async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let path = default_config_path();
+async fn run() -> AppResult<()> {
+    let path = config_path();
     let store = ConfigStore::from_file(&path).await?;
     let http = HttpConfig::from_store(&store)?;
     let monitor = MonitorConfig::from_store(&store)?;
     config::validate(&*monitor.read().await)?;
-
     println!("Loaded configuration from {}", path.display());
-    let http = http.read().await;
-    println!("HTTP server: http://{}:{}/", http.address, http.port);
-    let monitor = monitor.read().await;
-    println!(
-        "Monitor: enabled={}, interval={:?}, timeout={:?}",
-        monitor.enabled,
-        monitor.interval(),
-        monitor.timeout()
-    );
-    for target in &monitor.targets {
-        println!("  target {} at {}", target.name, target.address);
+
+    let listening = {
+        let http = http.read().await;
+        (http.address.clone(), http.port)
+    };
+    let listener = TcpListener::bind((listening.0.as_str(), listening.1))
+        .await
+        .map_err(|error| format!("cannot listen on {}:{}: {error}", listening.0, listening.1))?;
+    let url = format!("http://{}/", listener.local_addr()?);
+    println!("Status at {url} and the configuration in use at {url}config");
+
+    let (shutdown, shutdown_signal) = watch::channel(());
+    let wake = Arc::new(Notify::new());
+    let worker = tokio::spawn(monitor::run(
+        monitor.clone(),
+        wake.clone(),
+        shutdown_signal.clone(),
+    ));
+    let mut server = tokio::spawn(http::serve(
+        listener,
+        http.clone(),
+        monitor.clone(),
+        shutdown_signal,
+    ));
+
+    let app = App {
+        store,
+        http,
+        monitor,
+        wake,
+        listening,
+    };
+    print_help();
+    let mut console = spawn_console();
+    let outcome = loop {
+        tokio::select! {
+            line = console.recv() => {
+                // End of input quits, like the `quit` command.
+                let Some(line) = line else { break Ok(()) };
+                match handle(&app, line.trim()).await {
+                    Ok(Continue::Yes) => {}
+                    Ok(Continue::No) => break Ok(()),
+                    Err(error) => eprintln!("error: {error}"),
+                }
+            }
+            _ = tokio::signal::ctrl_c() => break Ok(()),
+            result = &mut server => {
+                let _ = shutdown.send(());
+                let _ = worker.await;
+                return match result {
+                    Ok(Ok(())) => Err("the HTTP server stopped unexpectedly".into()),
+                    Ok(Err(error)) => Err(error.into()),
+                    Err(error) => Err(error.into()),
+                };
+            }
+        }
+    };
+
+    println!("Shutting down");
+    let _ = shutdown.send(());
+    worker.await?;
+    server.await??;
+    outcome
+}
+
+enum Continue {
+    Yes,
+    No,
+}
+
+async fn handle(app: &App, command: &str) -> AppResult<Continue> {
+    match command {
+        "" => {}
+        "reload" => reload(app).await?,
+        "pause" => set_enabled(app, false).await,
+        "resume" => set_enabled(app, true).await,
+        "export" => export(app).await?,
+        "help" => print_help(),
+        "quit" => return Ok(Continue::No),
+        other => println!("Unknown command {other:?}; type `help` for the list."),
+    }
+    Ok(Continue::Yes)
+}
+
+/// Reads the configuration file again and applies it to the running application.
+async fn reload(app: &App) -> AppResult<()> {
+    let path = config_path();
+    // Read the file once, so the version that is checked is the one that is applied.
+    let source = tokio::fs::read_to_string(&path)
+        .await
+        .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    config::reload(&app.store, &app.http, &app.monitor, &source).await?;
+    app.wake.notify_one();
+    println!("Reloaded configuration from {}", path.display());
+
+    let http = app.http.read().await;
+    if (http.address.as_str(), http.port) != (app.listening.0.as_str(), app.listening.1) {
+        println!(
+            "The HTTP server keeps listening on {}:{}; restart the application to use {}:{}.",
+            app.listening.0, app.listening.1, http.address, http.port
+        );
     }
     Ok(())
 }
 
-/// The hand-written default configuration, independent of the working directory.
-fn default_config_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("config")
-        .join("monitor.toml")
+/// Changes a setting at runtime. The change lives in the scope only: `export`
+/// saves it, while `reload` replaces it with the value from the file.
+async fn set_enabled(app: &App, enabled: bool) {
+    app.monitor.write().await.enabled = enabled;
+    app.wake.notify_one();
+    println!("Monitoring {}", if enabled { "resumed" } else { "paused" });
+}
+
+/// Saves the scopes into the store and the store into `effective.toml`.
+async fn export(app: &App) -> AppResult<()> {
+    HttpConfig::save(&app.http, &app.store).await?;
+    MonitorConfig::save(&app.monitor, &app.store).await?;
+    let path = effective_config_path();
+    app.store.save_file(&path).await?;
+    println!(
+        "Exported the configuration in use to {}; it is loaded instead of monitor.toml from now on.",
+        path.display()
+    );
+    Ok(())
+}
+
+fn print_help() {
+    println!("Commands: reload, pause, resume, export, help, quit (or Ctrl+C)");
+}
+
+/// Reads console lines on a dedicated thread.
+///
+/// Tokio's `stdin` reads on a blocking thread that the runtime waits for when it
+/// shuts down, so Ctrl+C would not quit until Enter is pressed. A plain thread is
+/// not waited for; it ends with the process.
+fn spawn_console() -> mpsc::Receiver<String> {
+    let (sender, receiver) = mpsc::channel(8);
+    std::thread::spawn(move || {
+        for line in std::io::stdin().lines() {
+            let Ok(line) = line else { break };
+            if sender.blocking_send(line).is_err() {
+                break;
+            }
+        }
+    });
+    receiver
+}
+
+/// The exported configuration if it exists, otherwise the hand-written default.
+fn config_path() -> PathBuf {
+    let effective = effective_config_path();
+    if effective.exists() {
+        effective
+    } else {
+        config_dir().join("monitor.toml")
+    }
+}
+
+fn effective_config_path() -> PathBuf {
+    config_dir().join("effective.toml")
+}
+
+/// The configuration directory, independent of the working directory.
+fn config_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("config")
 }
