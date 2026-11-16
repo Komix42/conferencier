@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.0.7] - 2026-11-16
+
 ### Added
 - A [rustdoc guide](https://docs.rs/conferencier/latest/conferencier/guide/) covering concepts, derive attributes and value conversion, nested tables, saving files, troubleshooting and migration from earlier releases. It is included with the default `derive` feature.
 - Doctests for the shared README and a CI check that runs the guide's doctests from the packaged crate outside the workspace.
