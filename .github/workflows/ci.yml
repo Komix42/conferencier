@@ -136,6 +136,22 @@ jobs:
       - name: Publish dry-run (both crates)
         run: cargo publish --workspace --dry-run --locked
 
+      # The dry-run builds the packages but does not run their doctests, so the
+      # guide pages are tested again from the unpacked package, outside the workspace.
+      - name: Run doctests of the packaged crate
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 --locked | jq -r '.packages[] | select(.name == "conferencier") | .version')
+          dir="$RUNNER_TEMP/package"
+          mkdir -p "$dir"
+          # The dry-run above already verified the packages.
+          cargo package -p conferencier -p conferencier-derive --no-verify --locked
+          tar -xzf "target/package/conferencier-$version.crate" -C "$dir"
+          tar -xzf "target/package/conferencier-derive-$version.crate" -C "$dir"
+          cd "$dir/conferencier-$version"
+          # The unpublished derive crate is patched in, which changes the packaged
+          # Cargo.lock, so --locked cannot be used here.
+          cargo test --doc --all-features --config "patch.crates-io.conferencier-derive.path='$dir/conferencier-derive-$version'"
+
   audit:
     runs-on: ubuntu-latest
     steps:

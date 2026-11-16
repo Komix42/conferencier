@@ -12,27 +12,14 @@ use crate::Result;
 /// the nested path, for example `App.upstream[1]`. A dot in `path` does not cause
 /// a store lookup, and these functions never read or write a file.
 ///
-/// # Derived tables
+/// # Implementations
 ///
-/// With the default `derive` feature, `#[derive(ConfigTable)]` supports the same
-/// field attributes as [`ConfigScope`](crate::ConfigScope): `rename`, `default`,
-/// `ignore` and `table`. A table-only derive does not accept `section`; when both
-/// traits are derived, `section` applies only to the scope.
-/// Mark an owning field `#[confer(table)]` and use `T`, `Option<T>` or `Vec<T>`
-/// to represent a table, an optional table or an array of tables respectively.
-/// Unknown keys are ignored on load unless the type has
-/// `#[confer(deny_unknown_keys)]`. `to_table` returns only keys mapped by loaded
-/// fields, even for strict types. Strictness belongs to each type and is not
-/// inherited from its containing scope or table.
+/// With the default `derive` feature, `#[derive(ConfigTable)]` implements this
+/// trait for named-field structs. The
+/// [nested tables guide](https://docs.rs/conferencier/latest/conferencier/guide/tables/index.html)
+/// describes the table field shapes, their attributes and how tables behave on reload.
 ///
-/// Tables are plain values, not shared scope handles. Loading a scope rebuilds
-/// its nested tables, so ignored fields of a table are initialized on every
-/// successful construction, unlike ignored fields directly in a scope.
-/// Keep runtime state that must survive reloads in the scope itself.
-///
-/// # Manual implementations
-///
-/// Implementations own the input table and can move values out instead of cloning
+/// Manual implementations own the input table and can move values out instead of cloning
 /// them. Use [`Error`](crate::Error)'s constructors to attach `path` and the failing
 /// key to conversion errors. When delegating to a nested table, extend `path`
 /// with [`table_path`](crate::table_path) so that its errors carry the same
@@ -85,12 +72,9 @@ use crate::Result;
 pub trait ConfigTable: Sized {
     /// Constructs a value from an owned table, using `path` for error reporting.
     ///
-    /// For an absent key, the derived implementation applies an explicit fallback,
-    /// uses `None` for an `Option`, or returns [`Error::MissingKey`](crate::Error::MissingKey).
-    /// `#[confer(table, field_defaults)]` loads a missing single nested table from
-    /// an empty table without requiring the nested type to implement `Default`.
-    /// Unknown keys are ignored on load unless `#[confer(deny_unknown_keys)]`
-    /// is set. This does not change `to_table`, which includes only loaded fields.
+    /// For an absent key, the derived implementation uses its field's fallback,
+    /// `None` for an `Option`, or returns [`Error::MissingKey`](crate::Error::MissingKey).
+    /// Unknown keys are ignored unless the type has `#[confer(deny_unknown_keys)]`.
     ///
     /// Ignored fields are initialized after this table's loaded fields convert.
     /// Each call creates a fresh value; side effects of default expressions or
@@ -100,7 +84,8 @@ pub trait ConfigTable: Sized {
     ///
     /// Returns [`Error::MissingKey`](crate::Error::MissingKey),
     /// [`Error::TypeMismatch`](crate::Error::TypeMismatch) or
-    /// [`Error::ValueParse`](crate::Error::ValueParse) for invalid fields.
+    /// [`Error::ValueParse`](crate::Error::ValueParse) for invalid fields, or
+    /// [`Error::UnknownKey`](crate::Error::UnknownKey) for an unknown key in a strict table.
     /// A manual implementation may return other errors as appropriate.
     fn from_table(path: &str, table: Table) -> Result<Self>;
 

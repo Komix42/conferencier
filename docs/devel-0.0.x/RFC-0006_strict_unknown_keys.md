@@ -16,7 +16,7 @@ The RFC also proposes public diagnostic-path helpers for manual `ConfigScope` an
 
 It amends the following parts of [RFC-0004](./RFC-0004_nested_tables.md), whose text stays unchanged: E1 (the section name verbatim as the root of a path), E2 and E4 (the final key displayed without quoting, the path held in `section`), and the `<section>` key of R5 and of `set_section_table`.
 
-The proposal starts from the [Strict mode for unknown keys](./BACKLOG.md#derive-attributes-and-field-types) entry of the backlog, first listed as future work in [RFC-0004](./RFC-0004_nested_tables.md#out-of-scope--future-work). It assumes the API redesign of [RFC-0005](./RFC-0005_api_redesign.md) (`ConfigScope`, `ConfigTable`, `ConfigStore`, `Error`) and the `default` expressions of [RFC-0007](./RFC-0007_default_expressions.md), which ship in the same release; the published 0.0.4 documentation still uses the old names. Decisions made while drafting and after review are recorded in [Resolved questions](#resolved-questions).
+The proposal starts from the [Strict mode for unknown keys](../BACKLOG.md#derive-attributes-and-field-types) entry of the backlog, first listed as future work in [RFC-0004](./RFC-0004_nested_tables.md#out-of-scope--future-work). It assumes the API redesign of [RFC-0005](./RFC-0005_api_redesign.md) (`ConfigScope`, `ConfigTable`, `ConfigStore`, `Error`) and the `default` expressions of [RFC-0007](./RFC-0007_default_expressions.md), which ship in the same release; the published 0.0.4 documentation still uses the old names. Decisions made while drafting and after review are recorded in [Resolved questions](#resolved-questions).
 
 ## Synopsis
 
@@ -71,7 +71,7 @@ Without the attribute, `prot = 9090` is ignored, `port` falls back to `8080`, an
 ## Motivation
 
 - **Typos are silent.** A misspelled key such as `prot = 9090` or a misspelled table such as `[App.sever]` is ignored on load. The field falls back to its default or loads as `None`, and nothing tells the user that the configuration file has no effect.
-- **The next save destroys the evidence.** A scope's `save` replaces its whole section, so the misspelled key disappears from a saved file (O2). The README describes this as a known pitfall in [Saving configuration](../README.md#saving-configuration).
+- **The next save destroys the evidence.** A scope's `save` replaces its whole section, so the misspelled key disappears from a saved file (O2). The README describes this as a known pitfall in [Saving configuration](https://github.com/Komix42/conferencier/blob/v0.0.5-alpha/README.md#saving-configuration).
 - **Ignored fields look configurable.** A runtime field marked `#[confer(ignore)]` has no key. A user who writes it into the file sees no effect and no error.
 - **The lenient default stays useful.** Applications that read configuration written by a newer version of themselves, or that tolerate leftovers, should keep working. Strictness is therefore opt-in and chosen per struct.
 
@@ -230,8 +230,8 @@ The existing message for unsupported struct attributes is unchanged.
 
 - Unknown top-level sections. A later store-level check could take a list of known sections, for example from the scopes registered by the application.
 - Suggestions of similar keys in the error message.
-- A structured path (item 6); recorded in the [backlog](./BACKLOG.md#store-and-errors).
-- `#[confer(flatten)]` and other ideas that would change the set of known keys; they are listed in the [backlog](./BACKLOG.md).
+- A structured path (item 6); recorded in the [backlog](../BACKLOG.md#store-and-errors).
+- `#[confer(flatten)]` and other ideas that would change the set of known keys; they are listed in the [backlog](../BACKLOG.md).
 
 ## Testing
 
@@ -257,7 +257,7 @@ The existing message for unsupported struct attributes is unchanged.
 
 ## Documentation deliverables
 
-- README (both copies): the struct attributes in [Derive attributes](../README.md#derive-attributes) gain `deny_unknown_keys`, with prominent examples of the non-inheritance of strictness (U3) and an undetected top-level section typo; [Saving configuration](../README.md#saving-configuration) mentions it next to the misspelled-key pitfall; Troubleshooting gets an entry for `unknown key`; every example and description that uses `section` of an error uses `path`, and the error descriptions state P2–P4. Document the public helpers for manual implementations.
+- README (both copies): the struct attributes in [Derive attributes](https://github.com/Komix42/conferencier/blob/v0.0.5-alpha/README.md#derive-attributes) gain `deny_unknown_keys`, with prominent examples of the non-inheritance of strictness (U3) and an undetected top-level section typo; [Saving configuration](https://github.com/Komix42/conferencier/blob/v0.0.5-alpha/README.md#saving-configuration) mentions it next to the misspelled-key pitfall; Troubleshooting gets an entry for `unknown key`; every example and description that uses `section` of an error uses `path`, and the error descriptions state P2–P4. Document the public helpers for manual implementations.
 - Rustdoc: `Error` with its variants and constructors, including the path rules, array-element diagnostics and the examples table of [Error paths](#error-paths); `Error::UnknownKey` and `Error::unknown_key`; the public `table_path` module and its functions, with a manual implementation example; the `ConfigScope` and `ConfigTable` behavioral documentation; the derive documentation in `conferencier-derive` and the crate-level attribute list.
 - CHANGELOG: *Added* entries for the attribute and public path helpers, **Breaking** entries under *Changed* for P1–P4, and extend the shared 0.0.4-to-0.0.5 migration table with the error-field and diagnostic-format changes, including U+0080–U+009F escaping, rather than creating a separate migration guide.
 - BACKLOG: the entry moves to *Done*; the list of planned work for 0.0.5 drops it.

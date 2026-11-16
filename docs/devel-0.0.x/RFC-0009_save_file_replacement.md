@@ -9,10 +9,10 @@ Related: [RFC-0010](./RFC-0010_save_file_permissions.md)
 
 ## Document Scope
 
-This RFC reviews the complete [`ConfigStore::save_file`](../conferencier/src/store.rs)
+This RFC reviews the complete [`ConfigStore::save_file`](../../conferencier/src/store.rs)
 protocol: capturing a snapshot, preparing a temporary file, publishing it,
 handling failures and cancellation, and documenting its limits. It originated
-in the [replacement fallback debt](./BACKLOG.md#technical-debt), but is not
+in the [replacement fallback debt](../BACKLOG.md#technical-debt), but is not
 limited to that fallback.
 
 The proposed direction is to prepare a complete file in the target directory

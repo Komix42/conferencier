@@ -1,4 +1,3 @@
-use conferencier::ConfigTable;
 use conferencier_derive::{ConfigScope, ConfigTable};
 
 #[allow(dead_code)]
@@ -81,7 +80,7 @@ struct App {
 }
 
 fn main() {
-    fn assert_table<T: ConfigTable>() {}
+    fn assert_table<T: conferencier::ConfigTable>() {}
     assert_table::<Endpoint>();
     assert_table::<Shared>();
 }

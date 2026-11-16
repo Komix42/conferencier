@@ -7,7 +7,7 @@ description = "Minimal, typed TOML configuration for Tokio applications"
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-readme = "README.md"
+readme = "../README.md"
 keywords = ["configuration", "toml", "async", "tokio", "derive"]
 categories = ["config", "asynchronous", "data-structures"]
 

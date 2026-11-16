@@ -70,21 +70,15 @@ use crate::value_conversion;
 /// The document is guarded by a [`std::sync::RwLock`]. The lock is held only for the
 /// operation on the in-memory document: never across an `.await`, never during file I/O
 /// and never while user code runs, and the store hands out no guards. Calling the store
-/// again, also from another task, therefore cannot deadlock on it. If a panic ever poisons
-/// the lock, later calls continue with the data, which every write leaves consistent.
-///
-/// The design assumes relatively small documents and low contention, in line with
-/// [Tokio's guidance on synchronous locks](https://tokio.rs/tokio/tutorial/shared-state#on-using-stdsyncmutex-and-tokiosyncmutex).
-/// Work under the lock is not constant-time: cloning a section and serializing the document
-/// scale with their contents, and a contended acquisition blocks the worker thread. Unlike
-/// Tokio's `RwLock`, the standard lock gives no reader/writer priority guarantee; its policy
-/// depends on the platform. Should real workloads exceed these assumptions, the
-/// implementation and possibly the API have to be reevaluated based on measurements:
-/// switching to an async lock would not be a transparent backend change, because acquiring
-/// it has to be awaited and it would not offload the CPU work of serialization.
+/// again, also from another task, therefore cannot deadlock on it. A contended acquisition
+/// blocks the worker thread, and the lock gives no reader/writer priority guarantee. If a
+/// panic ever poisons the lock, later calls continue with the data, which every write
+/// leaves consistent.
 ///
 /// Individual calls are synchronized, not sequences of calls: a read followed by
 /// a write is not a transaction, and another task may change the document between them.
+/// The [guide](https://docs.rs/conferencier/latest/conferencier/guide/concepts/index.html#locking)
+/// explains the design assumptions behind this lock.
 #[derive(Clone, Debug, Default)]
 pub struct ConfigStore {
     table: Arc<RwLock<Table>>,
@@ -115,29 +109,9 @@ impl ConfigStore {
     /// Reads a TOML file asynchronously and builds a store from it.
     ///
     /// A failed read returns [`Error::Io`] carrying `path`.
-    /// This uses [`tokio::fs`] and must run within a Tokio runtime.
-    ///
-    /// There is no blocking variant. Code that reads the configuration before the Tokio
-    /// runtime starts can combine [`std::fs::read_to_string`] with
-    /// [`from_str`](Self::from_str):
-    /// `ConfigStore::from_str(&std::fs::read_to_string(path)?)?`.
-    /// The standard library's error does not carry the path;
-    /// attach it through [`Error::Io`] if needed:
-    ///
-    /// ```no_run
-    /// use conferencier::{ConfigStore, Error};
-    ///
-    /// # fn main() -> conferencier::Result<()> {
-    /// let path = std::path::Path::new("config.toml");
-    /// let source = std::fs::read_to_string(path).map_err(|source| Error::Io {
-    ///     path: Some(path.to_path_buf()),
-    ///     source,
-    /// })?;
-    /// let store = ConfigStore::from_str(&source)?;
-    /// # let _ = store;
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// This uses [`tokio::fs`] and must run within a Tokio runtime. There is no
+    /// blocking variant; the [guide](https://docs.rs/conferencier/latest/conferencier/guide/concepts/index.html#reading-a-file-before-the-runtime-starts)
+    /// shows how to read a file before the runtime starts.
     ///
     /// # Errors
     ///
@@ -192,77 +166,34 @@ impl ConfigStore {
         toml::to_string(&*self.read()).map_err(Error::from)
     }
 
-    /// Writes a serialized snapshot of the document using a temporary sibling file.
+    /// Writes a serialized snapshot of the document to the file at `path`.
     ///
     /// The document is serialized first; the store lock is not held during file I/O.
-    /// Changes made after serialization are not part of this snapshot. The target
-    /// is replaced rather than edited, so comments and formatting are lost as with
+    /// Changes made after serialization are not part of this snapshot. The snapshot is
+    /// written to a temporary file next to the target, which then replaces the target
+    /// with a single rename, so comments and formatting are lost as with
     /// [`save_str`](Self::save_str). Parent directories are not created.
     ///
-    /// # Write coordination and replacement
+    /// Concurrent calls to the same target, including calls through cloned handles,
+    /// each install one complete snapshot; which call wins is unspecified. Replacement
+    /// is atomic only where the filesystem provides atomic rename, a failed rename is
+    /// not retried, and crash durability is not promised.
     ///
-    /// Every call writes its own temporary sibling named
-    /// `.conferencier.<process id>.<counter>.tmp`, independent of the target filename,
-    /// so long target names remain usable. Concurrent calls to the same target, including
-    /// calls through cloned handles, never share a temporary file: each successful call
-    /// installs one complete snapshot. Which of several concurrent calls wins is
-    /// unspecified; an application that needs an order serializes its own saves.
+    /// Dropping the returned future does not cancel a save whose file operations have
+    /// started: it can still replace the target. A relative `path` depends on the
+    /// current directory until those operations finish.
     ///
-    /// Replacement uses a single rename; the target is never explicitly removed
-    /// to retry a failed rename. On filesystems that provide atomic replacement,
-    /// readers opening the target see either the old or the complete new file.
-    /// A rename error does not guarantee that the target was unchanged: its final
-    /// state depends on the operating system and filesystem. On Windows, sharing
-    /// conflicts can cause rename to fail; no automatic retry is performed. This
-    /// method does not promise crash durability. Cleanup is attempted when a write
-    /// or rename fails, but a crash or cleanup failure can leave the temporary file
-    /// behind.
+    /// Only a missing target or a regular file is accepted: a final-component symlink,
+    /// a directory, another non-regular file or a Windows reparse point is rejected,
+    /// while links in parent directories are allowed. Names beginning with
+    /// `.conferencier.` are reserved for temporary files and must not be used as
+    /// targets. On Unix, an existing target's `rwx` mode bits are preserved;
+    /// ownership, ACLs, Windows access settings and other metadata are not.
     ///
-    /// # Targets and permissions
-    ///
-    /// Before creating the temporary file, the final path component is inspected
-    /// with [`std::fs::symlink_metadata`]. Only a missing target or a regular file
-    /// is accepted. Final-component symlinks (including dangling links), directories,
-    /// other non-regular files and all Windows reparse points are rejected. This
-    /// includes regular-looking cloud placeholders carrying the reparse attribute.
-    /// Parent-directory symlinks and junctions are allowed; the path is not
-    /// canonicalized. For example, `config-link.toml` pointing to a file is rejected,
-    /// but `directory-link/config.toml` may be saved through a linked parent.
-    /// [`load_file`](Self::load_file) can still follow a final-component symlink.
-    /// To save to a referent, explicitly resolve and pass its path.
-    ///
-    /// On Unix, an existing target's observed owner/group/other `rwx` bits (`0o777`)
-    /// are requested at temporary-file creation and set exactly through its open
-    /// handle before any data is written. Special mode bits are not preserved.
-    /// A read-only mode does not itself prevent replacement: saving needs suitable
-    /// access to the containing directory, not write access to the target alone.
-    /// A new target uses normal creation policy. On Windows, no access settings
-    /// are copied; creation policy and rename behavior determine the result.
-    /// A regular Windows read-only target is accepted, but publication may fail;
-    /// its read-only attribute is not cleared or otherwise preserved.
-    ///
-    /// Preserving Unix mode bits does not preserve effective access. The new owner
-    /// and group follow creation policy; for example, saving a user's `0600` file as
-    /// root can make it unreadable by that user. Unix extended ACLs are not copied:
-    /// inherited directory ACLs can grant a named user access to a new `0640` file
-    /// that the old `0640` file denied. Windows DACLs, owner, SACL and file attributes
-    /// are not copied, so access can become broader. Extended attributes, alternate
-    /// data streams, security labels and timestamps are not preserved either.
-    /// A system-assigned security label can change access or deny it.
-    ///
-    /// For a private new Unix file, pre-create it with `create_new` and
-    /// `std::os::unix::fs::OpenOptionsExt::mode` set to `0o600`; the umask can narrow
-    /// that request. Later saves preserve its observed mode bits. On Linux the
-    /// requested mode also constrains the inherited POSIX ACL mask; on systems
-    /// with ACLs independent of mode bits, such as macOS, review inherited ACLs
-    /// separately. On Windows, private files require suitable directory permissions.
-    /// See the README for a complete pre-creation example.
-    ///
-    /// Metadata is observed once, not atomically with publication. Another actor
-    /// can change the target or its permissions after inspection. Regular files
-    /// with multiple hard links are accepted, but replacement changes only the
-    /// supplied name: other hard-link names and already-open handles keep the old
-    /// file's contents and permissions.
+    /// The [guide](https://docs.rs/conferencier/latest/conferencier/guide/files/index.html)
+    /// describes the replacement, cancellation, temporary files with all reserved
+    /// names, accepted targets and preserved permissions in detail, including how to
+    /// create a private configuration file.
     ///
     /// # Errors
     ///

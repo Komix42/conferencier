@@ -45,7 +45,7 @@ struct FeatureToggles {
     #[confer(default = true)]
     realtime_metrics: bool,
 
-    /// Optional list of beta features – omitted when empty.
+    /// Optional list of beta features – omitted when `None`.
     #[confer(rename = "beta")]
     beta_features: Option<Vec<String>>,
 
