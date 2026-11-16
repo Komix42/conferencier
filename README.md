@@ -59,7 +59,7 @@ or to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-conferencier = "0.0.7"
+conferencier = "0.0.8"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
