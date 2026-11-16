@@ -117,3 +117,102 @@ pub async fn reload(
     MonitorConfig::load(monitor, store).await?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use conferencier::Error;
+
+    use super::*;
+
+    const BUNDLED: &str = include_str!("../config/monitor.toml");
+
+    fn monitor_from(source: &str) -> conferencier::Result<SharedScope<MonitorConfig>> {
+        MonitorConfig::from_store(&ConfigStore::from_str(source)?)
+    }
+
+    async fn validate_source(source: &str) -> Result<(), String> {
+        validate(&*monitor_from(source).unwrap().read().await)
+    }
+
+    #[tokio::test]
+    async fn bundled_configuration_loads_and_validates() {
+        let store = ConfigStore::from_str(BUNDLED).unwrap();
+        let http = HttpConfig::from_store(&store).unwrap();
+        let monitor = MonitorConfig::from_store(&store).unwrap();
+        assert_eq!(http.read().await.port, 8080);
+        let monitor = monitor.read().await;
+        validate(&monitor).unwrap();
+        assert!(!monitor.targets.is_empty());
+    }
+
+    #[tokio::test]
+    async fn validate_rejects_application_rule_violations() {
+        let target = "[[Monitor.targets]]\nname = \"a\"\naddress = \"127.0.0.1:1\"\n";
+
+        let zero_interval = format!("[Monitor]\ninterval_secs = 0\n{target}");
+        let error = validate_source(&zero_interval).await.unwrap_err();
+        assert!(error.contains("interval_secs"), "{error}");
+
+        let duplicate = format!("[Monitor]\n{target}{target}");
+        let error = validate_source(&duplicate).await.unwrap_err();
+        assert!(error.contains("duplicate target name"), "{error}");
+
+        let empty_name = "[Monitor]\n[[Monitor.targets]]\nname = \" \"\naddress = \"x:1\"\n";
+        let error = validate_source(empty_name).await.unwrap_err();
+        assert!(error.contains("targets[0].name"), "{error}");
+    }
+
+    #[test]
+    fn misspelled_target_key_is_rejected() {
+        let source = "[Monitor]\n[[Monitor.targets]]\nname = \"a\"\nadress = \"x:1\"\n";
+        match monitor_from(source) {
+            Err(Error::UnknownKey { key, .. }) => assert_eq!(key, "adress"),
+            Err(other) => panic!("unexpected error: {other}"),
+            Ok(_) => panic!("a misspelled key was accepted"),
+        }
+    }
+
+    #[tokio::test]
+    async fn reload_applies_valid_source_and_keeps_runtime_state() {
+        let store = ConfigStore::from_str(BUNDLED).unwrap();
+        let http = HttpConfig::from_store(&store).unwrap();
+        let monitor = MonitorConfig::from_store(&store).unwrap();
+        http.write().await.requests_served = 7;
+
+        let source = "[Http]\nport = 9090\n[Monitor]\ninterval_secs = 3\ntargets = []\n";
+        reload(&store, &http, &monitor, source).await.unwrap();
+
+        let http = http.read().await;
+        assert_eq!((http.port, http.requests_served), (9090, 7));
+        let monitor = monitor.read().await;
+        assert_eq!(monitor.interval_secs, 3);
+        assert!(monitor.targets.is_empty());
+    }
+
+    #[tokio::test]
+    async fn failed_reload_leaves_store_and_scopes_unchanged() {
+        let store = ConfigStore::from_str(BUNDLED).unwrap();
+        let http = HttpConfig::from_store(&store).unwrap();
+        let monitor = MonitorConfig::from_store(&store).unwrap();
+        let before = store.save_str().unwrap();
+
+        let invalid = [
+            "[Monitor\n",                                          // TOML syntax
+            "[Http]\nport = 70000\n[Monitor]\ntargets = []\n",     // type range
+            "[Monitor]\nintervl = 3\ntargets = []\n",              // unknown key
+            "[Monitor]\ninterval_secs = 0\ntargets = []\n",        // application rule
+            "[Http]\nport = 9090\n[Monitor]\ninterval_secs = 3\n", // missing targets
+        ];
+        for source in invalid {
+            assert!(
+                reload(&store, &http, &monitor, source).await.is_err(),
+                "{source}"
+            );
+            assert_eq!(store.save_str().unwrap(), before, "{source}");
+            assert_eq!(http.read().await.port, 8080, "{source}");
+            let monitor = monitor.read().await;
+            assert_eq!(monitor.interval_secs, 10, "{source}");
+            assert_eq!(monitor.targets.len(), 2, "{source}");
+        }
+    }
+}
