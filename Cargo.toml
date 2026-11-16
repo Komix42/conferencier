@@ -1,5 +1,5 @@
 [workspace]
-members = ["conferencier", "conferencier-derive"]
+members = ["conferencier", "conferencier-derive", "readme-tests"]
 default-members = ["conferencier"]
 resolver = "3"
 

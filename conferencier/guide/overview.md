@@ -6,6 +6,8 @@ A **scope** is one component's configuration and runtime state, shared through a
 
 The crate does this one job and deliberately stays small instead of becoming a general-purpose configuration framework (see [Scope](#scope)).
 
+The [guide](crate::guide) explains how the parts work together.
+
 ## Highlights
 
 - **Typed scopes.** `#[derive(ConfigScope)]` maps a struct to one top-level TOML section, with defaults, optional values, renamed keys and runtime-only fields.

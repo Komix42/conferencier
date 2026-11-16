@@ -1,4 +1,4 @@
-#![cfg_attr(feature = "derive", doc = include_str!("../README.md"))]
+#![cfg_attr(feature = "derive", doc = include_str!("../guide/overview.md"))]
 #![cfg_attr(
     not(feature = "derive"),
     doc = r#"A minimal, single-purpose TOML configuration library for Tokio applications.
@@ -22,6 +22,8 @@ Enable the default `derive` feature for `#[derive(ConfigScope)]`,
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 mod error;
+#[cfg(feature = "derive")]
+pub mod guide;
 mod scope;
 mod store;
 mod table;
