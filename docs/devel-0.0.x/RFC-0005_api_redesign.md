@@ -16,7 +16,7 @@ It amends the following parts of earlier RFCs, whose text stays unchanged (see [
 - [RFC-0003](./RFC-0003_field_attributes.md): the name `from_confer`, in particular in [A5](./RFC-0003_field_attributes.md#field-attributes);
 - [RFC-0004](./RFC-0004_nested_tables.md): the names of [the `ConferTable` trait](./RFC-0004_nested_tables.md#the-confertable-trait) and its derive, the [store addition `set_section_table`](./RFC-0004_nested_tables.md#store-addition-set_section_table) and the trait signatures in [Changes to `ConferModule`](./RFC-0004_nested_tables.md#changes-to-confermodule).
 
-The proposal starts from the [Public API redesign](./BACKLOG.md#technical-debt) entry of the backlog. The planned RFC-0006 (strict mode for unknown keys) and RFC-0007 (expressions in `default`) use the names from this RFC and are implemented after it, in the same release. Decisions made while drafting and reviewing are recorded in [Resolved questions](#resolved-questions).
+The proposal starts from the [Public API redesign](../BACKLOG.md#technical-debt) entry of the backlog. The planned RFC-0006 (strict mode for unknown keys) and RFC-0007 (expressions in `default`) use the names from this RFC and are implemented after it, in the same release. Decisions made while drafting and reviewing are recorded in [Resolved questions](#resolved-questions).
 
 ## Synopsis
 
@@ -130,7 +130,7 @@ Goals:
 
 Non-goals:
 
-- New features. Strict mode and expressions in `default` get their own RFCs; other ideas stay in the [backlog](./BACKLOG.md).
+- New features. Strict mode and expressions in `default` get their own RFCs; other ideas stay in the [backlog](../BACKLOG.md).
 - Deprecated aliases or a compatibility layer for the old API (see [Alternatives considered](#alternatives-considered), item 6). N7's temporary diagnostic does not preserve the old naming rule.
 - Changes to the `#[confer(...)]` attribute and its arguments.
 
@@ -297,7 +297,7 @@ The exact wording is fixed by the `trybuild` snapshots.
 ## Out of scope
 
 - Strict mode for unknown keys (RFC-0006) and expressions in `default` (RFC-0007), planned for the same release.
-- The other ideas in the [backlog](./BACKLOG.md), such as path-based getters or structured error paths.
+- The other ideas in the [backlog](../BACKLOG.md), such as path-based getters or structured error paths.
 - New store capabilities, such as a method that copies a store, or blocking file I/O (a blocking constructor or blocking variants of `load_file` and `save_file`).
 - The unused `serde` dependency, which is listed in the backlog as technical debt and is removed separately.
 - The `save_file` race on its fixed-name temporary file, a pre-existing bug listed in the backlog as technical debt. Its fix changes no API and is scheduled independently of this RFC.

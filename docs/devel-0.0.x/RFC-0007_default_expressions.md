@@ -24,7 +24,7 @@ It amends the following parts of earlier RFCs, whose text stays unchanged (see [
 - [RFC-0003](./RFC-0003_field_attributes.md): [A3](./RFC-0003_field_attributes.md#field-attributes), which kept `default` a literal checked against the field type, and the out-of-scope note on the literal forms accepted by `default`;
 - [RFC-0004](./RFC-0004_nested_tables.md): the prohibition of `table` + `default` in [The `table` field attribute](./RFC-0004_nested_tables.md#the-table-field-attribute), the columns *Key absent on load* and *Save* of [Supported field shapes](./RFC-0004_nested_tables.md#supported-field-shapes) with their rationale, and alternative 7.
 
-The proposal starts from the [Expressions in `default`](./BACKLOG.md#derive-attributes-and-field-types) entry of the backlog. It assumes the API redesign of [RFC-0005](./RFC-0005_api_redesign.md) (`ConfigScope`, `ConfigTable`, `ConfigStore`, `Error`), which ships in the same release; the published 0.0.4 documentation still uses the old names. Decisions made while drafting and after review are recorded in [Resolved questions](#resolved-questions).
+The proposal starts from the [Expressions in `default`](../BACKLOG.md#derive-attributes-and-field-types) entry of the backlog. It assumes the API redesign of [RFC-0005](./RFC-0005_api_redesign.md) (`ConfigScope`, `ConfigTable`, `ConfigStore`, `Error`), which ships in the same release; the published 0.0.4 documentation still uses the old names. Decisions made while drafting and after review are recorded in [Resolved questions](#resolved-questions).
 
 ## Synopsis
 
@@ -244,7 +244,7 @@ The derive's own messages for literals are removed: `expected string literal` (a
 
 ## Out of scope
 
-- A macro that parses a datetime at compile time, e.g. `conferencier::datetime!("2024-01-01T00:00:00Z")`, recorded in the [backlog](./BACKLOG.md#derive-attributes-and-field-types). It can be added later without breaking changes.
+- A macro that parses a datetime at compile time, e.g. `conferencier::datetime!("2024-01-01T00:00:00Z")`, recorded in the [backlog](../BACKLOG.md#derive-attributes-and-field-types). It can be added later without breaking changes.
 - Generating a `Default` implementation from the `confer` attributes of a struct (M4), recorded in the backlog.
 - Omitting values equal to their default on save.
 - `Option<Vec<T>>` table fields (still postponed by [RFC-0004](./RFC-0004_nested_tables.md)).

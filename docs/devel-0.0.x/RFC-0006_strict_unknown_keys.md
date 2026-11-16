@@ -16,7 +16,7 @@ The RFC also proposes public diagnostic-path helpers for manual `ConfigScope` an
 
 It amends the following parts of [RFC-0004](./RFC-0004_nested_tables.md), whose text stays unchanged: E1 (the section name verbatim as the root of a path), E2 and E4 (the final key displayed without quoting, the path held in `section`), and the `<section>` key of R5 and of `set_section_table`.
 
-The proposal starts from the [Strict mode for unknown keys](./BACKLOG.md#derive-attributes-and-field-types) entry of the backlog, first listed as future work in [RFC-0004](./RFC-0004_nested_tables.md#out-of-scope--future-work). It assumes the API redesign of [RFC-0005](./RFC-0005_api_redesign.md) (`ConfigScope`, `ConfigTable`, `ConfigStore`, `Error`) and the `default` expressions of [RFC-0007](./RFC-0007_default_expressions.md), which ship in the same release; the published 0.0.4 documentation still uses the old names. Decisions made while drafting and after review are recorded in [Resolved questions](#resolved-questions).
+The proposal starts from the [Strict mode for unknown keys](../BACKLOG.md#derive-attributes-and-field-types) entry of the backlog, first listed as future work in [RFC-0004](./RFC-0004_nested_tables.md#out-of-scope--future-work). It assumes the API redesign of [RFC-0005](./RFC-0005_api_redesign.md) (`ConfigScope`, `ConfigTable`, `ConfigStore`, `Error`) and the `default` expressions of [RFC-0007](./RFC-0007_default_expressions.md), which ship in the same release; the published 0.0.4 documentation still uses the old names. Decisions made while drafting and after review are recorded in [Resolved questions](#resolved-questions).
 
 ## Synopsis
 
@@ -230,8 +230,8 @@ The existing message for unsupported struct attributes is unchanged.
 
 - Unknown top-level sections. A later store-level check could take a list of known sections, for example from the scopes registered by the application.
 - Suggestions of similar keys in the error message.
-- A structured path (item 6); recorded in the [backlog](./BACKLOG.md#store-and-errors).
-- `#[confer(flatten)]` and other ideas that would change the set of known keys; they are listed in the [backlog](./BACKLOG.md).
+- A structured path (item 6); recorded in the [backlog](../BACKLOG.md#store-and-errors).
+- `#[confer(flatten)]` and other ideas that would change the set of known keys; they are listed in the [backlog](../BACKLOG.md).
 
 ## Testing
 

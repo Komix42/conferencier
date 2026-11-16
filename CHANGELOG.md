@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+- Moved the design records (RFCs and implementation reports) of the 0.0.x releases from `docs/` to [`docs/devel-0.0.x/`](docs/devel-0.0.x/).
+
 ## [0.0.6] - 2026-11-15
 
 ### Added

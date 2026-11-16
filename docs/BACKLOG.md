@@ -12,7 +12,7 @@ Focus on presenting the existing library, not new configuration features:
 
 1. **Redesign the user documentation.** Rewrite and reorganize the READMEs and supporting documentation.
 
-No RFCs will be written for 0.0.7. The item is described under [Documentation](#documentation). 
+No RFCs will be written for 0.0.7. The item is described under [Documentation](#documentation).
 
 ## Technical debt
 
@@ -51,7 +51,7 @@ The README's [Scope](../README.md#scope) lists these as intentionally left out. 
 
 ### Documentation
 
-- **Redesign the user documentation.** The README has accumulated attribute details, migration notes, edge cases and operational guidance, making it harder to understand the crate at a glance. Direction: rewrite the introduction and quick start as a clear showcase of the crate's purpose and typical use; split detailed reference material and migration guidance into appropriate documentation, keeping important limitations discoverable through links. Move the existing files in `docs/`, except `BACKLOG.md`, to `docs/devel-0.0.x/`, preserving historical records and updating links. Keep the root and crate READMEs aligned, preserve runnable examples and doctest coverage, and keep the documentation usable on GitHub, crates.io and docs.rs; review the derive crate's README for its distinct audience too. The detailed structure will be decided separately. Origin: the post-0.0.5 planning discussion.
+- **Redesign the user documentation.** The README has accumulated attribute details, migration notes, edge cases and operational guidance, making it harder to understand the crate at a glance. Direction: rewrite the introduction and quick start as a clear showcase of the crate's purpose and typical use; split detailed reference material and migration guidance into appropriate documentation, keeping important limitations discoverable through links. Move the design records (RFCs and implementation reports) in `docs/` to `docs/devel-0.0.x/`, preserving historical records and updating links. Keep the root and crate READMEs aligned, preserve runnable examples and doctest coverage, and keep the documentation usable on GitHub, crates.io and docs.rs; review the derive crate's README for its distinct audience too. The detailed structure will be decided separately. Origin: the post-0.0.5 planning discussion.
 
 ### Examples
 
