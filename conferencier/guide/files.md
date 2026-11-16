@@ -3,7 +3,7 @@ Conferencier is primarily meant for reading configuration. Saving works, but it 
 - `ConfigStore::save_str` and `ConfigStore::save_file` regenerate the whole document from the stored values. Comments are lost, keys may be reordered, inline tables become `[section.table]` headers, and values are written in canonical notation (for example `0x1F90` becomes `8080` and `'text'` becomes `"text"`).
 - A scope's `save` owns its section, including all tables nested in it: it removes every key and sub-table that is not mapped to a non-ignored field, at any depth (also inside tables mapped with `#[confer(table)]`). In lenient mode, a misspelled key such as `prot = 9090` is ignored on load (`port` falls back to its default) and deleted by the next save. A strict type rejects it on load, but save still replaces the section without rechecking. Other sections are not changed; keep data that no scope owns in a separate section.
 - A computed default is saved like any other loaded value; later loads read that value instead of recomputing it. Use an `Option` with an application-level fallback if the value should stay dynamic after saving.
-- A well-typed default does not necessarily round-trip: a non-finite `f32` such as `f32::NAN` can be saved but is rejected on load.
+- A well-typed default does not necessarily round-trip; see [value conversion](crate::guide::derive#value-conversion) for the `f32` limitation.
 
 If people edit the configuration file by hand, prefer to only load it, and use saving mainly to generate an initial configuration file.
 

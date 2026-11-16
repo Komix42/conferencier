@@ -84,7 +84,8 @@ pub trait ConfigTable: Sized {
     ///
     /// Returns [`Error::MissingKey`](crate::Error::MissingKey),
     /// [`Error::TypeMismatch`](crate::Error::TypeMismatch) or
-    /// [`Error::ValueParse`](crate::Error::ValueParse) for invalid fields.
+    /// [`Error::ValueParse`](crate::Error::ValueParse) for invalid fields, or
+    /// [`Error::UnknownKey`](crate::Error::UnknownKey) for an unknown key in a strict table.
     /// A manual implementation may return other errors as appropriate.
     fn from_table(path: &str, table: Table) -> Result<Self>;
 

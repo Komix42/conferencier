@@ -40,6 +40,29 @@ cargo publish --workspace --dry-run --locked
   temporary `CARGO_HOME`.
 - When CI changes, update this list.
 
+### Packaged doctests
+
+CI also tests the guide doctests from the packaged crate, outside the workspace.
+On Linux (including WSL), run the following from the repository root after the
+publish dry run; this requires `jq` and `tar`:
+
+```sh
+(
+  set -eu
+  version=$(cargo metadata --no-deps --format-version 1 --locked | jq -er '.packages[] | select(.name == "conferencier") | .version')
+  dir=$(mktemp -d)
+  printf 'Package directory: %s\n' "$dir"
+  cargo package -p conferencier -p conferencier-derive --no-verify --locked
+  tar -xzf "target/package/conferencier-$version.crate" -C "$dir"
+  tar -xzf "target/package/conferencier-derive-$version.crate" -C "$dir"
+  cd "$dir/conferencier-$version"
+  cargo test --doc --all-features --config "patch.crates-io.conferencier-derive.path='$dir/conferencier-derive-$version'"
+)
+```
+
+The local derive patch changes the packaged lockfile, so this test cannot use
+`--locked`. The temporary directory can be removed after the test.
+
 ## Windows
 
 Run the commands in PowerShell in the Windows checkout. Unix-only tests, such

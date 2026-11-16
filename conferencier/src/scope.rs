@@ -164,7 +164,7 @@ pub trait ConfigScope: Send + Sync + Sized + 'static {
     /// With loaded fields, the derived implementation takes a read lock of `scope`,
     /// converts them into a new table, releases the scope lock and replaces the store section
     /// in one write. Readers never observe a partially saved section. Other sections
-    /// are unchanged; unknown keys and nested tables in the owned section are removed.
+    /// are unchanged; unknown keys and unmapped nested tables in the owned section are removed.
     /// Ignored fields are not written. A scope with only ignored fields saves an
     /// empty section without locking `scope`.
     ///

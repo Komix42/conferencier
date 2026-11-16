@@ -24,4 +24,4 @@ proc-macro-crate = "3"
 trybuild = "1.0"
 # Path-only on purpose: a versioned dev-dependency would create a publish cycle
 # with `conferencier`, which itself depends on this crate.
-conferencier = { path = "../conferencier", default-features = false }
+conferencier = { path = "../conferencier" }

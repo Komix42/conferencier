@@ -42,8 +42,7 @@ use crate::model::DeriveKind;
 /// # Example
 ///
 /// ```
-/// use conferencier::{ConfigScope as _, ConfigStore};
-/// use conferencier_derive::ConfigScope;
+/// use conferencier::{ConfigScope, ConfigStore};
 ///
 /// #[derive(ConfigScope)]
 /// #[confer(section = "App")]
@@ -83,9 +82,8 @@ pub fn scope_derive(input: TokenStream) -> TokenStream {
 /// # Example
 ///
 /// ```
-/// use conferencier::{ConfigTable as _, Error};
+/// use conferencier::{ConfigTable, Error};
 /// use conferencier::toml::Table;
-/// use conferencier_derive::ConfigTable;
 ///
 /// #[derive(ConfigTable)]
 /// struct Server {

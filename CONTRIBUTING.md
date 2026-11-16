@@ -25,7 +25,7 @@ Thanks for your interest in improving **conferencier**! This quick guide explain
    cargo doc --workspace --no-deps
    ```
 
-   CI runs the same checks on Linux, Windows and macOS, checks the minimum supported Rust version and treats rustdoc warnings as errors (set `RUSTDOCFLAGS=-D warnings` to do the same locally). It also runs the doctests of the packaged `conferencier` crate, outside the workspace, because `cargo publish --dry-run` does not run them.
+   CI runs tests on Linux, Windows and macOS, and runs formatting, lint and documentation checks on Linux. It also checks the minimum supported Rust version and treats rustdoc warnings as errors (set `RUSTDOCFLAGS=-D warnings` to do the same locally). CI runs the doctests of the packaged `conferencier` crate outside the workspace, because `cargo publish --dry-run` does not run them.
 
 4. **Document your changes** by updating `CHANGELOG.md`, the [guide](#documentation) and rustdoc comments or examples when appropriate.
 5. **Open a pull request** against the `develop` branch with a clear description of the change, including any follow-up work or known limitations.

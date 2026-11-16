@@ -7,6 +7,10 @@ The `#[derive(ConfigScope)]` macro understands a small set of field/struct attri
 
 Strictness checks only the section or table being loaded. For example, a strict scope for `[App]` does not reject a misspelled top-level `[Ap]` section; a missing `[App]` is treated as empty and may load if its fields have defaults. Strictness is checked on load, not save; saving still replaces the scope's section and removes keys that do not map to loaded fields.
 
+A load stops at the first error. A strict scope first reports a section that is not a table, then checks the section for unknown keys, then converts fields in declaration order. Nested tables are checked and converted depth-first when their field is reached. A misspelled required key is therefore reported as `unknown key App.prot` rather than `missing key App.port`, but an error in an earlier nested table can precede an error in a later outer field. If several keys are unknown, the smallest in byte-wise order is reported (alphabetical for ASCII), regardless of their order in the TOML document.
+
+To detect a misspelled section name, an application can compare the table-backed names returned by [`ConfigStore::list_sections`](crate::ConfigStore::list_sections) with the section names it expects. This does not report top-level scalar or array entries.
+
 Every field is either loaded from TOML or ignored by the configuration file.
 
 **Loaded fields** (the default) are read from and written to a TOML key:
@@ -24,6 +28,8 @@ Every field is either loaded from TOML or ignored by the configuration file.
 - `#[confer(table, field_defaults)]` loads a missing single table from an empty table, applying its fields' defaults and reporting any required inner key. The table type need not implement `Default`. It may be combined with `rename`, but not with `default`, `ignore`, `Option<T>` or `Vec<T>`.
 
 For every loaded field, a missing key uses its explicit `default` or `field_defaults`, otherwise `None` for a syntactically recognized `Option`, or else `Error::MissingKey`.
+
+On save, an `Option<T>` or `Option<Vec<T>>` set to `None` is omitted from the new table; `Some(value)` is written. In particular, `Some(vec![])` writes an empty array, not an absent key.
 
 **Ignored fields** are never read from or written to TOML. They have no key, so they are not checked for key collisions. Use them for runtime-only state (see [Configuration and runtime state](crate::guide::concepts#configuration-and-runtime-state)) or for types the derive does not support (e.g., maps):
 
@@ -45,6 +51,17 @@ Both expression forms use a synchronous closure returning the field's type. They
 
 If a type falls outside this set, the derive emits a compile error with a friendly message.
 Type aliases are opaque: scalar aliases are unsupported, and table aliases are treated as single table types that must implement `ConfigTable`, even if they name an `Option`.
+
+## Value conversion
+
+These rules apply to loaded scalar fields and their vector elements, both in scopes and in derived tables:
+
+- Integer fields accept TOML integers, which are signed 64-bit values. Loading checks the range of the Rust field type; saving a `u64` or `usize` greater than `i64::MAX` returns an error.
+- Float fields accept TOML floats and integers, but integer-to-float conversion and conversion to `f32` can lose precision. Loading `f32` rejects non-finite values and values outside its range; `f64` accepts non-finite values.
+- `Datetime` accepts a TOML date, time or datetime, or a string parsed as a TOML datetime. Other strings are not coerced into numbers or booleans.
+- A vector requires an array with compatible elements. A conversion error identifies the zero-based index of the failing element.
+
+Saving a non-finite `f32` is allowed, but that value cannot be loaded back into an `f32` field.
 
 ## TOML compatibility
 
