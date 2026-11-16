@@ -2,9 +2,17 @@
 
 Known technical debt and ideas for future versions of conferencier.
 
-Unlike the RFCs and implementation reports in this folder, this is a living document: entries are added, changed and removed as the project evolves. An entry is not a commitment. An idea that is taken up gets its own RFC and its entry links to it. Once an entry is done, because its RFC is implemented or the technical debt is fixed, it is replaced by a one-line note under [Done](#done) with the version that resolved it; changes that affect users are also recorded in the [changelog](../CHANGELOG.md).
+Unlike the RFCs and implementation reports in this folder, this is a living document: entries are added, changed and removed as the project evolves. An entry is not a commitment. An idea that is taken up gets its own RFC and its entry links to it, unless the release plan explicitly says otherwise. Once an entry is done, it is replaced by a one-line note under [Done](#done) with the version that resolved it; changes that affect users are also recorded in the [changelog](../CHANGELOG.md).
 
 Each entry states the problem, a possible direction and where it comes from.
+
+## Planned for 0.0.7
+
+Focus on presenting the existing library, not new configuration features:
+
+1. **Redesign the user documentation.** Rewrite and reorganize the READMEs and supporting documentation.
+
+No RFCs will be written for 0.0.7. The item is described under [Documentation](#documentation). 
 
 ## Technical debt
 
@@ -43,11 +51,12 @@ The README's [Scope](../README.md#scope) lists these as intentionally left out. 
 
 ### Documentation
 
-- **Revise the README for 0.1.0.** The README has accumulated attribute details, migration notes, edge cases and operational guidance, making it harder to understand the crate at a glance. Direction: make the introduction and quick start a clear showcase of the crate's purpose and typical use; move detailed reference material and migration guidance to appropriate documentation, keeping important limitations discoverable through links. Keep the root and crate READMEs aligned and preserve runnable examples and doctest coverage; review the derive crate's README for its distinct audience too. Timing: after the 0.0.6 release, for 0.1.0. Origin: the post-0.0.5 planning discussion.
+- **Redesign the user documentation.** The README has accumulated attribute details, migration notes, edge cases and operational guidance, making it harder to understand the crate at a glance. Direction: rewrite the introduction and quick start as a clear showcase of the crate's purpose and typical use; split detailed reference material and migration guidance into appropriate documentation, keeping important limitations discoverable through links. Move the existing files in `docs/`, except `BACKLOG.md`, to `docs/devel-0.0.x/`, preserving historical records and updating links. Keep the root and crate READMEs aligned, preserve runnable examples and doctest coverage, and keep the documentation usable on GitHub, crates.io and docs.rs; review the derive crate's README for its distinct audience too. The detailed structure will be decided separately. Origin: the post-0.0.5 planning discussion.
 
 ### Examples
 
-- An example integrated with an HTTP server, and a command-line workflow for exporting and importing configuration snapshots. Origin: [RFC-0002](./RFC-0002_baseline_examples.md#future-work).
+- **Hyper HTTP server example.** A complete, runnable example configuring a Hyper-based web server and demonstrating several components. Keep Hyper specific to the example, not a runtime dependency of the library. The detailed scenario will be decided separately. Origin: [RFC-0002](./RFC-0002_baseline_examples.md#future-work).
+- **Configuration snapshot workflow.** A command-line workflow for exporting and importing configuration snapshots. Origin: [RFC-0002](./RFC-0002_baseline_examples.md#future-work).
 
 ## Done
 
