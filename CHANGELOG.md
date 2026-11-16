@@ -20,6 +20,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `ConfigStore::save_file` no longer deletes the target and retries when replacement fails with `AlreadyExists`; it returns the error instead.
 - Implemented the public error traits with the standard library, removing the `thiserror` dependency.
 
+See the [migration guide from 0.0.5](conferencier/guide/migration.md#from-005-to-006).
+
 ## [0.0.5] - 2026-11-13
 
 ### Added
@@ -44,60 +46,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 #### Migration from 0.0.4
 
-| 0.0.4 | 0.0.5 |
-| --- | --- |
-| `Confer` | `ConfigStore` |
-| `SharedConfer` (`Arc<Confer>`) | `ConfigStore` |
-| `Confer::new()` | `ConfigStore::new()` |
-| `Confer::from_string(source)?` | `ConfigStore::from_str(source)?` or `source.parse::<ConfigStore>()?` |
-| `Confer::from_file(path)?` (blocking) | `ConfigStore::from_file(path).await?`; outside a runtime `ConfigStore::from_str(&std::fs::read_to_string(path)?)?` |
-| `Confer::from_file_async(path).await?` | `ConfigStore::from_file(path).await?` |
-| `store.get_section_table(section).await` | `store.get_section(section)` |
-| `store.set_section_table(section, table).await?` | `store.set_section(section, table)?` |
-| `store.section_exists(section).await` | `store.has_section(section)` |
-| `store.add_section(section).await?` | `store.ensure_section(section)?` |
-| `store.remove_section(section).await?` | `store.remove_section(section)` — returns `()` |
-| other in-memory methods, e.g. `store.get_integer(section, key).await?` | the same name without `.await`: `store.get_integer(section, key)?` |
-| `store.load_file(path).await?`, `store.save_file(path).await?` | unchanged |
-| `ConferModule` (trait and derive) | `ConfigScope` |
-| `SharedConferModule<T>` | `SharedScope<T>` |
-| `T::from_confer(store.clone()).await?` | `T::from_store(&store)?` |
-| `T::load(&module, store.clone()).await?` | `T::load(&scope, &store).await?` |
-| `T::save(&module, store.clone()).await?` | `T::save(&scope, &store).await?` |
-| `ConferTable` (trait and derive) | `ConfigTable` |
-| `ConferError` | `Error` |
-| `ConferError::value_parse_owned(...)` | `Error::value_parse(...)` |
-| paths through `conferencier::confer_module`, `conferencier::confer_table`, `conferencier::error` | the crate root, e.g. `conferencier::ConfigScope` |
-| feature `with-derive` | feature `derive` |
-| struct `ConferApp` relying on the default section `[App]` | add `#[confer(section = "App")]` to keep it, or add `#[confer(section = "ConferApp")]` and rename the TOML section to `[ConferApp]` |
-| a nested key with U+0080–U+009F reported literally in an error path | the character is reported as `\u0080`–`\u009F` |
-| `Error::MissingKey`, `TypeMismatch` or `ValueParse` with a `section` field | use the `path` field; constructor arguments use the formatted path |
-| a non-table section mismatch using `key == "<section>"` | an empty `path` and the raw section name in `key` |
-| `String` with `default = "localhost"` | `default = "localhost".into()` |
-| `f32` or `f64` with `default = 1` | `default = 1.0` |
-| `Vec<T>` with `default = [1, 2]`, or `default = []` | `default = vec![1, 2]`, or bare `default` |
-| `Vec<String>` with `default = ["a", "b"]` | `default = vec!["a".into(), "b".into()]` |
-| `Datetime` with `default = "2024-01-01T00:00:00Z"` | `default = "2024-01-01T00:00:00Z".parse().unwrap()` |
-| `Vec<Datetime>` with string literals in `default` | parse each string inside `vec![...]` |
-| `Option<T>` or `Option<Vec<T>>` with a `default` | use the inner type and an expression default to preserve the fallback; or keep `Option` and remove `default` to load a missing key as `None` |
-| `#[confer(table)] server: T` relying on an empty-table load | `#[confer(table, field_defaults)]` to preserve it, or use a Rust `default` if that value is intended |
-| `#[confer(table)] upstream: Vec<T>` relying on an empty vector | `#[confer(table, default)]` |
-| `#[confer(table)] server: Option<T>` | unchanged: a missing key is `None` |
-
-Manual scope implementations drop `#[async_trait]`, make `from_store` synchronous, borrow `&ConfigStore`, and keep `async fn load` and `async fn save`. Manual table implementations only need the new names. Existing helper attributes keep the `#[confer(...)]` name. See [RFC-0005](docs/devel-0.0.x/RFC-0005_api_redesign.md) for the full rationale.
-
-Datetime defaults are parsed when needed; an invalid string in an expression using `unwrap()` panics on a missing key instead of failing at compile time.
-
-For a missing single table, choose the intended behavior explicitly:
-
-| Declaration | Missing table |
-| --- | --- |
-| `#[confer(table)] server: T` | `MissingKey` |
-| `#[confer(table, default)] server: T` | Rust `T::default()` |
-| `#[confer(table, field_defaults)] server: T` | decode an empty table, including inner defaults and required-key errors |
-| `#[confer(table)] server: Option<T>` | `None` |
-
-**Table migration warning:** A derived Rust `Default` produces `0` for a `u16` field with `#[confer(default = 8080)]`; a missing table decoded using `field_defaults` produces `8080`. Use `field_defaults` to preserve the old empty-table behavior, or check the `Default` implementation and supply an expression if a different value is intended. Migrate nested table fallbacks recursively.
+See the [migration guide from 0.0.4](conferencier/guide/migration.md#from-004-to-005).
 
 ### Removed
 - The direct `toml` dependency of `conferencier-derive`; generated code and applications can use the `conferencier` re-exports.
@@ -121,16 +70,14 @@ For a missing single table, choose the intended behavior explicitly:
 
 ### Changed
 - **Breaking:** `ConferError` is now `#[non_exhaustive]`, so future releases can add error variants without a breaking change. A `match` on `ConferError` outside this crate needs a wildcard arm (`_ => ...`); constructing variants and matching individual variants work as before.
-- **Breaking:** `#[confer(init = ...)]` was removed and `#[confer(ignore)]` takes an optional initializer: `#[confer(ignore = <expr>)]`. The expression is written directly in the attribute (a plain Rust expression, not a string), so compiler errors point at it. It is evaluated in a closure of its own, so it cannot use `store`, other fields or `.await`; `return` and `?` end the expression, not `from_confer`. A bare `#[confer(ignore)]` still uses `Default::default()`. Ignored fields, bare ones included, are now initialized once, in `from_confer`, after every loaded field has converted successfully, and not at all when `from_confer` fails; side effects of an initializer or of a `Default` implementation can therefore occur later than before, or not at all. Any use of `init`, and `ignore` combined with `default` or `rename`, fails to compile with a migration hint. Migrate as follows:
-    - `#[confer(ignore, init = "Vec::new()")]` → `#[confer(ignore = Vec::new())]` (or plain `#[confer(ignore)]` when the value equals `Default::default()`)
-    - `#[confer(ignore, default = 5)]` → `#[confer(ignore = 5)]`
-    - `#[confer(ignore, rename = "...")]` → `#[confer(ignore)]` (`rename` had no effect on an ignored field)
-    - `#[confer(init = ...)]` on a loaded field → remove it; add `#[confer(default = ...)]` only if a missing key should fall back to a value
+- **Breaking:** `#[confer(init = ...)]` was removed and `#[confer(ignore)]` takes an optional Rust expression initializer. Ignored fields are now initialized once, after loaded fields have converted successfully.
 - The derived `from_confer` builds the module directly from the values read from the store instead of creating a default instance and loading into it, so loaded fields no longer need to implement `Default`.
 - Derived modules load and save whole sections. `from_confer` and `load` convert a single snapshot of the section, and `load` updates the module only if every field converts, so a failing `load` leaves the module unchanged (previously the fields before the failing one were already updated). `save` converts the whole module first and then replaces the section in a single write: readers never observe a half-saved module, and a conversion error such as a `u64` above `i64::MAX` leaves the store unchanged (previously earlier fields were already written). Such conversion errors are reported before a section that is not a table. `load` of a module without loaded fields now also fails when its section exists but is not a table.
 - The "unsupported field type" compile error now says how to nest a struct: `#[confer(table)]` on the field and `#[derive(ConferTable)]` on the type.
 - The crate description and the README introduction present conferencier as a minimal, single-purpose library.
 - The minimum supported Rust version is lowered from 1.88 to 1.85, the lowest version that the 2024 edition and the `toml` 1.x dependency allow, so both crates build with older toolchains.
+
+See the [migration guide from 0.0.3](conferencier/guide/migration.md#from-003-to-004).
 
 ### Fixed
 - A required `Datetime` field (plain type without `default`) now compiles and loads; a missing key fails with `MissingKey`.
@@ -150,6 +97,8 @@ For a missing single table, choose the intended behavior explicitly:
 - Updated procedural-macro parsing to `syn` 3.
 - **Breaking:** both crates now use `toml` 1.2 (TOML 1.1). Public TOML values, tables, datetimes and errors are no longer interchangeable with types from `toml` 0.9. Prefer the `conferencier::toml` and `conferencier::Datetime` re-exports, or update your direct TOML dependency.
 - In the new datetime API, `Time::second` and `Time::nanosecond` are optional, preserving omitted components instead of replacing them with zero.
+
+See the [migration guide from 0.0.2](conferencier/guide/migration.md#from-002-to-003).
 
 ### Fixed
 - Both crates can be published together with `cargo publish --workspace`; the versioned dev-dependency of `conferencier-derive` on `conferencier` that formed a publish cycle is now path-only.
@@ -171,6 +120,8 @@ For a missing single table, choose the intended behavior explicitly:
 
 ### Fixed
 - Derived modules with `f32` fields failed to compile because the generated range checks used an ambiguous `.into()`.
+
+See the [migration guide from 0.0.1](conferencier/guide/migration.md#from-001-to-002).
 
 ## [0.0.1] - 2025-09-29
 
