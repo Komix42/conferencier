@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+- A runnable example application, [`examples/uptime-monitor`](examples/uptime-monitor/README.md): an Axum status page and a background worker checking TCP targets, configured by one store with a scope per component. It demonstrates runtime state in ignored fields, application-side validation, an all-or-nothing explicit reload and export of the effective configuration. It is an unpublished workspace package, so the library crates gain no dependencies.
+
 ## [0.0.7] - 2026-11-16
 
 ### Added

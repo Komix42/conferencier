@@ -36,6 +36,7 @@ Thanks for your interest in improving **conferencier**! This quick guide explain
 - **`conferencier/guide/`** holds the user guide in Markdown. `overview.md` is the crate-level documentation; the other pages become modules of `conferencier::guide` (see `conferencier/src/guide.rs`) and are listed in `index.md`. A new page needs both. The guide is part of the package, so its Rust code blocks run as doctests and its intra-doc links are checked by `cargo doc`; link between pages and to API items with intra-doc links, not with file paths.
 - **Migration steps** for every release belong to `conferencier/guide/migration.md`; `CHANGELOG.md` only links to them.
 - **`docs/`** contains the [backlog](docs/BACKLOG.md) and the design records (RFCs and implementation reports) grouped by version series, such as `docs/devel-0.0.x/`.
+- **`examples/`** holds runnable example applications, such as [`uptime-monitor`](examples/uptime-monitor/README.md). Each is an unpublished workspace member (`publish = false`) documented in its own `README.md`, so its dependencies stay out of the library crates. The workspace commands above build, lint and test it; run it with `cargo run -p <name>`. Short examples of single features belong to `conferencier/examples/` instead.
 
 ## Reporting issues
 

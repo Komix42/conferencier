@@ -6,16 +6,6 @@ Unlike the RFCs and implementation reports in the version folders such as [`deve
 
 Each entry states the problem, a possible direction and where it comes from.
 
-## Planned for 0.0.8
-
-Build a runnable, realistic example application to demonstrate conferencier in a multi-component Tokio application:
-
-1. **Uptime monitor.** Add an Axum-based web server and a background worker that checks configured TCP targets. Use separate configuration scopes for the HTTP server and monitor, sharing one `ConfigStore`; expose the latest check results over HTTP and keep runtime state out of the TOML configuration.
-2. **Configuration workflow.** Support explicit reload and runtime pause/resume commands. Export the effective configuration to a separate file and load it on the next start when present, leaving the commented example configuration untouched.
-3. **Runnable package and documentation.** Put the application in `examples/uptime-monitor/` as a separate, unpublished workspace package, with its setup, usage, configuration and architecture explained in its `README.md`. Keep application-only dependencies out of the library crates.
-
-No RFC will be written for 0.0.8; the example's README will document its design and architecture. The example is illustrative and does not expand the library's scope.
-
 ## Technical debt
 
 - **Temporary section-name migration guard.** Following [RFC-0005](./devel-0.0.x/RFC-0005_api_redesign.md), `ConfigScope` derives in 0.0.5 and later 0.0.x and 0.1.x releases whose implicit section was affected by the old `Confer` prefix rule require an explicit section. Remove the guard in 0.2.0, and warn in its migration notes that a direct upgrade from 0.0.4 bypasses the guard. Origin: RFC-0005 N7.
@@ -51,12 +41,9 @@ The README's [Project scope](../README.md#project-scope) lists these as intentio
 - **Layered sources** such as environment variables, command-line arguments or several files. Origin: the README's Project scope.
 - **Formats other than TOML.** Origin: [RFC-0001](./devel-0.0.x/RFC-0001_baseline_architecture.md#out-of-scope).
 
-### Examples
-
-- **Uptime monitor application.** A complete, runnable example configuring a web server and a background worker, demonstrating multiple components that share configuration. The 0.0.8 plan uses Axum and TCP checks; keep application dependencies out of the library crates. Its explicit configuration reload and separate effective-config export also demonstrate a basic snapshot workflow. Origin: [RFC-0002](./devel-0.0.x/RFC-0002_baseline_examples.md#future-work).
-
 ## Done
 
+- **Uptime monitor example application**: completed in 0.0.8 ([`examples/uptime-monitor`](../examples/uptime-monitor/README.md)).
 - **Redesign the user documentation**: completed in 0.0.7.
 - **Reliable `ConfigStore::save_file` replacement and target validation**: implemented in 0.0.6 ([RFC-0009](./devel-0.0.x/RFC-0009_save_file_replacement.md)).
 - **Preserve existing Unix file mode bits when saving**: implemented in 0.0.6 ([RFC-0010](./devel-0.0.x/RFC-0010_save_file_permissions.md)).

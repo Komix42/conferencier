@@ -78,7 +78,7 @@ Conferencier supports TOML and uses Tokio for async operations. It does not laye
 ## Learn more
 
 - [Guide and API reference](https://docs.rs/conferencier/latest/conferencier/), including [concepts](https://docs.rs/conferencier/latest/conferencier/guide/concepts/index.html), the [derive attributes](https://docs.rs/conferencier/latest/conferencier/guide/derive/index.html), and [migration guides](https://docs.rs/conferencier/latest/conferencier/guide/migration/index.html).
-- [Examples](https://github.com/Komix42/conferencier/tree/main/conferencier/examples) in the repository.
+- [Examples](https://github.com/Komix42/conferencier/tree/main/conferencier/examples) in the repository, and the [uptime monitor](https://github.com/Komix42/conferencier/tree/main/examples/uptime-monitor), a runnable application with an HTTP server, a background worker and configuration reload.
 - [Changelog](https://github.com/Komix42/conferencier/blob/main/CHANGELOG.md) for release history.
 - [Contributing](https://github.com/Komix42/conferencier/blob/main/CONTRIBUTING.md) and [issue tracker](https://github.com/Komix42/conferencier/issues).
 
