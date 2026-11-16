@@ -256,7 +256,8 @@ impl ConfigStore {
     /// requested mode also constrains the inherited POSIX ACL mask; on systems
     /// with ACLs independent of mode bits, such as macOS, review inherited ACLs
     /// separately. On Windows, private files require suitable directory permissions.
-    /// See the README for a complete pre-creation example.
+    /// See the [guide](https://docs.rs/conferencier/latest/conferencier/guide/files/index.html#file-targets-and-permissions)
+    /// for a complete pre-creation example.
     ///
     /// Metadata is observed once, not atomically with publication. Another actor
     /// can change the target or its permissions after inspection. Regular files

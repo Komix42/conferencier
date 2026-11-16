@@ -41,12 +41,12 @@ No RFCs will be written for 0.0.7. The item is described under [Documentation](#
 
 ### Outside the current scope
 
-The README's [Scope](../README.md#scope) lists these as intentionally left out. Taking one up means changing the scope first.
+The README's [Project scope](../README.md#project-scope) lists these as intentionally left out. Taking one up means changing the scope first.
 
 - **Validation** of allowed ranges, patterns or rules across fields, for example through derive attributes. Origin: [RFC-0001](./devel-0.0.x/RFC-0001_baseline_architecture.md#out-of-scope), [IMPL-001](./devel-0.0.x/IMPL_001_baseline.md#7-known-limitations--follow-up-ideas).
 - **Hot reload**: watching configuration files and reloading scopes automatically. Origin: [RFC-0001](./devel-0.0.x/RFC-0001_baseline_architecture.md#out-of-scope), [IMPL-001](./devel-0.0.x/IMPL_001_baseline.md#7-known-limitations--follow-up-ideas).
 - **Format-preserving saves** that keep comments and layout, for example through `toml_edit`. Origin: [RFC-0004](./devel-0.0.x/RFC-0004_nested_tables.md#out-of-scope--future-work).
-- **Layered sources** such as environment variables, command-line arguments or several files. Origin: the README's Scope.
+- **Layered sources** such as environment variables, command-line arguments or several files. Origin: the README's Project scope.
 - **Formats other than TOML.** Origin: [RFC-0001](./devel-0.0.x/RFC-0001_baseline_architecture.md#out-of-scope).
 
 ### Documentation

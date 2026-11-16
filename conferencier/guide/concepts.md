@@ -1,18 +1,22 @@
-Conferencier keeps configuration in two kinds of values, which are synchronized only when you ask for it.
+Conferencier keeps the store and scopes separate; data moves between them only when you ask for it. Tables represent nested values within a scope.
 
 - A [`ConfigStore`](crate::ConfigStore) holds one TOML document in memory. It is a cheap-to-clone handle whose clones share the document. Its in-memory methods are synchronous; only file I/O is async.
-- A **scope** is a struct implementing [`ConfigScope`](crate::ConfigScope), usually through `#[derive(ConfigScope)]`. Its loaded fields own one top-level TOML section, and its ignored fields hold runtime state that never reaches the file. Async tasks share a scope through [`SharedScope<T>`](crate::SharedScope).
+- A **scope** is a struct implementing [`ConfigScope`](crate::ConfigScope), usually through `#[derive(ConfigScope)]`. A derived scope maps its loaded fields to one top-level TOML section; its ignored fields hold runtime state that never reaches the file. Async tasks share a scope through [`SharedScope<T>`](crate::SharedScope).
 - A **table** is a plain struct implementing [`ConfigTable`](crate::ConfigTable). It maps a nested table or an array of tables inside a scope.
 
-Nothing runs in the background. Data moves only on these calls:
+Nothing runs in the background. The main operations move data explicitly:
 
 | Call | Direction |
 |---|---|
 | [`ConfigStore::from_file`](crate::ConfigStore::from_file), [`ConfigStore::load_file`](crate::ConfigStore::load_file) | file → store |
+| [`ConfigStore::from_str`](crate::ConfigStore::from_str), [`ConfigStore::load_str`](crate::ConfigStore::load_str) | TOML string → store |
 | [`ConfigScope::from_store`](crate::ConfigScope::from_store) | store → new scope |
 | [`ConfigScope::load`](crate::ConfigScope::load) | store → existing scope |
 | [`ConfigScope::save`](crate::ConfigScope::save) | scope → store |
 | [`ConfigStore::save_file`](crate::ConfigStore::save_file) | store → file |
+| [`ConfigStore::save_str`](crate::ConfigStore::save_str) | store → TOML string |
+
+Store getters and setters also read and change the in-memory document directly.
 
 A change in the store is therefore invisible to a scope until the scope is loaded again:
 
@@ -104,4 +108,4 @@ async fn main() -> conferencier::Result<()> {
 
 Keep state that must survive reloads directly in the scope: ignored fields inside `ConfigTable` values are initialized again on every load (see [Nested tables](crate::guide::tables)).
 
-The handle's Tokio `RwLock` is not reentrant, so drop every guard of a scope before calling its `load` or `save` in the same task. `load` locks the scope for writing and would wait for a held guard forever. `save` locks it for reading, which waits forever behind a held write guard and, because Tokio's lock is fair, also behind a held read guard while another task is waiting to write. Copy what you need out of a short-lived guard instead, for example `let port = server.read().await.port;`.
+The handle's Tokio `RwLock` is not reentrant, so drop every guard of a scope before calling its `load` or `save` in the same task. For a derived scope with loaded fields, `load` locks the scope for writing and would wait for a held guard forever. `save` locks it for reading, which waits forever behind a held write guard and, because Tokio's lock is fair, also behind a held read guard while another task is waiting to write. Copy what you need out of a short-lived guard instead, for example `let port = server.read().await.port;`.

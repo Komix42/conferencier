@@ -47,7 +47,7 @@ use crate::model::DeriveKind;
 /// and survive reloads. `deny_unknown_keys` rejects unknown TOML keys on load.
 /// Saving always replaces the scope's whole section, removing keys that do not
 /// map to loaded fields.
-/// See the [attribute reference](https://docs.rs/conferencier#derive-attributes)
+/// See the [attribute reference](https://docs.rs/conferencier/latest/conferencier/guide/derive/index.html)
 /// for supported scalar types, defaults and nested-table semantics.
 ///
 /// # Compile-time checks

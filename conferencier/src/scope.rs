@@ -66,7 +66,7 @@ pub type SharedScope<T> = Arc<RwLock<T>>;
 /// such as `ConferApp` requires an explicit section through 0.1.x and is removed
 /// in 0.2.0. `#[confer(deny_unknown_keys)]` rejects unmapped keys in this scope's
 /// section during loading; it does not apply to nested table types or other sections.
-/// See the crate's [attribute reference](crate#derive-attributes).
+/// See the [attribute reference](https://docs.rs/conferencier/latest/conferencier/guide/derive/index.html).
 ///
 /// Manual implementations can write `async fn load` and `async fn save`; the compiler
 /// checks that the returned futures are `Send`, so generic code can spawn them on Tokio tasks.

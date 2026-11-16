@@ -44,8 +44,6 @@ See the [migration guide from 0.0.5](conferencier/guide/migration.md#from-005-to
 - **Breaking:** The default section name is the full struct name; a leading `Confer` word is no longer stripped. A `ConfigScope` such as `ConferApp` without `#[confer(section = ...)]` fails to compile with a message naming both choices: `section = "App"` keeps the 0.0.4 section, `section = "ConferApp"` uses the full name. This check stays through 0.1.x and is removed in 0.2.0, so upgrade from 0.0.4 through a 0.1.x release, or add an explicit section before upgrading to 0.2.0 directly.
 - **Breaking:** Quoted nested segments of diagnostic paths escape U+0080–U+009F as uppercase `\uXXXX`, like the other control characters, instead of writing them literally ([RFC-0006](docs/devel-0.0.x/RFC-0006_strict_unknown_keys.md) P2).
 
-#### Migration from 0.0.4
-
 See the [migration guide from 0.0.4](conferencier/guide/migration.md#from-004-to-005).
 
 ### Removed

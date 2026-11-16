@@ -4,6 +4,8 @@ Conferencier is a small TOML configuration library for Tokio applications. It ma
 
 The [guide](crate::guide) explains how the store, scopes and tables work together, how to use derive attributes, and how to migrate between releases. The [API reference](crate) documents each public type and method.
 
+Conferencier does not layer configuration sources, watch files or validate application-specific rules. Saving a scope replaces its section; serializing the store does not preserve comments or formatting. See [saving to files](crate::guide::files) for details.
+
 ## Start here
 
 - [Concepts](crate::guide::concepts): the store, scopes, loading, saving and shared runtime state.

@@ -6,8 +6,8 @@ Conferencier keeps configuration explicit and predictable:
 
 - Derives map structs to TOML sections, nested tables and arrays of tables.
 - Rust types, defaults and optional fields make configuration visible in application code.
-- A `ConfigStore` holds the TOML document; each scope copies data to or from it only when asked. Nothing reloads or saves in the background.
-- Shared scopes use Tokio locks, while the store's in-memory operations are synchronous.
+- A store (`ConfigStore`) holds the TOML document; each scope (a struct implementing `ConfigScope`) copies data to or from it only when asked. Nothing reloads or saves in the background.
+- Shared scopes (`SharedScope<T>`) use Tokio locks, while the store's in-memory operations are synchronous.
 
 ## Example
 
@@ -44,6 +44,10 @@ Add `conferencier` and Tokio to your `Cargo.toml`:
 conferencier = "0.0.7"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
+
+## Project scope
+
+Conferencier supports TOML and uses Tokio for async operations. It does not layer configuration sources, watch files or validate application-specific rules. Saving a scope replaces its section; saving the store does not preserve comments or formatting. See [saving configuration](https://docs.rs/conferencier/latest/conferencier/guide/files/index.html) for details.
 
 ## Learn more
 
