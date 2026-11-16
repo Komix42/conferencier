@@ -273,9 +273,9 @@ The derive's own messages for literals are removed: `expected string literal` (a
 ## Documentation deliverables
 
 - README (both copies):
-  - [Derive attributes](../README.md#derive-attributes) describes `default`, `default = <expr>`, `ignore` and `ignore = <expr>` with one rule and examples, states M1 in one sentence, and explains `field_defaults`, the `Default` of table types and the migration warning (M4, M5); the list of supported literal forms is removed.
+  - [Derive attributes](https://github.com/Komix42/conferencier/blob/v0.0.5-alpha/README.md#derive-attributes) describes `default`, `default = <expr>`, `ignore` and `ignore = <expr>` with one rule and examples, states M1 in one sentence, and explains `field_defaults`, the `Default` of table types and the migration warning (M4, M5); the list of supported literal forms is removed.
   - The section on nested tables replaces the implicit fallbacks of table fields by M1 and states that an empty `Vec<T>` is saved as `key = []`, which blocks adding `[[...]]` entries by hand.
-  - [Saving configuration](../README.md#saving-configuration) mentions that defaults are saved (S2).
+  - [Saving configuration](https://github.com/Komix42/conferencier/blob/v0.0.5-alpha/README.md#saving-configuration) mentions that defaults are saved (S2).
   - Troubleshooting replaces the entries for literal errors with the `&str` → `String` case, `default` on an `Option` field and a `MissingKey` for a table that used to fall back.
   - Every example uses the new form.
 - Rustdoc: the `ConfigScope` and `ConfigTable` behavioral documentation, the derive documentation in `conferencier-derive` and the crate-level attribute list; examples use the new form.

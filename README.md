@@ -373,7 +373,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the remaining checks run in CI.
 
 - [API reference](https://docs.rs/conferencier) of the latest release on docs.rs.
 - [CHANGELOG.md](CHANGELOG.md) lists the changes in each release, including migration notes.
-- [`docs/`](docs/) keeps the design records (RFCs and implementation reports). They record the design at the time they were written and are not updated later; this README and the API reference describe the current behavior.
+- [`docs/devel-0.0.x/`](docs/devel-0.0.x/) keeps the design records (RFCs and implementation reports) of the 0.0.x releases. They record the design at the time they were written and are not updated later; this README and the API reference describe the current behavior.
 - [`docs/BACKLOG.md`](docs/BACKLOG.md) collects known technical debt and ideas for future versions.
 
 ## License

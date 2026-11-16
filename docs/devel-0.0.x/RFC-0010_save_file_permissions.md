@@ -10,7 +10,7 @@ Related: [RFC-0009](./RFC-0009_save_file_replacement.md)
 ## Document Scope
 
 This RFC proposes the access-control policy for the temporary sibling and
-resulting file written by [`ConfigStore::save_file`](../conferencier/src/store.rs).
+resulting file written by [`ConfigStore::save_file`](../../conferencier/src/store.rs).
 It covers replacing an existing target and creating a new one. It does not
 specify preservation of all filesystem metadata.
 
