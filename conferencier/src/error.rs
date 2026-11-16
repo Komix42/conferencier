@@ -67,7 +67,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 ///
 /// File methods attach the relevant path to [`Error::Io`]. Converting a plain
 /// [`std::io::Error`] with `?` or `Error::from` leaves `path` as `None`; construct
-/// the public `Io` variant to attach a path, as shown in [`ConfigStore::from_file`](crate::ConfigStore::from_file).
+/// the public `Io` variant to attach a path, as shown in the
+/// [guide](https://docs.rs/conferencier/latest/conferencier/guide/concepts/index.html#reading-a-file-before-the-runtime-starts).
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Error {

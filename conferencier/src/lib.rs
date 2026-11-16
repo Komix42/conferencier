@@ -1,7 +1,7 @@
 #![cfg_attr(feature = "derive", doc = include_str!("../guide/overview.md"))]
 #![cfg_attr(
     not(feature = "derive"),
-    doc = r#"A minimal, single-purpose TOML configuration library for Tokio applications.
+    doc = r#"A minimal, easy-to-use TOML configuration library for Tokio applications.
 
 The `derive` feature is disabled in this build. Store access and manual trait
 implementations remain available:
@@ -44,10 +44,9 @@ pub use crate::table::ConfigTable;
 pub use toml;
 /// TOML date, time or datetime value, usable directly in derived scopes and tables.
 ///
-/// This re-exports [`toml::value::Datetime`]. TOML 1.1 permits times with omitted
-/// seconds, and the type preserves that distinction: `Time::second` and
-/// `Time::nanosecond` are optional. Store datetime getters accept both TOML
-/// datetime values and strings parsed as this type.
+/// This re-exports [`toml::value::Datetime`]. Its `Time::second` and
+/// `Time::nanosecond` are optional, because TOML 1.1 permits times with omitted
+/// seconds; see the [guide](https://docs.rs/conferencier/latest/conferencier/guide/derive/index.html#toml-compatibility).
 pub use toml::value::Datetime;
 
 // The derive macros share the traits' names but live in the macro namespace, so

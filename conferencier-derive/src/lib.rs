@@ -25,41 +25,19 @@ use crate::model::DeriveKind;
 ///
 /// # Helper attributes
 ///
-/// `#[confer(...)]` is this crate's derive helper attribute, an abbreviation of
-/// *conferencier*, not a required prefix for struct names.
-///
-/// - Struct: `section = "App"` selects a literal top-level TOML section. Otherwise
-///   the full struct name is used, without a raw identifier's `r#` prefix.
-/// - Struct: `deny_unknown_keys` rejects unmapped keys in this scope's section on
-///   load. It does not apply to nested table types or other sections.
-/// - Fields: `rename = "key"`, `default`, `default = <expr>`, `ignore`,
-///   `ignore = <expr>`, `table` and `field_defaults` control conversion and runtime-only state.
-/// - A field marked `table` must use `T`, `Option<T>` or `Vec<T>` with
-///   `T: conferencier::ConfigTable`.
-/// - A bare `default` uses the field type's `Default`; an expression has the
-///   field's exact type and runs only when its key is missing. `Option` fields
-///   cannot have a `default`.
-/// - `#[confer(table, field_defaults)]` loads a missing single table from an
-///   empty table, applying its field defaults without calling the type's `Default`.
-///   Other missing required keys report `MissingKey`.
-///
-/// Ignored fields directly in the scope are initialized once in `from_store`
-/// and survive reloads. `deny_unknown_keys` rejects unknown TOML keys on load.
-/// Saving always replaces the scope's whole section, removing keys that do not
-/// map to loaded fields.
-/// See the [attribute reference](https://docs.rs/conferencier/latest/conferencier/guide/derive/index.html)
-/// for supported scalar types, defaults and nested-table semantics.
+/// `#[confer(...)]`, short for *conferencier*, accepts `section = "Name"` and
+/// `deny_unknown_keys` on the struct, and `rename = "key"`, `default`,
+/// `default = <expr>`, `ignore`, `ignore = <expr>`, `table` and `field_defaults`
+/// on fields. The [attribute reference](https://docs.rs/conferencier/latest/conferencier/guide/derive/index.html)
+/// describes their semantics and the supported field types.
 ///
 /// # Compile-time checks
 ///
 /// Unsupported struct or field shapes, incompatible attributes and duplicate
 /// loaded keys produce compile errors. The struct must satisfy the trait's
-/// `Send + Sync + 'static` bounds.
-///
-/// Through 0.1.x, a name whose old implicit section stripped a leading `Confer`
-/// word, such as `ConferApp`, requires an explicit `section`. Use `"App"` to
-/// preserve the old section or `"ConferApp"` to adopt the full name. This temporary
-/// migration check is removed in 0.2.0.
+/// `Send + Sync + 'static` bounds. Through 0.1.x, a name such as `ConferApp`
+/// also requires an explicit `section`; see the
+/// [migration guide](https://docs.rs/conferencier/latest/conferencier/guide/migration/index.html#from-004-to-005).
 ///
 /// # Example
 ///
@@ -96,20 +74,11 @@ pub fn scope_derive(input: TokenStream) -> TokenStream {
 ///
 /// # Helper attributes
 ///
-/// Named fields accept `#[confer(rename = "key")]`, `default`, `default = <expr>`,
-/// `ignore`, `ignore = <expr>`, `table` and `field_defaults`, with the same field
-/// conversion rules as [`ConfigScope`]. The struct attribute `deny_unknown_keys`
-/// rejects unmapped keys in this table. It applies only to this type. A table-only
-/// derive does not accept `section`; a struct deriving both traits can use it for
-/// the scope implementation, regardless of derive order or macro aliases.
-///
-/// Ignored fields are initialized whenever a new table value is constructed,
-/// including on a scope reload. `deny_unknown_keys` rejects unknown keys on load;
-/// `to_table` always returns only keys mapped by loaded fields. `ConfigScope`
-/// alone does not implement this trait.
-///
-/// The temporary `Confer` prefix migration check applies only to the scope
-/// implementation, not to a table-only derive.
+/// Fields accept the same `#[confer(...)]` attributes as [`ConfigScope`]. The struct
+/// accepts `deny_unknown_keys`, which applies only to this type, and rejects
+/// `section` unless it also derives `ConfigScope`. The
+/// [nested tables guide](https://docs.rs/conferencier/latest/conferencier/guide/tables/index.html)
+/// describes table fields and how tables behave on reload.
 ///
 /// # Example
 ///

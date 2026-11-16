@@ -11,7 +11,7 @@ Every field is either loaded from TOML or ignored by the configuration file.
 
 **Loaded fields** (the default) are read from and written to a TOML key:
 
-- `#[confer(rename = "key")]` on a field overrides the TOML key name.
+- `#[confer(rename = "key")]` on a field overrides the TOML key name. Two loaded fields of one struct must not map to the same key; the derive reports a duplicate key at compile time.
 
 - `#[confer(default)]` uses the field type's `Default::default()` when its key is missing.
 

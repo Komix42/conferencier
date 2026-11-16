@@ -19,6 +19,8 @@ use crate::store::ConfigStore;
 /// reentrant: drop every guard before calling [`ConfigScope::load`] or
 /// [`ConfigScope::save`] on this handle in the same task. A held read guard can
 /// also block `save` when a writer is queued, because Tokio's lock is fair.
+/// The [guide](https://docs.rs/conferencier/latest/conferencier/guide/concepts/index.html#locking)
+/// compares this lock with the store's.
 ///
 /// # Example
 ///
@@ -61,12 +63,8 @@ pub type SharedScope<T> = Arc<RwLock<T>>;
 /// # Implementations
 ///
 /// With the default `derive` feature, `#[derive(ConfigScope)]` implements this
-/// trait for named-field structs. `#[confer(section = "App")]` selects the section;
-/// otherwise it is the full struct name. The temporary migration check for a name
-/// such as `ConferApp` requires an explicit section through 0.1.x and is removed
-/// in 0.2.0. `#[confer(deny_unknown_keys)]` rejects unmapped keys in this scope's
-/// section during loading; it does not apply to nested table types or other sections.
-/// See the [attribute reference](https://docs.rs/conferencier/latest/conferencier/guide/derive/index.html).
+/// trait for named-field structs; the [derive guide](https://docs.rs/conferencier/latest/conferencier/guide/derive/index.html)
+/// describes how its attributes select the section and map fields.
 ///
 /// Manual implementations can write `async fn load` and `async fn save`; the compiler
 /// checks that the returned futures are `Send`, so generic code can spawn them on Tokio tasks.
@@ -114,12 +112,10 @@ pub trait ConfigScope: Send + Sync + Sized + 'static {
     /// Builds a new shared scope from a snapshot of its section in `store`.
     ///
     /// A missing section is loaded as an empty table, so field defaults apply.
-    /// A default expression runs only for a missing key, in field declaration order;
-    /// a present but invalid value does not use it. A missing key uses its explicit
-    /// fallback, `None` for an `Option`, or returns [`Error::MissingKey`](crate::Error::MissingKey).
-    /// `#[confer(table, field_defaults)]` selects an empty-table load for a single
-    /// table; a bare `default` uses the table type's Rust `Default` instead.
-    /// Derived scopes ignore unknown keys unless `#[confer(deny_unknown_keys)]` is set.
+    /// A missing key uses its field's fallback, `None` for an `Option`, or returns
+    /// [`Error::MissingKey`](crate::Error::MissingKey); the
+    /// [derive guide](https://docs.rs/conferencier/latest/conferencier/guide/derive/index.html)
+    /// describes the fallbacks and unknown-key checks of derived scopes.
     /// Ignored fields are initialized once, in declaration order, after all
     /// loaded fields convert successfully.
     ///
@@ -162,18 +158,20 @@ pub trait ConfigScope: Send + Sync + Sized + 'static {
         scope: &SharedScope<Self>,
         store: &ConfigStore,
     ) -> impl Future<Output = Result<()>> + Send;
+
     /// Writes the loaded fields into the store, replacing the scope's whole section.
     ///
     /// With loaded fields, the derived implementation takes a read lock of `scope`,
     /// converts them into a new table, releases the scope lock and replaces the store section
     /// in one write. Readers never observe a partially saved section. Other sections
     /// are unchanged; unknown keys and nested tables in the owned section are removed.
-    /// Ignored fields are not written. Computed defaults are saved as ordinary values
-    /// and are not recomputed on a later load while their keys are present.
-    /// A scope with only ignored fields saves an empty section without locking `scope`.
+    /// Ignored fields are not written. A scope with only ignored fields saves an
+    /// empty section without locking `scope`.
     ///
     /// This updates only the in-memory store. [`ConfigStore::save_file`] persists
     /// the store separately. A later scope mutation is not part of the saved snapshot.
+    /// The [guide](https://docs.rs/conferencier/latest/conferencier/guide/files/index.html)
+    /// describes what saving does to a configuration file.
     ///
     /// # Locking
     ///

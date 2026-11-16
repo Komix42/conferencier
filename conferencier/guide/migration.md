@@ -78,7 +78,8 @@ its clones share the same document without an additional `Arc`.
 
 The default section is now the full struct name; a leading `Confer` word is no
 longer stripped. A scope such as `ConferApp` without an explicit section fails
-to compile during the migration period. Choose the section that matches the
+to compile during the migration period; a table-only `ConfigTable` derive has
+no section and is not checked. Choose the section that matches the
 existing configuration:
 
 - Add `#[confer(section = "App")]` to keep `[App]`.
