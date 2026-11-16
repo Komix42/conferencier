@@ -17,7 +17,7 @@ implementations remain available:
 
 Enable the default `derive` feature for `#[derive(ConfigScope)]`,
 `#[derive(ConfigTable)]` and the full
-[attribute reference](https://docs.rs/conferencier#derive-attributes)."#
+[attribute reference](https://docs.rs/conferencier/latest/conferencier/guide/derive/index.html)."#
 )]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
