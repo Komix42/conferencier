@@ -6,8 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+- A [rustdoc guide](https://docs.rs/conferencier/latest/conferencier/guide/) covering concepts, derive attributes and value conversion, nested tables, saving files, troubleshooting and migration from earlier releases. It is included with the default `derive` feature.
+- Doctests for the shared README and a CI check that runs the guide's doctests from the packaged crate outside the workspace.
+
 ### Changed
+- Reworked the README as a concise introduction with an example, installation instructions and a typical component-based use case. GitHub and crates.io now use the same root README instead of separate copies.
+- Consolidated migration instructions for all releases in the guide and linked to them from the changelog.
+- Streamlined API rustdoc around individual contracts and moved broader explanations into the guide. Expanded the documentation of strict-key error ordering, value conversion and file saving, including reserved temporary-file names, cancellation, relative paths and durability limitations; these describe existing behavior, not API changes.
+- Updated contributor documentation with the documentation layout and CI checks, including how to run packaged doctests locally.
 - Moved the design records (RFCs and implementation reports) of the 0.0.x releases from `docs/` to [`docs/devel-0.0.x/`](docs/devel-0.0.x/).
+
+### Fixed
+- Corrected derive macro examples to use the re-exports from `conferencier`, and clarified optional-vector saving, missing-table troubleshooting and API error descriptions.
 
 ## [0.0.6] - 2026-11-15
 

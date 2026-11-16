@@ -6,14 +6,6 @@ Unlike the RFCs and implementation reports in the version folders such as [`deve
 
 Each entry states the problem, a possible direction and where it comes from.
 
-## Planned for 0.0.7
-
-Focus on presenting the existing library, not new configuration features:
-
-1. **Redesign the user documentation.** Rewrite and reorganize the READMEs and supporting documentation.
-
-No RFCs will be written for 0.0.7. The item is described under [Documentation](#documentation).
-
 ## Technical debt
 
 - **Temporary section-name migration guard.** Following [RFC-0005](./devel-0.0.x/RFC-0005_api_redesign.md), `ConfigScope` derives in 0.0.5 and later 0.0.x and 0.1.x releases whose implicit section was affected by the old `Confer` prefix rule require an explicit section. Remove the guard in 0.2.0, and warn in its migration notes that a direct upgrade from 0.0.4 bypasses the guard. Origin: RFC-0005 N7.
@@ -49,10 +41,6 @@ The README's [Project scope](../README.md#project-scope) lists these as intentio
 - **Layered sources** such as environment variables, command-line arguments or several files. Origin: the README's Project scope.
 - **Formats other than TOML.** Origin: [RFC-0001](./devel-0.0.x/RFC-0001_baseline_architecture.md#out-of-scope).
 
-### Documentation
-
-- **Redesign the user documentation.** The README has accumulated attribute details, migration notes, edge cases and operational guidance, making it harder to understand the crate at a glance. Direction: rewrite the introduction and quick start as a clear showcase of the crate's purpose and typical use; split detailed reference material and migration guidance into appropriate documentation, keeping important limitations discoverable through links. Move the design records (RFCs and implementation reports) in `docs/` to `docs/devel-0.0.x/`, preserving historical records and updating links. Keep the root and crate READMEs aligned, preserve runnable examples and doctest coverage, and keep the documentation usable on GitHub, crates.io and docs.rs; review the derive crate's README for its distinct audience too. The detailed structure will be decided separately. Origin: the post-0.0.5 planning discussion.
-
 ### Examples
 
 - **Hyper HTTP server example.** A complete, runnable example configuring a Hyper-based web server and demonstrating several components. Keep Hyper specific to the example, not a runtime dependency of the library. The detailed scenario will be decided separately. Origin: [RFC-0002](./devel-0.0.x/RFC-0002_baseline_examples.md#future-work).
@@ -60,6 +48,7 @@ The README's [Project scope](../README.md#project-scope) lists these as intentio
 
 ## Done
 
+- **Redesign the user documentation**: completed in 0.0.7.
 - **Reliable `ConfigStore::save_file` replacement and target validation**: implemented in 0.0.6 ([RFC-0009](./devel-0.0.x/RFC-0009_save_file_replacement.md)).
 - **Preserve existing Unix file mode bits when saving**: implemented in 0.0.6 ([RFC-0010](./devel-0.0.x/RFC-0010_save_file_permissions.md)).
 - **Reject `section` on table-only derives**: implemented in 0.0.5 ([RFC-0008](./devel-0.0.x/RFC-0008_table_section.md)).
