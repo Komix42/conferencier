@@ -114,20 +114,20 @@ The `+` fields are runtime state, not configuration.
 
 ### Runtime state
 
-Fields marked `#[confer(ignore = ...)]` belong to the scope but not to the file: `HttpConfig::requests_served` is incremented by the request handlers, `MonitorConfig::results` is written by the worker and read by the status page, and `MonitorConfig::generation` identifies the configuration a round of checks started with. `load` never changes them, so the application explicitly removes results for removed targets or changed addresses after a successful reload. Results for unchanged targets and the request counter are kept. The reload also replaces the generation, which prevents checks started before it from publishing afterward, even if a target was removed and re-added with the same address.
+Fields marked `#[confer(ignore = ...)]` belong to the scope but not to the file: `HttpConfig::requests_served` is incremented by the request handlers, `MonitorConfig::results` is written by the worker and read by the status page, and `MonitorConfig::generation` identifies the configuration a round of checks started with. `load` leaves ignored scope fields untouched. On reload, the application retains results for unchanged targets, removes those for removed or changed targets, and replaces the generation together with the monitor settings. Earlier rounds that have not yet recorded their results cannot publish afterward, even if a target was removed and re-added with the same address.
 
 ### Locking
 
 The scopes are `tokio::sync::RwLock`s, and the components hold them only briefly:
 
 - The worker copies its settings and the targets under a read lock and releases it before any network I/O. A slow check therefore never delays a page or a reload; a reload that happens during a round takes effect in the next round.
-- After a round, the worker takes the write lock once to record all results. Any successful reload invalidates the entire in-flight round; the next round uses the new configuration.
+- After a round, the worker takes the write lock once to record all results. A reload invalidates rounds still awaiting publication when the monitor settings change; the next round uses the new configuration.
 - Handlers take each lock only to read or update a few fields.
 - `load` takes the scope's write lock, so no guard of the same scope may be held while awaiting it.
 
 ### Reload and export
 
-`reload` in `config.rs` first loads the new file into a separate `ConfigStore`, creates both scopes from it with `from_store`, which checks types and unknown keys, and validates the result. Only then does it replace the application's store with `load_str` and update the scopes with `load`. Because the candidate has already converted successfully, these cannot fail halfway, so any error leaves the running configuration as it was. After a successful reload the worker is woken, so the next round starts without waiting for the interval; a round in progress is finished first and its results are discarded.
+`reload` in `config.rs` first loads the new file into a separate `ConfigStore`, creates both scopes from it with `from_store`, which checks types and unknown keys, and validates the result. Only then does it replace the application's store with `load_str` and update the HTTP scope with `load`. It applies the validated monitor settings and replaces the generation under one write lock, so a worker cannot publish an old round between those changes. The two scopes are updated separately, not as one atomic snapshot for concurrent readers. After a successful reload the worker is woken, so the next round starts without waiting for the interval; a round still in progress when the monitor settings change is finished first and its results are discarded.
 
 `pause` and `resume` change `enabled` in the scope only. `export` writes such runtime changes back with `save`, which replaces each scope's section of the store, and then saves the store with `save_file`. Exporting to a separate file keeps the comments of `monitor.toml`, because conferencier does not preserve comments or layout when saving.
 

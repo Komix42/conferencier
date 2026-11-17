@@ -114,15 +114,30 @@ pub async fn reload(
     let candidate = ConfigStore::from_str(source)?;
     HttpConfig::from_store(&candidate)?;
     let candidate_monitor = MonitorConfig::from_store(&candidate)?;
-    validate(&*candidate_monitor.read().await)?;
+    let (enabled, interval_secs, timeout_secs, targets) = {
+        let candidate = candidate_monitor.read().await;
+        validate(&candidate)?;
+        let MonitorConfig {
+            enabled,
+            interval_secs,
+            timeout_secs,
+            targets,
+            results: _,
+            generation: _,
+        } = &*candidate;
+        (*enabled, *interval_secs, *timeout_secs, targets.clone())
+    };
 
     // The same source has just converted successfully, so these do not fail.
     store.load_str(source)?;
     HttpConfig::load(http, store).await?;
-    MonitorConfig::load(monitor, store).await?;
-    // `load` leaves ignored fields untouched; replace the generation and
-    // remove results for targets that were removed or changed.
+    // Apply settings and invalidate old rounds under one lock; `load` would
+    // release its lock before the application could replace the generation.
     let mut monitor = monitor.write().await;
+    monitor.enabled = enabled;
+    monitor.interval_secs = interval_secs;
+    monitor.timeout_secs = timeout_secs;
+    monitor.targets = targets;
     let MonitorConfig {
         targets,
         results,
@@ -200,14 +215,20 @@ mod tests {
         let monitor = MonitorConfig::from_store(&store).unwrap();
         http.write().await.requests_served = 7;
 
-        let source = "[Http]\nport = 9090\n[Monitor]\ninterval_secs = 3\ntargets = []\n";
+        let source = "[Http]\nport = 9090\n[Monitor]\nenabled = false\n\
+            interval_secs = 3\ntimeout_secs = 7\n\
+            [[Monitor.targets]]\nname = 'service'\naddress = 'service:1'\n";
         reload(&store, &http, &monitor, source).await.unwrap();
 
         let http = http.read().await;
         assert_eq!((http.port, http.requests_served), (9090, 7));
         let monitor = monitor.read().await;
+        assert!(!monitor.enabled);
         assert_eq!(monitor.interval_secs, 3);
-        assert!(monitor.targets.is_empty());
+        assert_eq!(monitor.timeout_secs, 7);
+        assert_eq!(monitor.targets.len(), 1);
+        assert_eq!(monitor.targets[0].name, "service");
+        assert_eq!(monitor.targets[0].address, "service:1");
     }
 
     #[tokio::test]

@@ -127,8 +127,7 @@ async fn record(
         return;
     }
     for (name, result) in results {
-        // Loading targets and changing the generation take separate locks.
-        // A reload can therefore change targets before it invalidates the round.
+        // Record only results that match a currently configured target.
         let configured = config
             .targets
             .iter()
@@ -146,6 +145,8 @@ async fn record(
 
 #[cfg(test)]
 mod tests {
+    use std::future::Future;
+
     use conferencier::{ConfigScope, ConfigStore};
 
     use super::*;
@@ -218,5 +219,50 @@ mod tests {
         )
         .await;
         assert!(monitor.read().await.results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn reload_invalidates_round_queued_before_monitor_update_completes() {
+        let initial = "[Monitor]\ninterval_secs = 30\n\
+                [[Monitor.targets]]\nname = 'service'\naddress = 'service:1'\n";
+        let changed = "[Monitor]\ninterval_secs = 3\n\
+                [[Monitor.targets]]\nname = 'service'\naddress = 'service:1'\n";
+        let store = ConfigStore::from_str(initial).unwrap();
+        let http = HttpConfig::from_store(&store).unwrap();
+        let monitor = MonitorConfig::from_store(&store).unwrap();
+        let generation = monitor.read().await.generation.clone();
+        let mut guard = monitor.write().await;
+        let previous_check = Instant::now() - Duration::from_secs(30);
+        guard.results.insert(
+            "service".into(),
+            CheckResult {
+                checked_at: previous_check,
+                ..result("service:1")
+            },
+        );
+
+        let reload = config::reload(&store, &http, &monitor, changed);
+        tokio::pin!(reload);
+        let record = record(
+            &monitor,
+            &generation,
+            vec![("service".into(), result("service:1"))],
+        );
+        tokio::pin!(record);
+        // Queue the reload first, then the old round, behind the held lock.
+        std::future::poll_fn(|cx| {
+            assert!(reload.as_mut().poll(cx).is_pending());
+            assert!(record.as_mut().poll(cx).is_pending());
+            std::task::Poll::Ready(())
+        })
+        .await;
+        drop(guard);
+
+        let (reload_result, ()) = tokio::join!(reload, record);
+        reload_result.unwrap();
+        let monitor = monitor.read().await;
+        assert_eq!(monitor.interval_secs, 3);
+        assert_eq!(monitor.results.len(), 1);
+        assert_eq!(monitor.results["service"].checked_at, previous_check);
     }
 }
