@@ -1,0 +1,8 @@
+config          show the configuration in use
+add-source      add a folder to index
+remove-source   remove a folder
+extensions      choose the file extensions to index
+largest         set how many of the largest files the report lists
+catalog         write the catalog to a JSON file, or stop writing it
+scan            index the folders and print the report
+report          print the report of the last scan again
