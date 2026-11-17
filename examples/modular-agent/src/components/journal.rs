@@ -8,6 +8,7 @@ use tokio::task::JoinHandle;
 
 use crate::component::{Component, ComponentFuture, ComponentResult, Context, RunningComponent};
 use crate::events::Event;
+use crate::split_command;
 
 #[derive(ConfigScope)]
 #[confer(section = "Journal", deny_unknown_keys)]
@@ -108,14 +109,9 @@ impl RunningComponent for JournalInstance {
                             path: value.to_owned(),
                         })
                     };
-                    let previous = {
-                        let mut config = self.config.write().await;
-                        std::mem::replace(&mut config.file, replacement)
-                    };
-                    if let Err(error) = self.context.save(&self.config).await {
-                        self.config.write().await.file = previous;
-                        return Err(error);
-                    }
+                    self.context
+                        .update(&self.config, |config| &mut config.file, replacement)
+                        .await?;
                     match value {
                         "off" => println!("Journal file output disabled"),
                         path => println!("Journal events will be appended to {path:?}"),
@@ -138,16 +134,6 @@ impl RunningComponent for JournalInstance {
             }
             Ok(())
         })
-    }
-}
-
-fn split_command(args: &str) -> (&str, Option<&str>) {
-    match args.find(char::is_whitespace) {
-        Some(index) => (
-            &args[..index],
-            Some(args[index..].trim_start_matches(char::is_whitespace)),
-        ),
-        None => (args, None),
     }
 }
 
@@ -488,6 +474,37 @@ mod tests {
 
         let _ = shutdown_tx.send(true);
         component.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn failed_file_update_restores_optional_table() {
+        let store = ConfigStore::from_str("[Journal.file]\npath = 'events.log'\n").unwrap();
+        let config = JournalConfig::from_store(&store).unwrap();
+        let (persist_tx, persist_rx) = tokio::sync::mpsc::unbounded_channel();
+        drop(persist_rx);
+        let (_shutdown_tx, shutdown) = watch::channel(false);
+        let (events, _) = broadcast::channel(4);
+        let mut component = JournalInstance {
+            config: config.clone(),
+            context: Context {
+                store,
+                config_path: PathBuf::from("agent.toml"),
+                persistence: PersistenceHandle::new(persist_tx),
+                events,
+                shutdown,
+            },
+            finish: None,
+            worker: None,
+        };
+
+        assert_eq!(
+            component.handle_command("file off").await.unwrap_err(),
+            "configuration persister has stopped"
+        );
+        assert_eq!(
+            config.read().await.file.as_ref().unwrap().path,
+            "events.log"
+        );
     }
 
     #[tokio::test]

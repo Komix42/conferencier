@@ -2,7 +2,7 @@
 //! the lock before walking the filesystem.
 
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::UNIX_EPOCH;
 
 use tokio::task::JoinSet;
@@ -48,13 +48,6 @@ pub async fn run(settings: &Settings) -> Result<(), BoxError> {
             config.sources.clone(),
         )
     };
-    let config_dir = settings
-        .path
-        .parent()
-        .filter(|path| !path.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."))
-        .to_path_buf();
-
     let allowed_extensions: Option<HashSet<String>> = extensions.map(|items| {
         items
             .into_iter()
@@ -64,7 +57,7 @@ pub async fn run(settings: &Settings) -> Result<(), BoxError> {
 
     let mut tasks = JoinSet::new();
     for source in sources {
-        let root = resolve_path(&config_dir, &source.path);
+        let root = settings.resolve_path(&source.path);
         let allowed_extensions = allowed_extensions.clone();
         tasks.spawn(async move {
             scan_source(source, root, recursive, include_hidden, allowed_extensions).await
@@ -93,15 +86,6 @@ pub async fn run(settings: &Settings) -> Result<(), BoxError> {
     crate::report::print(settings).await;
     crate::report::write_catalog(settings).await?;
     Ok(())
-}
-
-fn resolve_path(config_dir: &Path, path: &str) -> PathBuf {
-    let path = PathBuf::from(path);
-    if path.is_absolute() {
-        path
-    } else {
-        config_dir.join(path)
-    }
 }
 
 async fn scan_source(
@@ -206,6 +190,8 @@ async fn scan_source(
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use tempfile::tempdir;
 
     use super::*;

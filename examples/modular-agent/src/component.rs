@@ -32,6 +32,25 @@ impl Context {
         self.persistence.changed()
     }
 
+    /// Replaces a field, restoring it if saving or requesting persistence fails.
+    /// A successful request does not wait for the file write.
+    pub async fn update<T: ConfigScope, V: Send>(
+        &self,
+        scope: &SharedScope<T>,
+        field: fn(&mut T) -> &mut V,
+        value: V,
+    ) -> ComponentResult<()> {
+        let previous = {
+            let mut config = scope.write().await;
+            std::mem::replace(field(&mut config), value)
+        };
+        if let Err(error) = self.save(scope).await {
+            *field(&mut *scope.write().await) = previous;
+            return Err(error);
+        }
+        Ok(())
+    }
+
     pub async fn save_defaults<T: ConfigScope>(
         &self,
         section: &str,

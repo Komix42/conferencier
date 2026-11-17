@@ -1,7 +1,6 @@
 //! Console summary and the optional JSON catalog.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
 
 use serde_json::json;
 use tokio::io::AsyncWriteExt;
@@ -108,7 +107,7 @@ pub async fn write_catalog(settings: &Settings) -> Result<(), BoxError> {
     } else {
         serde_json::to_vec(&value)?
     };
-    let path = resolve_path(settings, &catalog.path);
+    let path = settings.resolve_path(&catalog.path);
     if let Some(parent) = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -156,19 +155,6 @@ fn catalog_entry(file: &IndexedFile) -> serde_json::Value {
         "size_bytes": file.size_bytes,
         "modified_unix_secs": file.modified_unix_secs,
     })
-}
-
-fn resolve_path(settings: &Settings, path: &str) -> PathBuf {
-    let path = PathBuf::from(path);
-    if path.is_absolute() {
-        path
-    } else {
-        settings
-            .path
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .join(path)
-    }
 }
 
 fn format_bytes(bytes: u64) -> String {

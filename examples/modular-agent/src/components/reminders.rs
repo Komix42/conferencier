@@ -6,6 +6,7 @@ use tokio::task::JoinHandle;
 
 use crate::component::{Component, ComponentFuture, ComponentResult, Context, RunningComponent};
 use crate::events::Event;
+use crate::split_command;
 
 #[derive(ConfigScope)]
 #[confer(section = "Reminders", deny_unknown_keys)]
@@ -223,16 +224,6 @@ fn validate(config: &ReminderConfig) -> ComponentResult<()> {
         }
     }
     Ok(())
-}
-
-fn split_command(args: &str) -> (&str, Option<&str>) {
-    match args.find(char::is_whitespace) {
-        Some(index) => (
-            &args[..index],
-            Some(args[index..].trim_start_matches(char::is_whitespace)),
-        ),
-        None => (args, None),
-    }
 }
 
 fn print_help() {

@@ -7,7 +7,7 @@
 
 use std::collections::HashSet;
 use std::error::Error;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use conferencier::{ConfigScope, ConfigStore, ConfigTable, SharedScope};
 
@@ -120,6 +120,19 @@ pub struct Settings {
 }
 
 impl Settings {
+    pub fn resolve_path(&self, path: &str) -> PathBuf {
+        let path = PathBuf::from(path);
+        if path.is_absolute() {
+            path
+        } else {
+            self.path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .unwrap_or_else(|| Path::new("."))
+                .join(path)
+        }
+    }
+
     /// Loads the configuration from `path`, or creates the file from the
     /// defaults if it does not exist. Returns whether the file was created.
     pub async fn open(path: PathBuf) -> Result<(Self, bool), BoxError> {
@@ -257,6 +270,20 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
+
+    #[tokio::test]
+    async fn paths_resolve_relative_to_config_directory_or_remain_absolute() {
+        let dir = tempdir().unwrap();
+        let (mut settings, _) = Settings::open(dir.path().join("indexer.toml"))
+            .await
+            .unwrap();
+        assert_eq!(settings.resolve_path("files"), dir.path().join("files"));
+        let absolute = dir.path().join("catalog.json");
+        assert_eq!(settings.resolve_path(absolute.to_str().unwrap()), absolute);
+
+        settings.path = PathBuf::from("indexer.toml");
+        assert_eq!(settings.resolve_path("files"), Path::new(".").join("files"));
+    }
 
     #[tokio::test]
     async fn first_start_persists_defaults_and_reopens() {

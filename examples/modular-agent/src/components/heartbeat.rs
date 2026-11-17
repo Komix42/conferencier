@@ -7,6 +7,7 @@ use tokio::task::JoinHandle;
 
 use crate::component::{Component, ComponentFuture, ComponentResult, Context, RunningComponent};
 use crate::events::Event;
+use crate::split_command;
 
 #[derive(ConfigScope)]
 #[confer(section = "Heartbeat")]
@@ -90,14 +91,9 @@ impl RunningComponent for HeartbeatInstance {
                     if seconds == 0 || seconds > i64::MAX as u64 {
                         return Err("interval must be between 1 and i64::MAX seconds".into());
                     }
-                    let previous = {
-                        let mut config = self.config.write().await;
-                        std::mem::replace(&mut config.interval_secs, seconds)
-                    };
-                    if let Err(error) = self.context.save(&self.config).await {
-                        self.config.write().await.interval_secs = previous;
-                        return Err(error);
-                    }
+                    self.context
+                        .update(&self.config, |config| &mut config.interval_secs, seconds)
+                        .await?;
                     self.wake.notify_one();
                     println!("Heartbeat interval set to {seconds}s");
                 }
@@ -106,37 +102,26 @@ impl RunningComponent for HeartbeatInstance {
                     if message.trim().is_empty() {
                         return Err("message must not be empty".into());
                     }
-                    let previous = {
-                        let mut config = self.config.write().await;
-                        std::mem::replace(&mut config.message, message.to_owned())
-                    };
-                    if let Err(error) = self.context.save(&self.config).await {
-                        self.config.write().await.message = previous;
-                        return Err(error);
-                    }
+                    self.context
+                        .update(
+                            &self.config,
+                            |config| &mut config.message,
+                            message.to_owned(),
+                        )
+                        .await?;
                     println!("Heartbeat message updated");
                 }
                 "pause" if value.is_none() => {
-                    let previous = {
-                        let mut config = self.config.write().await;
-                        std::mem::replace(&mut config.enabled, false)
-                    };
-                    if let Err(error) = self.context.save(&self.config).await {
-                        self.config.write().await.enabled = previous;
-                        return Err(error);
-                    }
+                    self.context
+                        .update(&self.config, |config| &mut config.enabled, false)
+                        .await?;
                     self.wake.notify_one();
                     println!("Heartbeat paused");
                 }
                 "resume" if value.is_none() => {
-                    let previous = {
-                        let mut config = self.config.write().await;
-                        std::mem::replace(&mut config.enabled, true)
-                    };
-                    if let Err(error) = self.context.save(&self.config).await {
-                        self.config.write().await.enabled = previous;
-                        return Err(error);
-                    }
+                    self.context
+                        .update(&self.config, |config| &mut config.enabled, true)
+                        .await?;
                     self.wake.notify_one();
                     println!("Heartbeat resumed");
                 }
@@ -203,16 +188,6 @@ fn validate(config: &HeartbeatConfig) -> ComponentResult<()> {
     Ok(())
 }
 
-fn split_command(args: &str) -> (&str, Option<&str>) {
-    match args.find(char::is_whitespace) {
-        Some(index) => (
-            &args[..index],
-            Some(args[index..].trim_start_matches(char::is_whitespace)),
-        ),
-        None => (args, None),
-    }
-}
-
 fn print_help() {
     println!("heartbeat commands: status, interval <seconds>, message <text>, pause, resume, help");
 }
@@ -277,6 +252,46 @@ mod tests {
 
         let _ = shutdown_tx.send(true);
         component.quiesce().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn failed_update_restores_changed_field_and_keeps_runtime_state() {
+        let store = ConfigStore::from_str("[Heartbeat]\ninterval_secs = 10\n").unwrap();
+        let config = HeartbeatConfig::from_store(&store).unwrap();
+        config.write().await.ticks = 3;
+        let (persist_tx, persist_rx) = tokio::sync::mpsc::unbounded_channel();
+        drop(persist_rx);
+        let (_shutdown_tx, shutdown) = watch::channel(false);
+        let (events, _) = broadcast::channel(4);
+        let context = Context {
+            store,
+            config_path: std::path::PathBuf::from("agent.toml"),
+            persistence: PersistenceHandle::new(persist_tx),
+            events,
+            shutdown,
+        };
+        let mut component = HeartbeatInstance {
+            config: config.clone(),
+            context,
+            wake: Arc::new(Notify::new()),
+            worker: None,
+        };
+
+        for command in ["interval 3", "message changed", "pause"] {
+            let error = component.handle_command(command).await.unwrap_err();
+            assert_eq!(error, "configuration persister has stopped");
+            let config = config.read().await;
+            assert_eq!(config.interval_secs, 10);
+            assert_eq!(config.message, "still here");
+            assert!(config.enabled);
+            assert_eq!(config.ticks, 3);
+        }
+        config.write().await.enabled = false;
+        assert_eq!(
+            component.handle_command("resume").await.unwrap_err(),
+            "configuration persister has stopped"
+        );
+        assert!(!config.read().await.enabled);
     }
 
     #[tokio::test]
