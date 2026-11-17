@@ -312,6 +312,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "modular-agent"
+version = "0.0.0"
+dependencies = [
+ "conferencier",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
