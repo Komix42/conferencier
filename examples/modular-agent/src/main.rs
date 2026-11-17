@@ -105,17 +105,28 @@ async fn run(args: Vec<String>, components: Vec<Box<dyn Component>>) -> AppResul
         }
     };
 
-    let _ = shutdown_tx.send(true);
+    stop(shutdown_tx, running, persistence, persister).await?;
+    outcome
+}
+
+async fn stop(
+    shutdown: watch::Sender<bool>,
+    mut running: Vec<Box<dyn RunningComponent>>,
+    persistence: PersistenceHandle,
+    persister: tokio::task::JoinHandle<()>,
+) -> AppResult<()> {
+    let _ = shutdown.send(true);
     for component in &mut running {
         if let Err(error) = component.shutdown().await {
             eprintln!("component {} shutdown: {error}", component.name());
         }
     }
     let flush_result = persistence.flush().await;
+    // Components hold persistence handles; the persister stops once every handle is dropped.
+    drop(running);
     drop(persistence);
     let _ = persister.await;
-    flush_result?;
-    outcome
+    Ok(flush_result?)
 }
 
 async fn start_components(
@@ -301,6 +312,39 @@ mod tests {
             .is_err()
         );
         assert!(Options::parse(vec!["--other".into()]).is_err());
+    }
+
+    #[tokio::test]
+    async fn stopping_flushes_and_ends_while_components_hold_persistence_handles() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("agent.toml");
+        let store = ConfigStore::new();
+        let (persist_tx, persist_rx) = mpsc::unbounded_channel();
+        let persistence = PersistenceHandle::new(persist_tx);
+        let persister = tokio::spawn(persist::run(store.clone(), path.clone(), persist_rx));
+        let (shutdown_tx, shutdown) = watch::channel(false);
+        let (events, _) = broadcast::channel(4);
+        let context = component::Context {
+            store: store.clone(),
+            persistence: persistence.clone(),
+            events,
+            shutdown,
+        };
+        let running = start_components(&components(), &[], context).await;
+        assert_eq!(running.len(), 3);
+
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            stop(shutdown_tx, running, persistence, persister),
+        )
+        .await
+        .expect("shutdown must not wait for handles held by components")
+        .unwrap();
+
+        let saved = ConfigStore::from_file(&path).await.unwrap();
+        for section in ["Heartbeat", "Reminders", "Journal"] {
+            assert!(saved.has_section(section));
+        }
     }
 
     #[tokio::test]

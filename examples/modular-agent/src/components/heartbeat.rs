@@ -1,7 +1,8 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use conferencier::{ConfigScope, SharedScope};
-use tokio::sync::watch;
+use tokio::sync::{Notify, watch};
 use tokio::task::JoinHandle;
 
 use crate::component::{Component, ComponentFuture, ComponentResult, Context, RunningComponent};
@@ -38,14 +39,17 @@ impl Component for Heartbeat {
             validate(&*config.read().await)?;
             context.save_defaults("Heartbeat", &config).await?;
 
+            let wake = Arc::new(Notify::new());
             let worker = tokio::spawn(run_worker(
                 config.clone(),
                 context.clone(),
+                wake.clone(),
                 context.shutdown.clone(),
             ));
             Ok(Box::new(HeartbeatInstance {
                 config,
                 context,
+                wake,
                 worker: Some(worker),
             }) as Box<dyn RunningComponent>)
         })
@@ -55,6 +59,7 @@ impl Component for Heartbeat {
 struct HeartbeatInstance {
     config: SharedScope<HeartbeatConfig>,
     context: Context,
+    wake: Arc<Notify>,
     worker: Option<JoinHandle<()>>,
 }
 
@@ -93,6 +98,7 @@ impl RunningComponent for HeartbeatInstance {
                         self.config.write().await.interval_secs = previous;
                         return Err(error);
                     }
+                    self.wake.notify_one();
                     println!("Heartbeat interval set to {seconds}s");
                 }
                 "message" => {
@@ -119,6 +125,7 @@ impl RunningComponent for HeartbeatInstance {
                         self.config.write().await.enabled = previous;
                         return Err(error);
                     }
+                    self.wake.notify_one();
                     println!("Heartbeat paused");
                 }
                 "resume" if value.is_none() => {
@@ -130,6 +137,7 @@ impl RunningComponent for HeartbeatInstance {
                         self.config.write().await.enabled = previous;
                         return Err(error);
                     }
+                    self.wake.notify_one();
                     println!("Heartbeat resumed");
                 }
                 "help" if value.is_none() => print_help(),
@@ -153,25 +161,21 @@ impl RunningComponent for HeartbeatInstance {
     }
 }
 
+/// Sleeps for the current interval; a saved command wakes it to apply new settings at once.
 async fn run_worker(
     config: SharedScope<HeartbeatConfig>,
     context: Context,
+    wake: Arc<Notify>,
     mut shutdown: watch::Receiver<bool>,
 ) {
     loop {
-        let (enabled, interval, message) = {
-            let config = config.read().await;
-            (
-                config.enabled,
-                Duration::from_secs(config.interval_secs),
-                config.message.clone(),
-            )
-        };
+        let interval = Duration::from_secs(config.read().await.interval_secs);
         tokio::select! {
             _ = tokio::time::sleep(interval) => {
-                if enabled {
-                    let mut config = config.write().await;
+                let mut config = config.write().await;
+                if config.enabled {
                     config.ticks += 1;
+                    let message = config.message.clone();
                     println!("heartbeat: {message}");
                     context.publish(Event {
                         source: "heartbeat".into(),
@@ -179,6 +183,7 @@ async fn run_worker(
                     });
                 }
             }
+            _ = wake.notified() => {}
             result = shutdown.changed() => {
                 if result.is_err() || *shutdown.borrow() {
                     return;
@@ -264,6 +269,38 @@ mod tests {
         assert!(matches!(
             persist_rx.try_recv(),
             Ok(crate::persist::PersistMessage::Changed)
+        ));
+
+        let _ = shutdown_tx.send(true);
+        component.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn commands_apply_to_the_running_worker_immediately() {
+        let store = ConfigStore::from_str("[Heartbeat]\ninterval_secs = 3600\n").unwrap();
+        let (persist_tx, _persist_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (shutdown_tx, shutdown) = watch::channel(false);
+        let (events, mut received) = broadcast::channel(16);
+        let context = Context {
+            store,
+            persistence: PersistenceHandle::new(persist_tx),
+            events,
+            shutdown,
+        };
+        let mut component = Heartbeat.start(context).await.unwrap();
+
+        component.handle_command("interval 1").await.unwrap();
+        tokio::time::timeout(Duration::from_secs(3), received.recv())
+            .await
+            .expect("the new interval must replace the pending one-hour sleep")
+            .unwrap();
+
+        component.handle_command("pause").await.unwrap();
+        while received.try_recv().is_ok() {}
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        assert!(matches!(
+            received.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
         ));
 
         let _ = shutdown_tx.send(true);

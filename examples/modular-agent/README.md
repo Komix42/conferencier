@@ -158,4 +158,5 @@ The persister serializes complete-store writes. A failed write is reported and t
 - The broadcast channel has a bounded capacity. If the journal cannot keep up, it reports how many events were missed.
 - If appending to the journal file fails, the error is printed and the event remains in the in-memory history.
 - Relative paths for `--config` and `Journal.file.path` use the working directory. Parent directories are not created.
+- Every save, including the final flush on exit, rewrites the whole configuration file from the store. Comments and formatting in a hand-edited `agent.toml` are not preserved.
 - This is an illustrative agent, not a production scheduler or logging service.
