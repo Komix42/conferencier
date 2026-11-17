@@ -141,6 +141,8 @@ Disabling a component skips its `start` method. A component that fails to load o
 
 The persister serializes complete-store writes. A failed write is reported and the in-memory store remains available; another save request or the final shutdown flush retries it. Runtime state, including heartbeat ticks, fired reminders and recent journal events, is not written to TOML.
 
+On shutdown the host first signals all components and waits for event producers to stop. Components that publish from workers must join them in `quiesce`. The host then calls `shutdown` on every component; the journal drains the events still available in its receiver before it exits. This two-phase lifecycle does not depend on the order in which components are registered.
+
 | File | Responsibility |
 |------|----------------|
 | [`src/main.rs`](src/main.rs) | Registry, startup, console dispatch, shutdown and tests for disabled or invalid components. |

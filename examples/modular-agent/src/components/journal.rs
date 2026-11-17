@@ -3,7 +3,7 @@ use std::path::{Component as PathComponent, Path, PathBuf};
 
 use conferencier::{ConfigScope, ConfigTable, SharedScope};
 use tokio::io::AsyncWriteExt;
-use tokio::sync::{broadcast, watch};
+use tokio::sync::{broadcast, oneshot};
 use tokio::task::JoinHandle;
 
 use crate::component::{Component, ComponentFuture, ComponentResult, Context, RunningComponent};
@@ -54,14 +54,12 @@ impl Component for Journal {
             }
             context.save_defaults("Journal", &config).await?;
 
-            let worker = tokio::spawn(run_worker(
-                config.clone(),
-                receiver,
-                context.shutdown.clone(),
-            ));
+            let (finish, finish_signal) = oneshot::channel();
+            let worker = tokio::spawn(run_worker(config.clone(), receiver, finish_signal));
             Ok(Box::new(JournalInstance {
                 config,
                 context,
+                finish: Some(finish),
                 worker: Some(worker),
             }) as Box<dyn RunningComponent>)
         })
@@ -71,6 +69,7 @@ impl Component for Journal {
 struct JournalInstance {
     config: SharedScope<JournalConfig>,
     context: Context,
+    finish: Option<oneshot::Sender<()>>,
     worker: Option<JoinHandle<()>>,
 }
 
@@ -126,6 +125,9 @@ impl RunningComponent for JournalInstance {
 
     fn shutdown<'a>(&'a mut self) -> ComponentFuture<'a, ()> {
         Box::pin(async move {
+            if let Some(finish) = self.finish.take() {
+                let _ = finish.send(());
+            }
             if let Some(worker) = self.worker.take() {
                 worker.await.map_err(|error| error.to_string())?;
             }
@@ -147,28 +149,40 @@ fn split_command(args: &str) -> (&str, Option<&str>) {
 async fn run_worker(
     config: SharedScope<JournalConfig>,
     mut events: broadcast::Receiver<Event>,
-    mut shutdown: watch::Receiver<bool>,
+    mut finish: oneshot::Receiver<()>,
 ) {
+    let mut draining = false;
     loop {
-        tokio::select! {
-            result = events.recv() => {
-                match result {
-                    Ok(event) => {
-                        if let Err(error) = record_event(&config, event).await {
-                            eprintln!("journal: {error}");
-                        }
-                    }
-                    Err(broadcast::error::RecvError::Lagged(count)) => {
-                        eprintln!("journal missed {count} events because its receiver lagged");
-                    }
-                    Err(broadcast::error::RecvError::Closed) => return,
+        let result = if draining {
+            match events.try_recv() {
+                Ok(event) => Ok(event),
+                Err(broadcast::error::TryRecvError::Lagged(count)) => {
+                    Err(broadcast::error::RecvError::Lagged(count))
+                }
+                Err(
+                    broadcast::error::TryRecvError::Empty | broadcast::error::TryRecvError::Closed,
+                ) => return,
+            }
+        } else {
+            tokio::select! {
+                biased;
+                _ = &mut finish => {
+                    draining = true;
+                    continue;
+                }
+                result = events.recv() => result,
+            }
+        };
+        match result {
+            Ok(event) => {
+                if let Err(error) = record_event(&config, event).await {
+                    eprintln!("journal: {error}");
                 }
             }
-            result = shutdown.changed() => {
-                if result.is_err() || *shutdown.borrow() {
-                    return;
-                }
+            Err(broadcast::error::RecvError::Lagged(count)) => {
+                eprintln!("journal missed {count} events because its receiver lagged");
             }
+            Err(broadcast::error::RecvError::Closed) => return,
         }
     }
 }
@@ -308,7 +322,7 @@ mod tests {
     use conferencier::{ConfigStore, Error};
     use std::time::Duration;
     use tempfile::tempdir;
-    use tokio::sync::broadcast;
+    use tokio::sync::{broadcast, watch};
 
     fn config(source: &str) -> Result<SharedScope<JournalConfig>, Error> {
         JournalConfig::from_store(&ConfigStore::from_str(source)?)
@@ -526,9 +540,9 @@ mod tests {
     #[tokio::test]
     async fn component_receives_published_events() {
         let scope = config("").unwrap();
-        let (shutdown_tx, shutdown) = watch::channel(false);
+        let (finish, finish_signal) = oneshot::channel();
         let (events, _) = broadcast::channel(4);
-        let worker = tokio::spawn(run_worker(scope.clone(), events.subscribe(), shutdown));
+        let worker = tokio::spawn(run_worker(scope.clone(), events.subscribe(), finish_signal));
         events
             .send(Event {
                 source: "heartbeat".into(),
@@ -547,8 +561,53 @@ mod tests {
         .await
         .unwrap();
 
-        let _ = shutdown_tx.send(true);
+        let _ = finish.send(());
         worker.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn shutdown_drains_events_already_queued() {
+        let scope = config("").unwrap();
+        let (finish, finish_signal) = oneshot::channel();
+        let (events, _) = broadcast::channel(4);
+        let receiver = events.subscribe();
+        events
+            .send(Event {
+                source: "test".into(),
+                message: "queued".into(),
+            })
+            .unwrap();
+        finish.send(()).unwrap();
+
+        run_worker(scope.clone(), receiver, finish_signal).await;
+
+        assert_eq!(scope.read().await.events[0].message, "queued");
+    }
+
+    #[tokio::test]
+    async fn shutdown_drains_retained_events_after_receiver_lags() {
+        let scope = config("").unwrap();
+        let (finish, finish_signal) = oneshot::channel();
+        let (events, _) = broadcast::channel(2);
+        let receiver = events.subscribe();
+        for index in 0..4 {
+            events
+                .send(Event {
+                    source: "test".into(),
+                    message: index.to_string(),
+                })
+                .unwrap();
+        }
+        finish.send(()).unwrap();
+        run_worker(scope.clone(), receiver, finish_signal).await;
+
+        let config = scope.read().await;
+        let messages: Vec<&str> = config
+            .events
+            .iter()
+            .map(|event| event.message.as_str())
+            .collect();
+        assert_eq!(messages, ["2", "3"]);
     }
 
     #[tokio::test]

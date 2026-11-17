@@ -151,7 +151,7 @@ impl RunningComponent for HeartbeatInstance {
         })
     }
 
-    fn shutdown<'a>(&'a mut self) -> ComponentFuture<'a, ()> {
+    fn quiesce<'a>(&'a mut self) -> ComponentFuture<'a, ()> {
         Box::pin(async move {
             if let Some(worker) = self.worker.take() {
                 worker.await.map_err(|error| error.to_string())?;
@@ -273,7 +273,7 @@ mod tests {
         ));
 
         let _ = shutdown_tx.send(true);
-        component.shutdown().await.unwrap();
+        component.quiesce().await.unwrap();
     }
 
     #[tokio::test]
@@ -306,7 +306,7 @@ mod tests {
         ));
 
         let _ = shutdown_tx.send(true);
-        component.shutdown().await.unwrap();
+        component.quiesce().await.unwrap();
     }
 
     #[test]

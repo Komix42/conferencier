@@ -118,6 +118,11 @@ async fn stop(
 ) -> AppResult<()> {
     let _ = shutdown.send(true);
     for component in &mut running {
+        if let Err(error) = component.quiesce().await {
+            eprintln!("component {} quiesce: {error}", component.name());
+        }
+    }
+    for component in &mut running {
         if let Err(error) = component.shutdown().await {
             eprintln!("component {} shutdown: {error}", component.name());
         }
@@ -294,6 +299,35 @@ impl Options {
 mod tests {
     use super::*;
 
+    struct FinalPublisher {
+        release: Option<tokio::sync::oneshot::Sender<()>>,
+        worker: Option<tokio::task::JoinHandle<()>>,
+    }
+
+    impl RunningComponent for FinalPublisher {
+        fn name(&self) -> &'static str {
+            "final-publisher"
+        }
+
+        fn handle_command<'a>(&'a mut self, _args: &'a str) -> component::ComponentFuture<'a, ()> {
+            Box::pin(async { Err("no commands".into()) })
+        }
+
+        fn quiesce<'a>(&'a mut self) -> component::ComponentFuture<'a, ()> {
+            Box::pin(async move {
+                if let Some(release) = self.release.take() {
+                    release
+                        .send(())
+                        .map_err(|_| "publisher stopped".to_string())?;
+                }
+                if let Some(worker) = self.worker.take() {
+                    worker.await.map_err(|error| error.to_string())?;
+                }
+                Ok(())
+            })
+        }
+    }
+
     #[test]
     fn parses_config_and_repeated_disabled_components() {
         let options = Options::parse(vec![
@@ -370,6 +404,108 @@ mod tests {
         }
     }
 
+    #[tokio::test(flavor = "current_thread")]
+    async fn stopping_drains_queued_and_final_events_regardless_of_component_order() {
+        for journal_first in [true, false] {
+            let directory = tempfile::tempdir().unwrap();
+            let config_path = directory.path().join("agent.toml");
+            let journal_path = directory.path().join("journal.log");
+            let source = format!(
+                "[Journal]\nkeep = 10\n[Journal.file]\npath = {:?}\n",
+                journal_path.to_string_lossy()
+            );
+            let store = ConfigStore::from_str(&source).unwrap();
+            let (persist_tx, persist_rx) = mpsc::unbounded_channel();
+            let persistence = PersistenceHandle::new(persist_tx);
+            let persister =
+                tokio::spawn(persist::run(store.clone(), config_path.clone(), persist_rx));
+            let (shutdown_tx, shutdown) = watch::channel(false);
+            let (events, _) = broadcast::channel(4);
+            let context = component::Context {
+                store,
+                config_path,
+                persistence: persistence.clone(),
+                events: events.clone(),
+                shutdown: shutdown.clone(),
+            };
+            let journal = components::journal::Journal.start(context).await.unwrap();
+            let mut publisher_shutdown = shutdown;
+            let publisher_events = events.clone();
+            let (release, released) = tokio::sync::oneshot::channel();
+            let publisher = FinalPublisher {
+                release: Some(release),
+                worker: Some(tokio::spawn(async move {
+                    publisher_shutdown.changed().await.unwrap();
+                    released.await.unwrap();
+                    publisher_events
+                        .send(events::Event {
+                            source: "test".into(),
+                            message: "during shutdown".into(),
+                        })
+                        .unwrap();
+                })),
+            };
+            events
+                .send(events::Event {
+                    source: "test".into(),
+                    message: "before shutdown".into(),
+                })
+                .unwrap();
+            let running: Vec<Box<dyn RunningComponent>> = if journal_first {
+                vec![journal, Box::new(publisher)]
+            } else {
+                vec![Box::new(publisher), journal]
+            };
+
+            tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                stop(shutdown_tx, running, persistence, persister),
+            )
+            .await
+            .expect("shutdown must finish")
+            .unwrap();
+
+            assert_eq!(
+                tokio::fs::read_to_string(journal_path).await.unwrap(),
+                "test: before shutdown\ntest: during shutdown\n"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn stopping_works_with_components_disabled() {
+        for disabled in [
+            vec!["journal".into()],
+            vec!["heartbeat".into(), "reminders".into()],
+            vec!["heartbeat".into(), "reminders".into(), "journal".into()],
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("agent.toml");
+            let store = ConfigStore::new();
+            let (persist_tx, persist_rx) = mpsc::unbounded_channel();
+            let persistence = PersistenceHandle::new(persist_tx);
+            let persister = tokio::spawn(persist::run(store.clone(), path.clone(), persist_rx));
+            let (shutdown_tx, shutdown) = watch::channel(false);
+            let (events, _) = broadcast::channel(4);
+            let context = component::Context {
+                store,
+                config_path: path,
+                persistence: persistence.clone(),
+                events,
+                shutdown,
+            };
+            let running = start_components(&components(), &disabled, context).await;
+
+            tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                stop(shutdown_tx, running, persistence, persister),
+            )
+            .await
+            .expect("shutdown must finish with disabled components")
+            .unwrap();
+        }
+    }
+
     #[tokio::test]
     async fn disabled_component_leaves_its_configuration_untouched() {
         let store =
@@ -427,6 +563,9 @@ mod tests {
         );
         assert_eq!(store.get_section("Journal").unwrap(), before);
         let _ = shutdown_tx.send(true);
+        for component in &mut running {
+            component.quiesce().await.unwrap();
+        }
         for component in &mut running {
             component.shutdown().await.unwrap();
         }

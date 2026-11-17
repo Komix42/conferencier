@@ -53,6 +53,10 @@ pub trait Component: Send + Sync {
 pub trait RunningComponent: Send {
     fn name(&self) -> &'static str;
     fn handle_command<'a>(&'a mut self, args: &'a str) -> ComponentFuture<'a, ()>;
+    /// Waits for event producers to stop before subscribers are shut down.
+    fn quiesce<'a>(&'a mut self) -> ComponentFuture<'a, ()> {
+        Box::pin(async { Ok(()) })
+    }
     fn shutdown<'a>(&'a mut self) -> ComponentFuture<'a, ()> {
         Box::pin(async { Ok(()) })
     }

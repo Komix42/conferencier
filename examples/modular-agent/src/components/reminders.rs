@@ -154,7 +154,7 @@ impl RunningComponent for RemindersInstance {
         })
     }
 
-    fn shutdown<'a>(&'a mut self) -> ComponentFuture<'a, ()> {
+    fn quiesce<'a>(&'a mut self) -> ComponentFuture<'a, ()> {
         Box::pin(async move {
             if let Some(worker) = self.worker.take() {
                 worker.await.map_err(|error| error.to_string())?;
@@ -267,7 +267,7 @@ mod tests {
         assert!(matches!(persist_rx.try_recv(), Ok(PersistMessage::Changed)));
 
         let _ = shutdown_tx.send(true);
-        component.shutdown().await.unwrap();
+        component.quiesce().await.unwrap();
     }
 
     #[tokio::test]
@@ -303,7 +303,7 @@ mod tests {
         persist_rx.try_recv().unwrap();
 
         let _ = shutdown_tx.send(true);
-        component.shutdown().await.unwrap();
+        component.quiesce().await.unwrap();
     }
 
     #[tokio::test]
