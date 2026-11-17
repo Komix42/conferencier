@@ -11,6 +11,8 @@ use std::path::PathBuf;
 
 use conferencier::{ConfigScope, ConfigStore, ConfigTable, SharedScope};
 
+use crate::scan::{IndexedFile, SourceStats};
+
 pub type BoxError = Box<dyn Error + Send + Sync>;
 
 /// Settings of the scanner, the `[Indexer]` section.
@@ -36,6 +38,15 @@ pub struct IndexerConfig {
     /// `sources = []`.
     #[confer(table, default)]
     pub sources: Vec<Source>,
+    /// Runtime results from the last successful scan; never written to TOML.
+    #[confer(ignore = Vec::new())]
+    pub files: Vec<IndexedFile>,
+    /// Runtime per-source counts from the last successful scan.
+    #[confer(ignore = Vec::new())]
+    pub source_stats: Vec<SourceStats>,
+    /// Distinguishes a completed scan with no sources from no scan yet.
+    #[confer(ignore)]
+    pub has_scanned: bool,
 }
 
 /// One folder to index, an element of `[[Indexer.sources]]`.
@@ -87,7 +98,7 @@ pub struct Summary {
 ///
 /// It is strict although `[Report]` is not: strictness is not inherited in
 /// either direction.
-#[derive(ConfigTable)]
+#[derive(Clone, ConfigTable)]
 #[confer(deny_unknown_keys)]
 pub struct CatalogFile {
     /// The JSON file, relative to the configuration file or absolute.
@@ -168,6 +179,30 @@ impl Settings {
         IndexerConfig::save(&self.indexer, &snapshot).await?;
         ReportConfig::save(&self.report, &snapshot).await?;
         Ok(snapshot.save_str()?)
+    }
+
+    /// Copies both scopes into the store, then writes the whole file.
+    ///
+    /// Scope saves replace only their own sections; the store save persists all
+    /// sections together. This is called after each successful console edit.
+    pub async fn save(&self) -> Result<(), BoxError> {
+        let previous = self.store.save_str()?;
+        let result = async {
+            IndexerConfig::save(&self.indexer, &self.store).await?;
+            ReportConfig::save(&self.report, &self.store).await?;
+            self.write_file().await?;
+            Ok::<(), BoxError>(())
+        }
+        .await;
+        if let Err(error) = result {
+            // Restore the in-memory store and both scopes if persistence failed.
+            // Scope loads leave their ignored runtime state untouched.
+            self.store.load_str(&previous)?;
+            IndexerConfig::load(&self.indexer, &self.store).await?;
+            ReportConfig::load(&self.report, &self.store).await?;
+            return Err(error);
+        }
+        Ok(())
     }
 
     /// Writes the whole store to the configuration file.
