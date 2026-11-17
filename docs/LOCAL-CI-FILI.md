@@ -101,7 +101,7 @@ wsl --install -d Ubuntu-24.04
 In Ubuntu:
 
 ```sh
-sudo apt update && sudo apt install -y build-essential git curl pkg-config
+sudo apt update && sudo apt install -y build-essential git curl pkg-config jq
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 source ~/.cargo/env
 rustup toolchain install 1.85
