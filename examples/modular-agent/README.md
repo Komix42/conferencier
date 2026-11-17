@@ -59,7 +59,7 @@ Component commands use the component name as a prefix:
 | `reminders add <name> <seconds> <message>` | Add a uniquely named reminder and save it. Its timer starts now. |
 | `reminders remove <name>` | Remove and save a reminder. |
 | `journal show` | Show recent events held in memory. |
-| `journal file <path>` | Append future events to a file. The path is relative to the working directory. |
+| `journal file <path>` | Append future events to a file. The path is relative to the working directory and must not resolve to the configuration file. |
 | `journal file off` | Stop writing events to a file; does not delete an existing file. |
 
 For example, from the repository root:
@@ -153,10 +153,10 @@ The persister serializes complete-store writes. A failed write is reported and t
 
 ## Limitations
 
-- The console splits commands on whitespace. A reminder name cannot contain spaces; its message and a journal path can.
+- The first whitespace separates a command from its arguments; internal spaces in messages and journal paths are preserved. A reminder name cannot contain spaces.
 - The journal keeps only the configured number of recent events in memory. Its file output appends every received event and does not rotate or truncate the file.
 - The broadcast channel has a bounded capacity. If the journal cannot keep up, it reports how many events were missed.
-- If appending to the journal file fails, the error is printed and the event remains in the in-memory history.
+- If writing or flushing the journal file fails, the error is printed and the event remains in the in-memory history.
 - Relative paths for `--config` and `Journal.file.path` use the working directory. Parent directories are not created.
 - Every save, including the final flush on exit, rewrites the whole configuration file from the store. Comments and formatting in a hand-edited `agent.toml` are not preserved.
 - This is an illustrative agent, not a production scheduler or logging service.

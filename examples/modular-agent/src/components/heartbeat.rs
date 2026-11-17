@@ -252,6 +252,7 @@ mod tests {
         let (events, _) = broadcast::channel(4);
         let context = Context {
             store: store.clone(),
+            config_path: std::path::PathBuf::from("agent.toml"),
             persistence: PersistenceHandle::new(persist_tx),
             events,
             shutdown,
@@ -283,6 +284,7 @@ mod tests {
         let (events, mut received) = broadcast::channel(16);
         let context = Context {
             store,
+            config_path: std::path::PathBuf::from("agent.toml"),
             persistence: PersistenceHandle::new(persist_tx),
             events,
             shutdown,

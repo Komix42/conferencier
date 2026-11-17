@@ -1,5 +1,5 @@
 use std::collections::VecDeque;
-use std::path::Path;
+use std::path::{Component as PathComponent, Path, PathBuf};
 
 use conferencier::{ConfigScope, ConfigTable, SharedScope};
 use tokio::io::AsyncWriteExt;
@@ -43,6 +43,15 @@ impl Component for Journal {
             let config =
                 JournalConfig::from_store(&context.store).map_err(|error| error.to_string())?;
             validate(&*config.read().await)?;
+            let file_path = config
+                .read()
+                .await
+                .file
+                .as_ref()
+                .map(|file| file.path.clone());
+            if let Some(path) = file_path {
+                validate_output_path(Path::new(&path), &context.config_path).await?;
+            }
             context.save_defaults("Journal", &config).await?;
 
             let worker = tokio::spawn(run_worker(
@@ -72,9 +81,7 @@ impl RunningComponent for JournalInstance {
 
     fn handle_command<'a>(&'a mut self, args: &'a str) -> ComponentFuture<'a, ()> {
         Box::pin(async move {
-            let mut words = args.splitn(2, ' ');
-            let command = words.next().unwrap_or_default();
-            let value = words.next().map(str::trim_start);
+            let (command, value) = split_command(args);
             match command {
                 "show" if value.is_none() => {
                     let config = self.config.read().await;
@@ -92,6 +99,7 @@ impl RunningComponent for JournalInstance {
                     } else if value.trim().is_empty() {
                         return Err("journal file path must not be empty".into());
                     } else {
+                        validate_output_path(Path::new(value), &self.context.config_path).await?;
                         Some(JournalFile {
                             path: value.to_owned(),
                         })
@@ -123,6 +131,16 @@ impl RunningComponent for JournalInstance {
             }
             Ok(())
         })
+    }
+}
+
+fn split_command(args: &str) -> (&str, Option<&str>) {
+    match args.find(char::is_whitespace) {
+        Some(index) => (
+            &args[..index],
+            Some(args[index..].trim_start_matches(char::is_whitespace)),
+        ),
+        None => (args, None),
     }
 }
 
@@ -180,7 +198,91 @@ async fn append_line(path: &Path, line: &[u8]) -> ComponentResult<()> {
         .map_err(|error| format!("cannot open {}: {error}", path.display()))?;
     file.write_all(line)
         .await
-        .map_err(|error| format!("cannot write {}: {error}", path.display()))
+        .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+    file.flush()
+        .await
+        .map_err(|error| format!("cannot flush {}: {error}", path.display()))
+}
+
+async fn validate_output_path(path: &Path, config_path: &Path) -> ComponentResult<()> {
+    let output_path = resolve_path(path).await?;
+    let config_path_resolved = resolve_path(config_path).await?;
+    if same_path(&output_path, &config_path_resolved) {
+        return Err(format!(
+            "journal file path {} resolves to the configuration file {}",
+            path.display(),
+            config_path.display()
+        ));
+    }
+    Ok(())
+}
+
+fn same_path(left: &Path, right: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        left.to_string_lossy()
+            .eq_ignore_ascii_case(&right.to_string_lossy())
+    }
+    #[cfg(not(windows))]
+    {
+        left == right
+    }
+}
+
+async fn resolve_path(path: &Path) -> ComponentResult<PathBuf> {
+    let absolute = if path.is_absolute() {
+        path.to_owned()
+    } else {
+        std::env::current_dir()
+            .map_err(|error| format!("cannot resolve {}: {error}", path.display()))?
+            .join(path)
+    };
+    let absolute = normalize_path(&absolute);
+    let mut ancestor = absolute.as_path();
+    let mut suffix = Vec::new();
+
+    loop {
+        match tokio::fs::canonicalize(ancestor).await {
+            Ok(mut resolved) => {
+                for component in suffix.iter().rev() {
+                    resolved.push(component);
+                }
+                return Ok(resolved);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let Some(name) = ancestor.file_name() else {
+                    return Err(format!(
+                        "cannot resolve {}: no existing parent directory",
+                        path.display()
+                    ));
+                };
+                suffix.push(name.to_owned());
+                ancestor = ancestor.parent().ok_or_else(|| {
+                    format!(
+                        "cannot resolve {}: no existing parent directory",
+                        path.display()
+                    )
+                })?;
+            }
+            Err(error) => {
+                return Err(format!("cannot resolve {}: {error}", path.display()));
+            }
+        }
+    }
+}
+
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            PathComponent::CurDir => {}
+            PathComponent::ParentDir => {
+                normalized.pop();
+            }
+            _ => normalized.push(component.as_os_str()),
+        }
+    }
+    normalized
 }
 
 fn validate(config: &JournalConfig) -> ComponentResult<()> {
@@ -289,6 +391,7 @@ mod tests {
         let (events, _) = broadcast::channel(4);
         let context = Context {
             store: store.clone(),
+            config_path: std::path::PathBuf::from("agent.toml"),
             persistence: PersistenceHandle::new(persist_tx),
             events,
             shutdown,
@@ -296,8 +399,19 @@ mod tests {
         let mut component = Journal.start(context).await.unwrap();
         assert!(matches!(persist_rx.try_recv(), Ok(PersistMessage::Changed)));
 
-        component.handle_command("file journal.log").await.unwrap();
+        component
+            .handle_command("file events  archive.log")
+            .await
+            .unwrap();
         assert!(store.save_str().unwrap().contains("[Journal.file]"));
+        let journal_section = store.get_section("Journal").unwrap();
+        let journal_file = journal_section
+            .get("file")
+            .and_then(conferencier::toml::Value::as_table)
+            .unwrap()
+            .get("path")
+            .and_then(conferencier::toml::Value::as_str);
+        assert_eq!(journal_file, Some("events  archive.log"));
         assert!(matches!(persist_rx.try_recv(), Ok(PersistMessage::Changed)));
 
         component.handle_command("file off").await.unwrap();
@@ -306,6 +420,107 @@ mod tests {
 
         let _ = shutdown_tx.send(true);
         component.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn refuses_to_use_the_configuration_file_as_journal_output() {
+        let directory = tempdir().unwrap();
+        let config_path = directory.path().join("agent.toml");
+        tokio::fs::write(&config_path, "[Journal]\nkeep = 100\n")
+            .await
+            .unwrap();
+        let store = ConfigStore::from_file(&config_path).await.unwrap();
+        let (persist_tx, mut persist_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (shutdown_tx, shutdown) = watch::channel(false);
+        let (events, _) = broadcast::channel(4);
+        let context = Context {
+            store: store.clone(),
+            config_path: config_path.clone(),
+            persistence: PersistenceHandle::new(persist_tx),
+            events,
+            shutdown,
+        };
+        let mut component = Journal.start(context).await.unwrap();
+
+        let alias = config_path
+            .parent()
+            .unwrap()
+            .join("nested")
+            .join("..")
+            .join("agent.toml");
+        tokio::fs::create_dir(config_path.parent().unwrap().join("nested"))
+            .await
+            .unwrap();
+        let error = component
+            .handle_command(&format!("file {}", alias.display()))
+            .await
+            .unwrap_err();
+        assert!(
+            error.contains("resolves to the configuration file"),
+            "{error}"
+        );
+        assert!(store.get_section("Journal").unwrap().get("file").is_none());
+        assert!(matches!(
+            persist_rx.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ));
+
+        component
+            .handle_command(&format!("file {}", config_path.display()))
+            .await
+            .unwrap_err();
+        assert!(store.get_section("Journal").unwrap().get("file").is_none());
+        let _ = shutdown_tx.send(true);
+        component.shutdown().await.unwrap();
+        assert_eq!(
+            tokio::fs::read_to_string(config_path).await.unwrap(),
+            "[Journal]\nkeep = 100\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn skips_start_when_existing_journal_path_is_the_configuration_file() {
+        let directory = tempdir().unwrap();
+        let config_path = directory.path().join("agent.toml");
+        tokio::fs::write(&config_path, "[Journal]\nkeep = 100\n")
+            .await
+            .unwrap();
+        let source = format!(
+            "[Journal]\nkeep = 100\n[Journal.file]\npath = {:?}\n",
+            config_path.to_string_lossy()
+        );
+        let store = ConfigStore::from_str(&source).unwrap();
+        let (persist_tx, _persist_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (_shutdown_tx, shutdown) = watch::channel(false);
+        let (events, _) = broadcast::channel(4);
+        let context = Context {
+            store,
+            config_path,
+            persistence: PersistenceHandle::new(persist_tx),
+            events,
+            shutdown,
+        };
+
+        match Journal.start(context).await {
+            Err(error) => assert!(error.contains("resolves to the configuration file")),
+            Ok(_) => panic!("journal started with the configuration file as its output"),
+        }
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn rejects_case_variant_of_a_not_yet_created_configuration_path() {
+        let directory = tempdir().unwrap();
+        let config_path = directory.path().join("agent.toml");
+        let output_path = directory.path().join("AGENT.TOML");
+
+        let error = validate_output_path(&output_path, &config_path)
+            .await
+            .unwrap_err();
+        assert!(
+            error.contains("resolves to the configuration file"),
+            "{error}"
+        );
     }
 
     #[tokio::test]

@@ -70,6 +70,7 @@ async fn run(args: Vec<String>, components: Vec<Box<dyn Component>>) -> AppResul
 
     let context = component::Context {
         store: store.clone(),
+        config_path: options.config.clone(),
         persistence: persistence.clone(),
         events: events_tx,
         shutdown: shutdown_rx,
@@ -92,7 +93,7 @@ async fn run(args: Vec<String>, components: Vec<Box<dyn Component>>) -> AppResul
         tokio::select! {
             line = console.recv() => {
                 let Some(line) = line else { break Ok(()) };
-                match handle(&store, &mut running, line.trim()).await {
+                match handle(&store, &mut running, line.trim_start()).await {
                     Ok(Continue::Yes) => {}
                     Ok(Continue::No) => break Ok(()),
                     Err(error) => eprintln!("error: {error}"),
@@ -192,10 +193,10 @@ async fn handle(
     components: &mut [Box<dyn RunningComponent>],
     line: &str,
 ) -> AppResult<Continue> {
-    let mut words = line.split_whitespace();
-    let Some(command) = words.next() else {
+    let (command, args) = split_command(line);
+    if command.is_empty() {
         return Ok(Continue::Yes);
-    };
+    }
     match command {
         "help" => print_help(components),
         "components" => {
@@ -210,11 +211,20 @@ async fn handle(
                 .iter_mut()
                 .find(|component| component.name() == name)
                 .ok_or_else(|| format!("unknown command or component {name:?}"))?;
-            let args = words.collect::<Vec<_>>().join(" ");
-            component.handle_command(&args).await?;
+            component.handle_command(args.unwrap_or_default()).await?;
         }
     }
     Ok(Continue::Yes)
+}
+
+fn split_command(line: &str) -> (&str, Option<&str>) {
+    match line.find(char::is_whitespace) {
+        Some(index) => (
+            &line[..index],
+            Some(line[index..].trim_start_matches(char::is_whitespace)),
+        ),
+        None => (line, None),
+    }
 }
 
 fn print_help(components: &[Box<dyn RunningComponent>]) {
@@ -314,6 +324,18 @@ mod tests {
         assert!(Options::parse(vec!["--other".into()]).is_err());
     }
 
+    #[test]
+    fn component_arguments_preserve_internal_and_trailing_spaces() {
+        assert_eq!(
+            split_command("journal file events  archive.log"),
+            ("journal", Some("file events  archive.log"))
+        );
+        assert_eq!(
+            split_command("heartbeat message still  here "),
+            ("heartbeat", Some("message still  here "))
+        );
+    }
+
     #[tokio::test]
     async fn stopping_flushes_and_ends_while_components_hold_persistence_handles() {
         let directory = tempfile::tempdir().unwrap();
@@ -326,6 +348,7 @@ mod tests {
         let (events, _) = broadcast::channel(4);
         let context = component::Context {
             store: store.clone(),
+            config_path: path.clone(),
             persistence: persistence.clone(),
             events,
             shutdown,
@@ -359,6 +382,7 @@ mod tests {
         let (events, _) = broadcast::channel(4);
         let context = component::Context {
             store: store.clone(),
+            config_path: PathBuf::from("agent.toml"),
             persistence,
             events,
             shutdown,
@@ -386,6 +410,7 @@ mod tests {
         let (events, _) = broadcast::channel(4);
         let context = component::Context {
             store: store.clone(),
+            config_path: PathBuf::from("agent.toml"),
             persistence,
             events,
             shutdown,

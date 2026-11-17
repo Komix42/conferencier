@@ -1,4 +1,5 @@
 use std::future::Future;
+use std::path::PathBuf;
 use std::pin::Pin;
 
 use conferencier::{ConfigScope, ConfigStore, SharedScope};
@@ -13,6 +14,7 @@ pub type ComponentFuture<'a, T> = Pin<Box<dyn Future<Output = ComponentResult<T>
 #[derive(Clone)]
 pub struct Context {
     pub store: ConfigStore,
+    pub config_path: PathBuf,
     pub persistence: PersistenceHandle,
     pub events: broadcast::Sender<Event>,
     pub shutdown: watch::Receiver<bool>,
