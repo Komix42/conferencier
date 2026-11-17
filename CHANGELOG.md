@@ -6,10 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.0.8] - 2026-11-17
+
 ### Added
 - A runnable example application, [`examples/uptime-monitor`](examples/uptime-monitor/README.md): an Axum status page and a background worker checking TCP targets, configured by one store with a scope per component. It demonstrates runtime state in ignored fields, application-side validation, an all-or-nothing explicit reload and export of the effective configuration. It is an unpublished workspace package, so the library crates gain no dependencies.
 - A runnable [`examples/folder-indexer`](examples/folder-indexer/README.md) application: it scans folders, reports their contents and optionally creates a JSON catalog. Console commands manage and save its own configuration, demonstrating defaults, nested and optional tables, and runtime state in shared scopes. Catalogs are created only at new paths, without overwriting existing files.
 - A runnable [`examples/modular-agent`](examples/modular-agent/README.md) application: independent components own and save their configuration sections, publish and subscribe to events, and continue independently when another component is disabled or misconfigured. A single persister serializes writes to the shared configuration file.
+
+See the [migration guide from 0.0.7](conferencier/guide/migration.md#from-007-to-008).
 
 ## [0.0.7] - 2026-11-16
 

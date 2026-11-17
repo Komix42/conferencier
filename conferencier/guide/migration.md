@@ -5,6 +5,11 @@ order. Names in a section refer to the API of that release; for example,
 `ConferModule` in the 0.0.4 instructions becomes `ConfigScope` in 0.0.5.
 Before saving, check that each scope uses the intended TOML section.
 
+## From 0.0.7 to 0.0.8
+
+The 0.0.8 release adds example applications; no library API or configuration
+migration is required.
+
 ## From 0.0.6 to 0.0.7
 
 The 0.0.7 release focuses on documentation; no configuration API migration is
