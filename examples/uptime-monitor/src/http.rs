@@ -91,3 +91,46 @@ async fn count_request(http: &SharedScope<HttpConfig>) -> u64 {
     config.requests_served += 1;
     config.requests_served
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, Instant};
+
+    use super::*;
+    use crate::config;
+    use crate::monitor::{CheckResult, Status};
+
+    #[tokio::test]
+    async fn readded_target_is_not_checked_until_a_new_result_arrives() {
+        let initial = "[Monitor]\nenabled = false\n\
+            [[Monitor.targets]]\nname = 'service'\naddress = 'service:1'\n";
+        let removed = "[Monitor]\nenabled = false\ntargets = []\n";
+        let store = ConfigStore::from_str(initial).unwrap();
+        let http = HttpConfig::from_store(&store).unwrap();
+        let monitor = MonitorConfig::from_store(&store).unwrap();
+        monitor.write().await.results.insert(
+            "service".into(),
+            CheckResult {
+                address: "service:1".into(),
+                status: Status::Up {
+                    latency: Duration::from_millis(1),
+                },
+                checked_at: Instant::now(),
+            },
+        );
+        let state = AppState { http, monitor };
+        assert!(status(State(state.clone())).await.contains("up ("));
+
+        config::reload(&store, &state.http, &state.monitor, removed)
+            .await
+            .unwrap();
+        config::reload(&store, &state.http, &state.monitor, initial)
+            .await
+            .unwrap();
+        let page = status(State(state)).await;
+        assert!(page.contains("Monitoring is paused."));
+        assert!(page.contains("service:1"));
+        assert!(page.contains("not checked yet"));
+        assert!(!page.contains("up ("));
+    }
+}

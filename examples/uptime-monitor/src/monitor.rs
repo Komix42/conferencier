@@ -1,6 +1,5 @@
 //! The background worker that checks the configured targets.
 
-use std::collections::HashSet;
 use std::fmt;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -54,19 +53,20 @@ pub async fn run(
     loop {
         // Copy the settings and release the lock before any network I/O, so a slow
         // check never blocks the HTTP server or a reload.
-        let (enabled, interval, timeout, targets) = {
+        let (enabled, interval, timeout, targets, generation) = {
             let config = monitor.read().await;
             (
                 config.enabled,
                 config.interval(),
                 config.timeout(),
                 config.targets.clone(),
+                config.generation.clone(),
             )
         };
 
         if enabled {
             tokio::select! {
-                results = check_all(targets, timeout) => record(&monitor, results).await,
+                results = check_all(targets, timeout) => record(&monitor, &generation, results).await,
                 _ = shutdown.changed() => return,
             }
         }
@@ -115,9 +115,16 @@ async fn check(address: String, timeout: Duration) -> CheckResult {
 }
 
 /// Stores the results in the scope's runtime state and reports status changes.
-async fn record(monitor: &SharedScope<MonitorConfig>, results: Vec<(String, CheckResult)>) {
+async fn record(
+    monitor: &SharedScope<MonitorConfig>,
+    generation: &Arc<()>,
+    results: Vec<(String, CheckResult)>,
+) {
     let mut guard = monitor.write().await;
     let config = &mut *guard;
+    if !Arc::ptr_eq(&config.generation, generation) {
+        return;
+    }
     for (name, result) in results {
         // A reload during the checks may have removed the target or changed its address.
         let configured = config
@@ -133,8 +140,81 @@ async fn record(monitor: &SharedScope<MonitorConfig>, results: Vec<(String, Chec
             println!("{name} is {}", if is_up { "up" } else { "down" });
         }
     }
-    let names: HashSet<&str> = config.targets.iter().map(|t| t.name.as_str()).collect();
-    config
-        .results
-        .retain(|name, _| names.contains(name.as_str()));
+}
+
+#[cfg(test)]
+mod tests {
+    use conferencier::{ConfigScope, ConfigStore};
+
+    use super::*;
+    use crate::config::{self, HttpConfig};
+
+    fn result(address: &str) -> CheckResult {
+        CheckResult {
+            address: address.into(),
+            status: Status::Up {
+                latency: Duration::from_millis(1),
+            },
+            checked_at: Instant::now(),
+        }
+    }
+
+    #[tokio::test]
+    async fn old_checks_cannot_reappear_after_target_changes_or_is_readded() {
+        let initial = "[Monitor]\nenabled = false\n\
+                [[Monitor.targets]]\nname = 'service'\naddress = 'service:1'\n";
+        let removed = "[Monitor]\nenabled = false\ntargets = []\n";
+        let changed = "[Monitor]\nenabled = false\n\
+                [[Monitor.targets]]\nname = 'service'\naddress = 'service:2'\n";
+        for replacement in [removed, changed] {
+            let store = ConfigStore::from_str(initial).unwrap();
+            let http = HttpConfig::from_store(&store).unwrap();
+            let monitor = MonitorConfig::from_store(&store).unwrap();
+            let old_generation = monitor.read().await.generation.clone();
+
+            config::reload(&store, &http, &monitor, replacement)
+                .await
+                .unwrap();
+            config::reload(&store, &http, &monitor, initial)
+                .await
+                .unwrap();
+            record(
+                &monitor,
+                &old_generation,
+                vec![("service".into(), result("service:1"))],
+            )
+            .await;
+            assert!(monitor.read().await.results.is_empty());
+
+            let current_generation = monitor.read().await.generation.clone();
+            record(
+                &monitor,
+                &current_generation,
+                vec![("service".into(), result("service:1"))],
+            )
+            .await;
+            assert_eq!(monitor.read().await.results["service"].address, "service:1");
+        }
+    }
+
+    #[tokio::test]
+    async fn successful_reload_invalidates_in_flight_checks_for_unchanged_targets() {
+        let source = "[Monitor]\n\
+                [[Monitor.targets]]\nname = 'service'\naddress = 'service:1'\n";
+        let store = ConfigStore::from_str(source).unwrap();
+        let http = HttpConfig::from_store(&store).unwrap();
+        let monitor = MonitorConfig::from_store(&store).unwrap();
+        let generation = monitor.read().await.generation.clone();
+
+        config::reload(&store, &http, &monitor, source)
+            .await
+            .unwrap();
+        record(
+            &monitor,
+            &generation,
+            vec![("service".into(), result("service:1"))],
+        )
+        .await;
+        assert!(monitor.read().await.results.is_empty());
+    }
 }

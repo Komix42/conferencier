@@ -5,6 +5,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
+use std::sync::Arc;
 use std::time::Duration;
 
 use conferencier::{ConfigScope, ConfigStore, ConfigTable, SharedScope};
@@ -42,9 +43,12 @@ pub struct MonitorConfig {
     #[confer(table)]
     pub targets: Vec<Target>,
     /// The latest check result of each target by name. Runtime state written by
-    /// the worker and read by the HTTP server; a reload keeps it.
+    /// the worker and read by the HTTP server.
     #[confer(ignore = HashMap::new())]
     pub results: HashMap<String, CheckResult>,
+    /// Identifies the configuration under which a round of checks started.
+    #[confer(ignore = Arc::new(()))]
+    pub generation: Arc<()>,
 }
 
 /// One monitored service, an element of `[[Monitor.targets]]`.
@@ -99,7 +103,8 @@ pub fn validate(monitor: &MonitorConfig) -> Result<(), String> {
 ///
 /// The source is first loaded into a separate store and checked there, so on
 /// any error the application's store and scopes keep their previous values.
-/// Runtime state in ignored fields is kept.
+/// The request counter and results for unchanged targets are kept. In-flight
+/// checks from before the reload are invalidated.
 pub async fn reload(
     store: &ConfigStore,
     http: &SharedScope<HttpConfig>,
@@ -115,6 +120,19 @@ pub async fn reload(
     store.load_str(source)?;
     HttpConfig::load(http, store).await?;
     MonitorConfig::load(monitor, store).await?;
+    let mut monitor = monitor.write().await;
+    let MonitorConfig {
+        targets,
+        results,
+        generation,
+        ..
+    } = &mut *monitor;
+    *generation = Arc::new(());
+    results.retain(|name, result| {
+        targets
+            .iter()
+            .any(|target| target.name == *name && target.address == result.address)
+    });
     Ok(())
 }
 
@@ -123,6 +141,7 @@ mod tests {
     use conferencier::Error;
 
     use super::*;
+    use crate::monitor::Status;
 
     const BUNDLED: &str = include_str!("../config/monitor.toml");
 
@@ -190,11 +209,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn reload_keeps_unchanged_results_and_removes_changed_or_absent_targets() {
+        let initial = "[Monitor]\nenabled = false\n\
+            [[Monitor.targets]]\nname = 'keep'\naddress = 'keep:1'\n\
+            [[Monitor.targets]]\nname = 'changed'\naddress = 'old:1'\n\
+            [[Monitor.targets]]\nname = 'removed'\naddress = 'removed:1'\n";
+        let store = ConfigStore::from_str(initial).unwrap();
+        let http = HttpConfig::from_store(&store).unwrap();
+        let monitor = MonitorConfig::from_store(&store).unwrap();
+        let checked_at = std::time::Instant::now();
+        {
+            let mut monitor = monitor.write().await;
+            for (name, address) in [
+                ("keep", "keep:1"),
+                ("changed", "old:1"),
+                ("removed", "removed:1"),
+            ] {
+                monitor.results.insert(
+                    name.into(),
+                    CheckResult {
+                        address: address.into(),
+                        status: Status::Up {
+                            latency: Duration::from_millis(1),
+                        },
+                        checked_at,
+                    },
+                );
+            }
+        }
+
+        let changed = "[Monitor]\nenabled = false\n\
+            [[Monitor.targets]]\nname = 'keep'\naddress = 'keep:1'\n\
+            [[Monitor.targets]]\nname = 'changed'\naddress = 'new:1'\n";
+        reload(&store, &http, &monitor, changed).await.unwrap();
+        {
+            let monitor = monitor.read().await;
+            assert_eq!(monitor.results.len(), 1);
+            assert_eq!(monitor.results["keep"].checked_at, checked_at);
+            assert!(!monitor.results.contains_key("changed"));
+            assert!(!monitor.results.contains_key("removed"));
+        }
+
+        reload(&store, &http, &monitor, initial).await.unwrap();
+        let monitor = monitor.read().await;
+        assert_eq!(monitor.results.len(), 1);
+        assert_eq!(monitor.results["keep"].checked_at, checked_at);
+        assert!(!monitor.results.contains_key("changed"));
+        assert!(!monitor.results.contains_key("removed"));
+    }
+
+    #[tokio::test]
     async fn failed_reload_leaves_store_and_scopes_unchanged() {
         let store = ConfigStore::from_str(BUNDLED).unwrap();
         let http = HttpConfig::from_store(&store).unwrap();
         let monitor = MonitorConfig::from_store(&store).unwrap();
         let before = store.save_str().unwrap();
+        let generation = monitor.read().await.generation.clone();
 
         let invalid = [
             "[Monitor\n",                                          // TOML syntax
@@ -213,6 +283,7 @@ mod tests {
             let monitor = monitor.read().await;
             assert_eq!(monitor.interval_secs, 10, "{source}");
             assert_eq!(monitor.targets.len(), 2, "{source}");
+            assert!(Arc::ptr_eq(&monitor.generation, &generation), "{source}");
         }
     }
 }

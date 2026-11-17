@@ -8,6 +8,7 @@ mod config;
 mod http;
 mod monitor;
 
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -27,8 +28,9 @@ struct App {
     monitor: SharedScope<MonitorConfig>,
     /// Starts the worker's next round immediately.
     wake: Arc<Notify>,
-    /// The address the HTTP server listens on; it changes only with a restart.
-    listening: (String, u16),
+    /// The configuration used to bind, and the actual address chosen by the OS.
+    listener_config: (String, u16),
+    listening: SocketAddr,
 }
 
 #[tokio::main]
@@ -50,14 +52,20 @@ async fn run() -> AppResult<()> {
     config::validate(&*monitor.read().await)?;
     println!("Loaded configuration from {}", path.display());
 
-    let listening = {
+    let listener_config = {
         let http = http.read().await;
         (http.address.clone(), http.port)
     };
-    let listener = TcpListener::bind((listening.0.as_str(), listening.1))
+    let listener = TcpListener::bind((listener_config.0.as_str(), listener_config.1))
         .await
-        .map_err(|error| format!("cannot listen on {}:{}: {error}", listening.0, listening.1))?;
-    let url = format!("http://{}/", listener.local_addr()?);
+        .map_err(|error| {
+            format!(
+                "cannot listen on {}:{}: {error}",
+                listener_config.0, listener_config.1
+            )
+        })?;
+    let listening = listener.local_addr()?;
+    let url = format!("http://{listening}/");
     println!("Status at {url} and the configuration in use at {url}config");
 
     let (shutdown, shutdown_signal) = watch::channel(());
@@ -79,6 +87,7 @@ async fn run() -> AppResult<()> {
         http,
         monitor,
         wake,
+        listener_config,
         listening,
     };
     print_help();
@@ -145,13 +154,24 @@ async fn reload(app: &App) -> AppResult<()> {
     println!("Reloaded configuration from {}", path.display());
 
     let http = app.http.read().await;
-    if (http.address.as_str(), http.port) != (app.listening.0.as_str(), app.listening.1) {
-        println!(
-            "The HTTP server keeps listening on {}:{}; restart the application to use {}:{}.",
-            app.listening.0, app.listening.1, http.address, http.port
-        );
+    if let Some(notice) = listener_restart_notice(&http, &app.listener_config, app.listening) {
+        println!("{notice}");
     }
     Ok(())
+}
+
+fn listener_restart_notice(
+    http: &HttpConfig,
+    listener_config: &(String, u16),
+    listening: SocketAddr,
+) -> Option<String> {
+    if (http.address.as_str(), http.port) == (listener_config.0.as_str(), listener_config.1) {
+        return None;
+    }
+    Some(format!(
+        "The HTTP server keeps listening on {listening}; restart the application to use {}:{}.",
+        http.address, http.port
+    ))
 }
 
 /// Changes a setting at runtime. The change lives in the scope only: `export`
@@ -214,4 +234,42 @@ fn effective_config_path() -> PathBuf {
 /// The configuration directory, independent of the working directory.
 fn config_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("config")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn listener_notice_uses_bound_address_and_compares_requested_settings() {
+        let listener_config = ("127.0.0.1".to_owned(), 0);
+        let listener = TcpListener::bind((listener_config.0.as_str(), listener_config.1))
+            .await
+            .unwrap();
+        let listening = listener.local_addr().unwrap();
+        assert_ne!(listening.port(), 0);
+        let store = ConfigStore::from_str("[Http]\nport = 0\n").unwrap();
+        let http = HttpConfig::from_store(&store).unwrap();
+        let mut http = http.write().await;
+
+        assert!(listener_restart_notice(&http, &listener_config, listening).is_none());
+        http.port = listening.port();
+        assert_eq!(
+            listener_restart_notice(&http, &listener_config, listening).unwrap(),
+            format!(
+                "The HTTP server keeps listening on {listening}; restart the application to use 127.0.0.1:{}.",
+                listening.port()
+            )
+        );
+        http.port = 0;
+        http.address = "localhost".into();
+        assert_eq!(
+            listener_restart_notice(&http, &listener_config, listening).unwrap(),
+            format!(
+                "The HTTP server keeps listening on {listening}; restart the application to use localhost:0."
+            )
+        );
+        http.address = "127.0.0.1".into();
+        assert!(listener_restart_notice(&http, &listener_config, listening).is_none());
+    }
 }

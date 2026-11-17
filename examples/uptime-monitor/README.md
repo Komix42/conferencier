@@ -6,7 +6,7 @@ The example shows how conferencier fits into a Tokio application with several co
 
 - **One store, one scope per component.** The HTTP server owns the `[Http]` section and the worker owns `[Monitor]`; both scopes come from one `ConfigStore` loaded from one file.
 - **Nested tables and strict keys.** Targets are an array of tables (`[[Monitor.targets]]`), and a misspelled key such as `adress` is an error instead of being silently ignored.
-- **Runtime state next to configuration.** The check results and the request counter live in ignored fields of the scopes. They are never loaded or saved, and they survive a reload.
+- **Runtime state next to configuration.** The check results and the request counter live in ignored fields of the scopes. They are never loaded or saved; the application keeps the counter and results for unchanged targets across a reload.
 - **Validation in the application.** Conferencier converts values to the field types; rules such as a nonzero interval or unique target names are checked by the application.
 - **Explicit reload that is all or nothing.** A changed file is applied only if all of it is valid; otherwise the application keeps running with its previous configuration.
 - **Export of the effective configuration.** Changes made at runtime are saved to a separate file, leaving the hand-written one untouched.
@@ -75,7 +75,7 @@ The application loads `config/effective.toml` if it exists, otherwise `config/mo
 | Key | Default | Meaning |
 |-----|---------|---------|
 | `Http.address` | `"127.0.0.1"` | Address the HTTP server listens on. |
-| `Http.port` | `8080` | Port the HTTP server listens on. |
+| `Http.port` | `8080` | Port the HTTP server listens on; `0` lets the OS choose a free port, which is printed at startup. |
 | `Monitor.enabled` | `true` | Whether the worker checks the targets. |
 | `Monitor.interval_secs` | `30` | Seconds between two rounds of checks; must be greater than zero. |
 | `Monitor.timeout_secs` | `5` | Seconds to wait for a connection before a target counts as down; must be greater than zero. |
@@ -112,14 +112,14 @@ The `+` fields are runtime state, not configuration.
 
 ### Runtime state
 
-Fields marked `#[confer(ignore = ...)]` belong to the scope but not to the file: `HttpConfig::requests_served` is incremented by the request handlers, `MonitorConfig::results` is written by the worker and read by the status page. `load` never changes them, so a reload keeps the counter and the results. A result remembers the address it was checked at, so the page and the worker can tell that it is stale after the address of a target changed; results of removed targets are dropped.
+Fields marked `#[confer(ignore = ...)]` belong to the scope but not to the file: `HttpConfig::requests_served` is incremented by the request handlers, `MonitorConfig::results` is written by the worker and read by the status page. `load` never changes them, so the application explicitly removes results for removed targets or changed addresses after a successful reload. Results for unchanged targets and the request counter are kept. A runtime generation also prevents checks started before a reload from publishing afterward, even if a target was removed and re-added with the same address.
 
 ### Locking
 
 The scopes are `tokio::sync::RwLock`s, and the components hold them only briefly:
 
 - The worker copies its settings and the targets under a read lock and releases it before any network I/O. A slow check therefore never delays a page or a reload; a reload that happens during a round takes effect in the next round.
-- After a round, the worker takes the write lock once to record all results, skipping targets that a reload removed or changed in the meantime.
+- After a round, the worker takes the write lock once to record all results. Any successful reload invalidates the entire in-flight round; the next round uses the new configuration.
 - Handlers take each lock only to read or update a few fields.
 - `load` takes the scope's write lock, so no guard of the same scope may be held while awaiting it.
 
@@ -133,7 +133,7 @@ The scopes are `tokio::sync::RwLock`s, and the components hold them only briefly
 
 The example keeps to what it demonstrates; a production service would need more.
 
-- **The listener is not reconfigured.** `Http.address` and `Http.port` take effect only after a restart; `reload` prints a note when they differ from the address in use.
+- **The listener is not reconfigured.** `Http.address` and `Http.port` take effect only after a restart; `reload` prints a note with the actual listening address when they differ from the settings used at startup. Reloading unchanged settings with `port = 0` does not require a restart.
 - **The file is the source of truth.** `reload` replaces runtime changes: after `pause`, a reload sets `enabled` back to the file's value unless the change was exported.
 - **Reload is explicit.** Conferencier does not watch files, so the application reloads only on the `reload` command.
 - **A check only opens a TCP connection.** It does not send a request or check a response, which keeps HTTP client dependencies out of the example. Axum provides the server side with a small router and graceful shutdown.
