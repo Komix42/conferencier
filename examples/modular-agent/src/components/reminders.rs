@@ -71,9 +71,7 @@ impl RunningComponent for RemindersInstance {
 
     fn handle_command<'a>(&'a mut self, args: &'a str) -> ComponentFuture<'a, ()> {
         Box::pin(async move {
-            let mut words = args.splitn(2, ' ');
-            let command = words.next().unwrap_or_default();
-            let value = words.next().map(str::trim_start);
+            let (command, value) = split_command(args);
             match command {
                 "list" if value.is_none() => {
                     let config = self.config.read().await;
@@ -93,19 +91,20 @@ impl RunningComponent for RemindersInstance {
                 }
                 "add" => {
                     let (name, rest) = value
-                        .and_then(|value| value.split_once(' '))
+                        .map(split_command)
+                        .and_then(|(name, rest)| Some((name, rest?)))
                         .ok_or("usage: reminders add <name> <seconds> <message>")?;
-                    let (seconds, message) = rest
-                        .trim_start()
-                        .split_once(' ')
-                        .ok_or("usage: reminders add <name> <seconds> <message>")?;
+                    let (seconds, message) = match split_command(rest) {
+                        (seconds, Some(message)) => (seconds, message),
+                        _ => return Err("usage: reminders add <name> <seconds> <message>".into()),
+                    };
                     let after_secs = seconds
                         .parse::<u64>()
                         .map_err(|_| "seconds must be a positive integer")?;
                     let reminder = Reminder {
                         name: name.to_owned(),
                         after_secs,
-                        message: message.trim_start().to_owned(),
+                        message: message.to_owned(),
                         added_at: Instant::now(),
                         fired: false,
                     };
@@ -226,6 +225,16 @@ fn validate(config: &ReminderConfig) -> ComponentResult<()> {
     Ok(())
 }
 
+fn split_command(args: &str) -> (&str, Option<&str>) {
+    match args.find(char::is_whitespace) {
+        Some(index) => (
+            &args[..index],
+            Some(args[index..].trim_start_matches(char::is_whitespace)),
+        ),
+        None => (args, None),
+    }
+}
+
 fn print_help() {
     println!("reminders commands: list, add <name> <seconds> <message>, remove <name>, help");
 }
@@ -295,6 +304,18 @@ mod tests {
                 .save_str()
                 .unwrap()
                 .contains("message = \"water is ready\"")
+        );
+        persist_rx.try_recv().unwrap();
+
+        component
+            .handle_command("add\tcoffee\t30\tcoffee  is ready")
+            .await
+            .unwrap();
+        assert!(
+            store
+                .save_str()
+                .unwrap()
+                .contains("message = \"coffee  is ready\"")
         );
         persist_rx.try_recv().unwrap();
 

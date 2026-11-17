@@ -62,7 +62,8 @@ async fn status(State(state): State<AppState>) -> String {
         };
         writeln!(page, "{:<20} {:<24} {state}", target.name, target.address).unwrap();
     }
-    writeln!(page, "\n{served} requests served.").unwrap();
+    let noun = if served == 1 { "request" } else { "requests" };
+    writeln!(page, "\n{served} {noun} served.").unwrap();
     page
 }
 
@@ -81,7 +82,7 @@ async fn config(State(state): State<AppState>) -> Result<String, (StatusCode, St
     .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
     Ok(format!(
         "# The configuration currently in use. Runtime state, such as the\n\
-         # {served} requests served or the check results, is not part of it.\n\n{rendered}"
+         # request counter ({served}) or the check results, is not part of it.\n\n{rendered}"
     ))
 }
 

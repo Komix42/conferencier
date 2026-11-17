@@ -20,7 +20,7 @@ From anywhere in the repository:
 cargo run -p modular-agent
 ```
 
-By default, the application uses `examples/modular-agent/agent.toml`, independent of the working directory. If the file does not exist, each component adds its defaults and the application writes the resulting configuration.
+By default, the application uses `examples/modular-agent/agent.toml`, independent of the working directory. If the file does not exist, each component adds its defaults and the application writes the resulting configuration. The file is ignored by Git.
 
 To select another file, pass its path:
 
@@ -28,7 +28,7 @@ To select another file, pass its path:
 cargo run -p modular-agent -- --config path/to/agent.toml
 ```
 
-A path after `--config` is resolved from the working directory. Disable one or more components with repeated `--without` arguments:
+A relative `--config` path is resolved from the working directory; a relative journal path stored in the configuration is resolved from the configuration file's directory. Disable one or more components with repeated `--without` arguments:
 
 ```text
 cargo run -p modular-agent -- --without journal --without reminders
@@ -36,41 +36,52 @@ cargo run -p modular-agent -- --without journal --without reminders
 
 The disabled components' sections remain untouched. Unknown component names and invalid command-line arguments are errors.
 
-## Commands
+The application prints whether it created or loaded the file and waits for console commands:
+
+```text
+Starting with an empty configuration at .../examples/modular-agent/agent.toml
+Type `help` for commands.
+```
+
+### Console commands
 
 The host provides:
 
 | Command | Effect |
 |---------|--------|
 | `components` | List running components. |
-| `config` | Print the complete configuration currently in the store. |
-| `help` | List host and component commands. |
+| `config` | Print the complete configuration currently in the store, including sections of disabled components. |
+| `help` | List host commands and running components. |
 | `quit` | Stop workers and save the final configuration. Ctrl+C and end of input also stop the application. |
 
 Component commands use the component name as a prefix:
 
 | Command | Effect |
 |---------|--------|
-| `heartbeat status` | Show whether the heartbeat is enabled, its interval and number of messages sent. |
+| `heartbeat status` | Show whether the heartbeat is enabled, its interval, message and number of messages sent. |
 | `heartbeat interval <seconds>` | Change and save the interval; it must be positive. |
-| `heartbeat message <text>` | Change and save the message. |
+| `heartbeat message <text>` | Change and save the message; it must not be empty. |
 | `heartbeat pause` / `heartbeat resume` | Disable or enable heartbeat messages and save the setting. |
 | `reminders list` | List reminders and their remaining time. |
 | `reminders add <name> <seconds> <message>` | Add a uniquely named reminder and save it. Its timer starts now. |
 | `reminders remove <name>` | Remove and save a reminder. |
 | `journal show` | Show recent events held in memory. |
-| `journal file <path>` | Append future events to a file. The path is relative to the working directory and must not resolve to the configuration file. |
+| `journal file <path>` | Append future events to a file. A relative path is resolved from the configuration file's directory; the path must not resolve to the configuration file. |
 | `journal file off` | Stop writing events to a file; does not delete an existing file. |
+| `heartbeat help`, `reminders help`, `journal help` | List the component's commands. |
 
-For example, from the repository root:
+Commands and arguments are separated by any whitespace; spaces inside a message or journal path are preserved.
 
-```text
-reminders add tea 10 Tea is ready
-heartbeat interval 3
-journal file examples/modular-agent/journal.log
-```
+### A walk through
 
-After a few seconds, `journal show` lists heartbeat and reminder events. The generated `agent.toml` and the `examples/modular-agent/journal.log` path used above are ignored by Git.
+These steps use the default configuration path. Start with no `agent.toml` and no `journal.log` in `examples/modular-agent/`; if either already exists, preserve it and use `--config` with a different path instead.
+
+1. Start the application with `cargo run -p modular-agent`. Type `components` to see the three running components and `config` to see the defaults they added.
+2. Type `heartbeat interval 3`. The message `heartbeat: still here` now appears every three seconds.
+3. Type `reminders add tea 10 Tea is ready`. After ten seconds, `reminder tea: Tea is ready` appears and `reminders list` shows the reminder as done.
+4. Type `journal file journal.log` and then `journal show`: it lists the recent heartbeat and reminder events. New events are also appended to `examples/modular-agent/journal.log`.
+5. Type `quit` and start again with `cargo run -p modular-agent -- --without journal`. The journal is disabled, but `config` still shows `[Journal]` and its file setting. The `tea` reminder fires again ten seconds after the start, because reminders count from application start.
+6. Type `quit` and start without `--without`: the journal appends to `journal.log` again. To start over, remove `agent.toml` and `journal.log` when you no longer need them; both are ignored by Git.
 
 ## Configuration
 
@@ -82,52 +93,54 @@ enabled = true
 interval_secs = 10
 message = "still here"
 
-[Reminders]
-items = []
-
 [Journal]
 keep = 100
+
+[Reminders]
+items = []
 ```
 
-An application command can add reminder tables or `[Journal.file]`. For example:
+Component commands can add reminder tables or `[Journal.file]`. After the walk through, the file looks like this:
 
 ```toml
 [Heartbeat]
 enabled = true
-interval_secs = 10
+interval_secs = 3
 message = "still here"
-
-[[Reminders.items]]
-name = "tea"
-after_secs = 60
-message = "Tea is ready"
 
 [Journal]
 keep = 100
 
 [Journal.file]
-path = "examples/modular-agent/journal.log"
+path = "journal.log"
+
+[[Reminders.items]]
+after_secs = 10
+message = "Tea is ready"
+name = "tea"
 ```
 
-`after_secs` is measured from application start for reminders loaded from the file, and from the `add` command for new reminders. It is not a wall-clock schedule.
+The store writes sections and keys in alphabetical order, not in the order of the fields or of a hand-edited file.
+
+`after_secs` is measured from application start for reminders loaded from the file, and from the `add` command for new reminders. It is not a wall-clock schedule. A fired reminder stays in the configuration, so it fires again after every start until it is removed with `reminders remove`.
 
 | Section | Key | Default | Meaning |
 |---------|-----|---------|---------|
 | `Heartbeat` | `enabled` | `true` | Whether the periodic message is printed and published. |
 | `Heartbeat` | `interval_secs` | `10` | Seconds between messages; must be greater than zero. |
-| `Heartbeat` | `message` | `"still here"` | Text printed and published on each tick. |
-| `Reminders` | `items` | `[]` | Array of tables with unique `name`, positive `after_secs` and nonempty `message`. |
+| `Heartbeat` | `message` | `"still here"` | Text printed and published on each tick; must not be empty. |
+| `Reminders` | `items` | `[]` | Array of tables with a unique, nonempty `name`, positive `after_secs` and nonempty `message`. |
 | `Journal` | `keep` | `100` | Maximum number of recent events retained in memory; must be greater than zero. |
-| `Journal.file` | `path` | absent | Optional append-only event output path, relative to the working directory. |
+| `Journal.file` | `path` | absent | Optional append-only event output path; a relative path is resolved from the configuration file's directory. |
 
 `Reminders` and its item tables, `Journal` and `Journal.file` reject unknown keys. `Heartbeat` is lenient when loading, but saving it replaces the whole section, so unrecognized keys in `[Heartbeat]` are removed by a later heartbeat command.
 
 ## Architecture
 
 ```text
-agent.toml ──► ConfigStore ──┬──► [Heartbeat] ──► heartbeat worker
-                             ├──► [Reminders] ──► reminders worker
-                             └──► [Journal] ────► journal worker
+agent.toml ──► ConfigStore ──┬──► [Heartbeat] ──► heartbeat worker  + ticks
+                             ├──► [Reminders] ──► reminders worker  + timers, fired
+                             └──► [Journal] ────► journal worker    + recent events
 
 heartbeat and reminders ── events ──► bounded broadcast channel ──► journal
 
@@ -135,13 +148,7 @@ component command ──► save its scope to ConfigStore ──► persistence 
                                                      └──► single persister ──► agent.toml
 ```
 
-Each component's `start` method creates its typed scope from the shared store, validates its own rules and starts its worker. When its section is missing, it saves its defaults and requests persistence. The host dispatches commands by component name and does not inspect the component's settings.
-
-Disabling a component skips its `start` method. A component that fails to load or validate never saves its scope. In both cases its existing section stays in the store and is written unchanged when another component saves or the application exits. Sections not owned by any registered component are also preserved.
-
-The persister serializes complete-store writes. A failed write is reported and the in-memory store remains available; another save request or the final shutdown flush retries it. Runtime state, including heartbeat ticks, fired reminders and recent journal events, is not written to TOML.
-
-On shutdown the host first signals all components and waits for event producers to stop. Components that publish from workers must join them in `quiesce`. The host then calls `shutdown` on every component; the journal drains the events still available in its receiver before it exits. This two-phase lifecycle does not depend on the order in which components are registered.
+The `+` fields are runtime state, not configuration.
 
 | File | Responsibility |
 |------|----------------|
@@ -153,12 +160,26 @@ On shutdown the host first signals all components and waits for event producers 
 | [`src/components/reminders.rs`](src/components/reminders.rs) | Reminder tables, commands, validation and timer worker. |
 | [`src/components/journal.rs`](src/components/journal.rs) | Event subscriber, in-memory history and optional file output. |
 
+### Startup
+
+Each component's `start` method creates its typed scope from the shared store, validates its own rules and starts its worker. When its section is missing, it saves its defaults and requests persistence. The host dispatches commands by component name and does not inspect the component's settings.
+
+Disabling a component skips its `start` method. A component that fails to load or validate prints an error such as `component journal: Journal.keep must be greater than zero` and never saves its scope. In both cases its existing section stays in the store and is written unchanged when another component saves or the application exits. Sections not owned by any registered component are also preserved; the host warns about them at startup, for example `warning: unowned section [Notes] is preserved`.
+
+### Saving
+
+The persister serializes complete-store writes. A command reports success once its scope is saved to the store; the file is written afterwards. A failed write is printed and the in-memory store remains available; another save request or the final shutdown flush retries it. If the final flush fails, the application prints the error and exits with a nonzero status. Runtime state, including heartbeat ticks, reminder timers and recent journal events, is not written to TOML.
+
+### Shutdown
+
+On shutdown the host first signals all components and waits for event producers to stop. Components that publish from workers must join them in `quiesce`. The host then calls `shutdown` on every component; the journal drains the events still available in its receiver before it exits. This two-phase lifecycle does not depend on the order in which components are registered.
+
 ## Limitations
 
-- The first whitespace separates a command from its arguments; internal spaces in messages and journal paths are preserved. A reminder name cannot contain spaces.
-- The journal keeps only the configured number of recent events in memory. Its file output appends every received event and does not rotate or truncate the file.
-- The broadcast channel has a bounded capacity. If the journal cannot keep up, it reports how many events were missed.
-- If writing or flushing the journal file fails, the error is printed and the event remains in the in-memory history.
-- Relative paths for `--config` and `Journal.file.path` use the working directory. Parent directories are not created.
-- Every save, including the final flush on exit, rewrites the whole configuration file from the store. Comments and formatting in a hand-edited `agent.toml` are not preserved.
-- This is an illustrative agent, not a production scheduler or logging service.
+- **Simple command parsing.** The first whitespace separates a command from its arguments, and quotes are not interpreted. A reminder name cannot contain whitespace.
+- **Limited event history.** The journal keeps only the configured number of recent events in memory. Its file output appends every received event and does not rotate or truncate the file.
+- **Bounded event channel.** If the journal cannot keep up, it reports how many events were missed.
+- **Journal file errors are not fatal.** If writing or flushing the journal file fails, the error is printed and the event remains in the in-memory history. Parent directories of the journal file are not created.
+- **Reminders are not a schedule.** They count from application start or from `add`, and a fired reminder fires again after a restart.
+- **The file is rewritten on every save.** Every save, including the final flush on exit, rewrites the whole configuration file from the store. Comments and formatting in a hand-edited `agent.toml` are not preserved.
+- **This is not a production service.** It is an illustrative agent, not a production scheduler or logging service.

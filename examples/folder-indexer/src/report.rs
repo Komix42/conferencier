@@ -30,15 +30,15 @@ pub async fn print(settings: &Settings) {
         return;
     }
 
-    println!("Indexed {} files:", files.len());
+    println!("Indexed {}:", count(files.len(), "file"));
     if source_stats.is_empty() {
         println!("  No folders are configured. Use `add-source` to add one.");
     }
     for stats in source_stats {
         println!(
-            "  {:<16} {:>5} files, {}",
+            "  {:<16} {:>11}, {}",
             stats.name,
-            stats.files,
+            count(stats.files, "file"),
             format_bytes(stats.bytes)
         );
     }
@@ -135,8 +135,17 @@ pub async fn write_catalog(settings: &Settings) -> Result<(), BoxError> {
             path.display()
         )
     })?;
-    println!("Wrote {} files to {}", files.len(), path.display());
+    println!("Wrote {} to {}", count(files.len(), "file"), path.display());
     Ok(())
+}
+
+/// Formats a count with a singular or plural noun, such as `1 file` or `2 files`.
+fn count(count: usize, noun: &str) -> String {
+    if count == 1 {
+        format!("{count} {noun}")
+    } else {
+        format!("{count} {noun}s")
+    }
 }
 
 fn catalog_entry(file: &IndexedFile) -> serde_json::Value {

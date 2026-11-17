@@ -173,17 +173,21 @@ async fn handle(settings: &Settings, line: &str) -> AppResult<Continue> {
         "catalog" => {
             let value = required_arg(&mut words, "usage: catalog <off|path>")?;
             no_more_args(words, "usage: catalog <off|path>")?;
+            let mut report = settings.report.write().await;
             let catalog = if value == "off" {
                 None
             } else if value.trim().is_empty() {
                 return Err("catalog path must not be empty".into());
             } else {
+                // Keep a `pretty` setting edited in the file.
+                let pretty = report.catalog.as_ref().is_none_or(|catalog| catalog.pretty);
                 Some(crate::config::CatalogFile {
                     path: value.to_owned(),
-                    pretty: true,
+                    pretty,
                 })
             };
-            settings.report.write().await.catalog = catalog;
+            report.catalog = catalog;
+            drop(report);
             settings.save().await?;
             println!("Updated the catalog setting");
         }
@@ -206,8 +210,8 @@ fn no_more_args<'a>(mut words: impl Iterator<Item = &'a str>, usage: &str) -> Ap
 
 fn print_help() {
     println!("Commands:");
-    println!("  config                         show the effective configuration");
-    println!("  add-source <name> <path>       add a folder (relative to the config file)");
+    println!("  config                          show the effective configuration");
+    println!("  add-source <name> <path>        add a folder (relative to the config file)");
     println!("  remove-source <name>            remove a folder");
     println!("  extensions <all|md,txt>         select extensions; `all` removes the key");
     println!("  largest <count>                 set the number of large files in the report");
@@ -335,6 +339,23 @@ mod tests {
         let store = ConfigStore::from_file(&path).await.unwrap();
         let report = ReportConfig::from_store(&store).unwrap();
         assert_eq!(report.read().await.summary.largest, 2);
+    }
+
+    #[tokio::test]
+    async fn catalog_command_keeps_the_pretty_setting() {
+        let dir = tempdir().unwrap();
+        let (settings, _) = Settings::open(dir.path().join("indexer.toml"))
+            .await
+            .unwrap();
+        settings.report.write().await.catalog = Some(CatalogFile {
+            path: "old.json".into(),
+            pretty: false,
+        });
+
+        assert!(handle(&settings, "catalog new.json").await.is_ok());
+        let report = settings.report.read().await;
+        let catalog = report.catalog.as_ref().unwrap();
+        assert_eq!((catalog.path.as_str(), catalog.pretty), ("new.json", false));
     }
 
     #[tokio::test]

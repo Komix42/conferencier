@@ -11,12 +11,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - A runnable [`examples/folder-indexer`](examples/folder-indexer/README.md) application: it scans folders, reports their contents and optionally creates a JSON catalog. Console commands manage and save its own configuration, demonstrating defaults, nested and optional tables, and runtime state in shared scopes. Catalogs are created only at new paths, without overwriting existing files.
 - A runnable [`examples/modular-agent`](examples/modular-agent/README.md) application: independent components own and save their configuration sections, publish and subscribe to events, and continue independently when another component is disabled or misconfigured. A single persister serializes writes to the shared configuration file.
 
-### Fixed
-- `modular-agent` now preserves whitespace in command arguments, refuses journal output paths that resolve to its configuration file, and flushes journal writes before reporting success.
-- `modular-agent` waits for event producers and drains the journal's remaining events during shutdown.
-- `folder-indexer` preserves backslashes in Unix file names and remembers Ctrl+C during commands, finishing the current scan or save before exiting.
-- `uptime-monitor` discards results for removed or changed targets and invalidates pre-reload checks; listener notices report the actual address without treating an unchanged port `0` as a change.
-
 ## [0.0.7] - 2026-11-16
 
 ### Added

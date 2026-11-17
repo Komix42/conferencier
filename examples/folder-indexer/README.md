@@ -4,7 +4,7 @@ A small console application configured with [conferencier](../../README.md). It 
 
 The example shows:
 
-- **A store and a scope per component.** The scanner owns `[Indexer]` and the report owns `[Report]`; both scopes are loaded from one `ConfigStore`.
+- **One store, one scope per component.** The scanner owns `[Indexer]` and the report owns `[Report]`; both scopes are loaded from one `ConfigStore`.
 - **Configuration from defaults.** On the first start, an empty store and the scopes' defaults produce a usable TOML file.
 - **Tables and optional values.** Sources use `Vec<Source>` tables; `[Report.summary]` uses its fields' defaults when absent. An absent extension filter or catalog is represented by `None` and removed from TOML on save.
 - **Configuration and runtime state.** Scan results and counts live in ignored fields of the scanner scope, not in the configuration file.
@@ -48,7 +48,7 @@ No scan results yet. Type `scan` to index the configured folders.
 | `remove-source <name>` | Remove a source and save the configuration. |
 | `extensions <all\|md,txt>` | Filter by a comma-separated list of extensions without dots, or use `all` to remove the filter. Matching is ASCII case-insensitive. |
 | `largest <count>` | Set the number of largest files printed in the report; `0` disables the list. |
-| `catalog <path>` | Configure a JSON catalog and save the setting. The next `scan` writes it to a **new** file at this path. |
+| `catalog <path>` | Configure a JSON catalog and save the setting. The next `scan` writes it to a **new** file at this path, creating missing parent folders. A `pretty` setting of an already configured catalog is kept; a new catalog table starts with `pretty = true`. |
 | `catalog off` | Disable the catalog and remove its table from the configuration; existing catalog files are not deleted. |
 | `scan` | Scan the configured folders concurrently, print a report and write the optional catalog. |
 | `report` | Print the most recent scan's report without scanning again or writing a catalog. |
@@ -145,20 +145,19 @@ When adding `[[Indexer.sources]]` by hand, first remove `sources = []`: TOML doe
 | `Report.summary.largest` | `5` | Maximum number of largest files shown. |
 | `Report.summary.by-extension` | `true` | Show counts grouped by extension. |
 | `Report.catalog` | absent | Optional table; absent means no catalog is written. |
-| `Report.catalog.path` | required when the table is present | Path of the new JSON file, relative to the configuration directory or absolute. |
+| `Report.catalog.path` | required when the table is present | Path of the new JSON file, relative to the configuration directory or absolute. Missing parent folders are created. |
 | `Report.catalog.pretty` | `true` | Indent the JSON output. |
 
-`[Indexer]`, each source and `[Report.catalog]` reject unknown keys. `[Report]` and `[Report.summary]` ignore them. Because **both scopes are saved on every successful configuration edit**, unrecognized keys inside their sections are removed on the next save, even in the lenient report. Other top-level sections remain in the store and file, but are omitted from `config`'s effective snapshot. `list_sections` warns about unexpected top-level *table* sections, not top-level scalars or arrays.
+`[Indexer]`, each source and `[Report.catalog]` reject unknown keys. `[Report]` and `[Report.summary]` ignore them. Because **both scopes are saved on every successful configuration edit**, unrecognized keys inside their sections are removed on the next save, even in the lenient report. Other top-level sections remain in the store and file, but are omitted from `config`'s effective snapshot. At startup the application uses `list_sections` to warn about unexpected top-level *table* sections; top-level scalars and arrays are not reported.
 
 ## Architecture
 
 ```text
-                         start / first-run defaults
-   indexer.toml ───────────────────► ConfigStore
-        ▲                               │ from_store
-        │ save_file                    ├──► SharedScope<IndexerConfig> + scan results
-        │                              └──► SharedScope<ReportConfig>
-        └──────── scope save ◄───────────── console edits
+                  load / save_file
+   indexer.toml ◄──────────────────► ConfigStore ── from_store ──┬──► SharedScope<IndexerConfig>  + scan results
+                                          ▲                      └──► SharedScope<ReportConfig>
+                                          │ scope save
+                                      console edits, first-run defaults
 
    scan: copy scanner settings, scan sources concurrently, store results
    report: read results and report settings, print summary, optionally write JSON

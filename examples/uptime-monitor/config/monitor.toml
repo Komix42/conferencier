@@ -1,8 +1,11 @@
-# Default configuration of the uptime monitor example.
+# Bundled configuration of the uptime monitor example.
 #
 # This hand-written file is never overwritten: the `export` command saves the
-# effective configuration to `effective.toml` next to it, which is loaded
-# instead of this file when it exists. Delete it to return to these defaults.
+# configuration in use to `effective.toml` next to it, which is then loaded
+# instead of this file. Delete `effective.toml` to return to this file.
+#
+# The intervals below are shorter than the built-in defaults, so that changes
+# show up quickly.
 
 # The HTTP server that shows the check results.
 # Changes take effect only after a restart.

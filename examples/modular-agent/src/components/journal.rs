@@ -50,12 +50,17 @@ impl Component for Journal {
                 .as_ref()
                 .map(|file| file.path.clone());
             if let Some(path) = file_path {
-                validate_output_path(Path::new(&path), &context.config_path).await?;
+                validate_output_path(&path, &context.config_path).await?;
             }
             context.save_defaults("Journal", &config).await?;
 
             let (finish, finish_signal) = oneshot::channel();
-            let worker = tokio::spawn(run_worker(config.clone(), receiver, finish_signal));
+            let worker = tokio::spawn(run_worker(
+                config.clone(),
+                config_dir(&context.config_path),
+                receiver,
+                finish_signal,
+            ));
             Ok(Box::new(JournalInstance {
                 config,
                 context,
@@ -98,7 +103,7 @@ impl RunningComponent for JournalInstance {
                     } else if value.trim().is_empty() {
                         return Err("journal file path must not be empty".into());
                     } else {
-                        validate_output_path(Path::new(value), &self.context.config_path).await?;
+                        validate_output_path(value, &self.context.config_path).await?;
                         Some(JournalFile {
                             path: value.to_owned(),
                         })
@@ -148,6 +153,7 @@ fn split_command(args: &str) -> (&str, Option<&str>) {
 
 async fn run_worker(
     config: SharedScope<JournalConfig>,
+    config_dir: PathBuf,
     mut events: broadcast::Receiver<Event>,
     mut finish: oneshot::Receiver<()>,
 ) {
@@ -175,7 +181,7 @@ async fn run_worker(
         };
         match result {
             Ok(event) => {
-                if let Err(error) = record_event(&config, event).await {
+                if let Err(error) = record_event(&config, &config_dir, event).await {
                     eprintln!("journal: {error}");
                 }
             }
@@ -187,7 +193,11 @@ async fn run_worker(
     }
 }
 
-async fn record_event(config: &SharedScope<JournalConfig>, event: Event) -> ComponentResult<()> {
+async fn record_event(
+    config: &SharedScope<JournalConfig>,
+    config_dir: &Path,
+    event: Event,
+) -> ComponentResult<()> {
     let line = format!("{}: {}\n", event.source, event.message);
     let path = {
         let mut config = config.write().await;
@@ -198,9 +208,19 @@ async fn record_event(config: &SharedScope<JournalConfig>, event: Event) -> Comp
         config.file.as_ref().map(|file| file.path.clone())
     };
     if let Some(path) = path {
-        append_line(Path::new(&path), line.as_bytes()).await?;
+        append_line(&config_dir.join(path), line.as_bytes()).await?;
     }
     Ok(())
+}
+
+/// The directory relative journal paths are resolved from: the configuration
+/// file's directory, so a saved path does not depend on the working directory.
+fn config_dir(config_path: &Path) -> PathBuf {
+    config_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+        .to_path_buf()
 }
 
 async fn append_line(path: &Path, line: &[u8]) -> ComponentResult<()> {
@@ -218,13 +238,12 @@ async fn append_line(path: &Path, line: &[u8]) -> ComponentResult<()> {
         .map_err(|error| format!("cannot flush {}: {error}", path.display()))
 }
 
-async fn validate_output_path(path: &Path, config_path: &Path) -> ComponentResult<()> {
-    let output_path = resolve_path(path).await?;
+async fn validate_output_path(path: &str, config_path: &Path) -> ComponentResult<()> {
+    let output_path = resolve_path(&config_dir(config_path).join(path)).await?;
     let config_path_resolved = resolve_path(config_path).await?;
     if same_path(&output_path, &config_path_resolved) {
         return Err(format!(
-            "journal file path {} resolves to the configuration file {}",
-            path.display(),
+            "journal file path {path} resolves to the configuration file {}",
             config_path.display()
         ));
     }
@@ -369,6 +388,7 @@ mod tests {
 
         record_event(
             &config,
+            Path::new("."),
             Event {
                 source: "heartbeat".into(),
                 message: "first".into(),
@@ -378,6 +398,7 @@ mod tests {
         .unwrap();
         record_event(
             &config,
+            Path::new("."),
             Event {
                 source: "reminders".into(),
                 message: "second".into(),
@@ -394,6 +415,39 @@ mod tests {
         assert_eq!(
             tokio::fs::read_to_string(path).await.unwrap(),
             "heartbeat: first\nreminders: second\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn relative_paths_resolve_from_the_configuration_directory() {
+        let directory = tempdir().unwrap();
+        let config_path = directory.path().join("agent.toml");
+        let config = config("[Journal.file]\npath = \"journal.log\"\n").unwrap();
+
+        record_event(
+            &config,
+            &super::config_dir(&config_path),
+            Event {
+                source: "test".into(),
+                message: "event".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            tokio::fs::read_to_string(directory.path().join("journal.log"))
+                .await
+                .unwrap(),
+            "test: event\n"
+        );
+
+        tokio::fs::write(&config_path, "").await.unwrap();
+        let error = validate_output_path("nested/../agent.toml", &config_path)
+            .await
+            .unwrap_err();
+        assert!(
+            error.contains("resolves to the configuration file"),
+            "{error}"
         );
     }
 
@@ -528,7 +582,7 @@ mod tests {
         let config_path = directory.path().join("agent.toml");
         let output_path = directory.path().join("AGENT.TOML");
 
-        let error = validate_output_path(&output_path, &config_path)
+        let error = validate_output_path(&output_path.to_string_lossy(), &config_path)
             .await
             .unwrap_err();
         assert!(
@@ -542,7 +596,12 @@ mod tests {
         let scope = config("").unwrap();
         let (finish, finish_signal) = oneshot::channel();
         let (events, _) = broadcast::channel(4);
-        let worker = tokio::spawn(run_worker(scope.clone(), events.subscribe(), finish_signal));
+        let worker = tokio::spawn(run_worker(
+            scope.clone(),
+            PathBuf::from("."),
+            events.subscribe(),
+            finish_signal,
+        ));
         events
             .send(Event {
                 source: "heartbeat".into(),
@@ -579,7 +638,7 @@ mod tests {
             .unwrap();
         finish.send(()).unwrap();
 
-        run_worker(scope.clone(), receiver, finish_signal).await;
+        run_worker(scope.clone(), PathBuf::from("."), receiver, finish_signal).await;
 
         assert_eq!(scope.read().await.events[0].message, "queued");
     }
@@ -599,7 +658,7 @@ mod tests {
                 .unwrap();
         }
         finish.send(()).unwrap();
-        run_worker(scope.clone(), receiver, finish_signal).await;
+        run_worker(scope.clone(), PathBuf::from("."), receiver, finish_signal).await;
 
         let config = scope.read().await;
         let messages: Vec<&str> = config
@@ -615,6 +674,7 @@ mod tests {
         let config = config("[Journal]\nkeep = 1\n[Journal.file]\npath = \"\"\n").unwrap();
         let error = record_event(
             &config,
+            Path::new("."),
             Event {
                 source: "test".into(),
                 message: "event".into(),

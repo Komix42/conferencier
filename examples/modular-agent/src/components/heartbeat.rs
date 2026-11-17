@@ -204,10 +204,13 @@ fn validate(config: &HeartbeatConfig) -> ComponentResult<()> {
 }
 
 fn split_command(args: &str) -> (&str, Option<&str>) {
-    args.split_once(' ')
-        .map_or((args, None), |(command, value)| {
-            (command, Some(value.trim_start()))
-        })
+    match args.find(char::is_whitespace) {
+        Some(index) => (
+            &args[..index],
+            Some(args[index..].trim_start_matches(char::is_whitespace)),
+        ),
+        None => (args, None),
+    }
 }
 
 fn print_help() {
@@ -314,6 +317,10 @@ mod tests {
         assert_eq!(
             split_command("message a longer message"),
             ("message", Some("a longer message"))
+        );
+        assert_eq!(
+            split_command("message\ta  tab"),
+            ("message", Some("a  tab"))
         );
         assert_eq!(split_command("pause"), ("pause", None));
     }

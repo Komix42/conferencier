@@ -43,7 +43,7 @@ The configuration directory is found relative to the package, not to the working
   self                 127.0.0.1:8080           up (0.4 ms) (checked 3s ago)
   local-database       127.0.0.1:5432           down: no connection within 2s (checked 1s ago)
 
-  1 requests served.
+  1 request served.
   ```
 
 - **`GET /config`** shows the configuration the application currently uses, as TOML. It includes runtime changes such as `pause`, but not the runtime state.
@@ -61,12 +61,14 @@ The configuration directory is found relative to the package, not to the working
 
 ### A walk through
 
+These steps use the bundled `config/monitor.toml`. Start with no `config/effective.toml`; if it already exists, preserve it elsewhere first, because the application would load it instead.
+
 1. Start the application and open <http://127.0.0.1:8080/>.
-2. Edit `config/monitor.toml`: set `interval_secs = 3` and uncomment the `crates.io` target. Type `reload`. The new target is checked immediately and every three seconds after that; the request counter on the page keeps counting.
+2. Edit `config/monitor.toml`: set `interval_secs = 3` and uncomment the `crates.io` target. Type `reload`. The new target is checked without waiting for the interval, as soon as a round in progress finishes, and every three seconds after that; the request counter on the page keeps counting.
 3. Misspell a key, for example `intervl_secs = 3`, and type `reload`. The application prints `error: unknown key Monitor.intervl_secs` and keeps checking with the previous settings. Fix the key again.
 4. Type `pause`. The page says that monitoring is paused, and `/config` shows `enabled = false`.
 5. Type `export`, then `quit`, and start the application again. It now loads `config/effective.toml`, so it starts paused. Type `resume`.
-6. Delete `config/effective.toml` to return to the hand-written configuration. The file is ignored by Git.
+6. Delete `config/effective.toml` to return to the hand-written configuration. The file is ignored by Git. Undo your edits to `config/monitor.toml` when you no longer need them, for example with `git restore`.
 
 ## Configuration
 
@@ -81,7 +83,7 @@ The application loads `config/effective.toml` if it exists, otherwise `config/mo
 | `Monitor.timeout_secs` | `5` | Seconds to wait for a connection before a target counts as down; must be greater than zero. |
 | `Monitor.targets` | required | Array of tables with `name` (unique, not empty) and `address` (`host:port`); may be empty (`targets = []`). |
 
-`[Monitor]` and its targets reject unknown keys; `[Http]` ignores them. A missing key takes its default, except for `targets` and the keys of a target, which have none. The bundled `monitor.toml` sets shorter intervals than the defaults so that changes show up quickly.
+`[Monitor]` and its targets reject unknown keys; `[Http]` ignores them. Because `export` saves each scope's whole section, unknown keys in `[Http]` are not written to `effective.toml`; other top-level sections are copied unchanged. A missing key takes its default from the table above, except for `targets` and the keys of a target, which have none. The bundled `monitor.toml` sets shorter intervals than these defaults so that changes show up quickly.
 
 ## Architecture
 
@@ -90,7 +92,7 @@ config/effective.toml (if present) or config/monitor.toml
         │  start, reload                    ▲  export
         ▼                                   │
    ConfigStore ─┬─ [Http]    ──► SharedScope<HttpConfig>     + requests_served
-                └─ [Monitor] ──► SharedScope<MonitorConfig>  + results
+                └─ [Monitor] ──► SharedScope<MonitorConfig>  + results, generation
 
    HTTP server   reads both scopes, counts requests in HttpConfig
    worker        reads its settings from MonitorConfig, writes results into it
@@ -112,7 +114,7 @@ The `+` fields are runtime state, not configuration.
 
 ### Runtime state
 
-Fields marked `#[confer(ignore = ...)]` belong to the scope but not to the file: `HttpConfig::requests_served` is incremented by the request handlers, `MonitorConfig::results` is written by the worker and read by the status page. `load` never changes them, so the application explicitly removes results for removed targets or changed addresses after a successful reload. Results for unchanged targets and the request counter are kept. A runtime generation also prevents checks started before a reload from publishing afterward, even if a target was removed and re-added with the same address.
+Fields marked `#[confer(ignore = ...)]` belong to the scope but not to the file: `HttpConfig::requests_served` is incremented by the request handlers, `MonitorConfig::results` is written by the worker and read by the status page, and `MonitorConfig::generation` identifies the configuration a round of checks started with. `load` never changes them, so the application explicitly removes results for removed targets or changed addresses after a successful reload. Results for unchanged targets and the request counter are kept. The reload also replaces the generation, which prevents checks started before it from publishing afterward, even if a target was removed and re-added with the same address.
 
 ### Locking
 
@@ -125,7 +127,7 @@ The scopes are `tokio::sync::RwLock`s, and the components hold them only briefly
 
 ### Reload and export
 
-`reload` in `config.rs` first loads the new file into a separate `ConfigStore`, creates both scopes from it with `from_store`, which checks types and unknown keys, and validates the result. Only then does it replace the application's store with `load_str` and update the scopes with `load`. Because the candidate has already converted successfully, these cannot fail halfway, so any error leaves the running configuration as it was. After a successful reload the worker is woken to check the new targets at once.
+`reload` in `config.rs` first loads the new file into a separate `ConfigStore`, creates both scopes from it with `from_store`, which checks types and unknown keys, and validates the result. Only then does it replace the application's store with `load_str` and update the scopes with `load`. Because the candidate has already converted successfully, these cannot fail halfway, so any error leaves the running configuration as it was. After a successful reload the worker is woken, so the next round starts without waiting for the interval; a round in progress is finished first and its results are discarded.
 
 `pause` and `resume` change `enabled` in the scope only. `export` writes such runtime changes back with `save`, which replaces each scope's section of the store, and then saves the store with `save_file`. Exporting to a separate file keeps the comments of `monitor.toml`, because conferencier does not preserve comments or layout when saving.
 
