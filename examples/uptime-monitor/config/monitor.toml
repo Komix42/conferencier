@@ -1,0 +1,39 @@
+# Bundled configuration of the uptime monitor example.
+#
+# This hand-written file is never overwritten: the `export` command saves the
+# configuration in use to `effective.toml` next to it, which is then loaded
+# instead of this file. Delete `effective.toml` to return to this file.
+#
+# The intervals below are shorter than the built-in defaults, so that changes
+# show up quickly.
+
+# The HTTP server that shows the check results.
+# Changes take effect only after a restart.
+[Http]
+address = "127.0.0.1"
+port = 8080
+
+# The background worker. `reload` applies changes here without a restart.
+[Monitor]
+enabled = true
+# Seconds between two rounds of checks.
+interval_secs = 10
+# Seconds to wait for a TCP connection before a target counts as down.
+timeout_secs = 2
+
+# Each target is checked by opening a TCP connection to `address`.
+
+# The monitor's own HTTP server, so at least one target is up.
+[[Monitor.targets]]
+name = "self"
+address = "127.0.0.1:8080"
+
+# Nothing usually listens here, so this target shows as down.
+[[Monitor.targets]]
+name = "local-database"
+address = "127.0.0.1:5432"
+
+# A target on the internet; uncomment it when you are online.
+# [[Monitor.targets]]
+# name = "crates.io"
+# address = "crates.io:443"

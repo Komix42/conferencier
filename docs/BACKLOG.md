@@ -41,13 +41,11 @@ The README's [Project scope](../README.md#project-scope) lists these as intentio
 - **Layered sources** such as environment variables, command-line arguments or several files. Origin: the README's Project scope.
 - **Formats other than TOML.** Origin: [RFC-0001](./devel-0.0.x/RFC-0001_baseline_architecture.md#out-of-scope).
 
-### Examples
-
-- **Hyper HTTP server example.** A complete, runnable example configuring a Hyper-based web server and demonstrating several components. Keep Hyper specific to the example, not a runtime dependency of the library. The detailed scenario will be decided separately. Origin: [RFC-0002](./devel-0.0.x/RFC-0002_baseline_examples.md#future-work).
-- **Configuration snapshot workflow.** A command-line workflow for exporting and importing configuration snapshots. Origin: [RFC-0002](./devel-0.0.x/RFC-0002_baseline_examples.md#future-work).
-
 ## Done
 
+- **Modular agent example application**: completed in 0.0.8 ([`examples/modular-agent`](../examples/modular-agent/README.md)).
+- **Folder indexer example application**: completed in 0.0.8 ([`examples/folder-indexer`](../examples/folder-indexer/README.md)).
+- **Uptime monitor example application**: completed in 0.0.8 ([`examples/uptime-monitor`](../examples/uptime-monitor/README.md)).
 - **Redesign the user documentation**: completed in 0.0.7.
 - **Reliable `ConfigStore::save_file` replacement and target validation**: implemented in 0.0.6 ([RFC-0009](./devel-0.0.x/RFC-0009_save_file_replacement.md)).
 - **Preserve existing Unix file mode bits when saving**: implemented in 0.0.6 ([RFC-0010](./devel-0.0.x/RFC-0010_save_file_permissions.md)).
