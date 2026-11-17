@@ -1,7 +1,7 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use conferencier::ConfigStore;
+use conferencier::{ConfigScope, ConfigStore, SharedScope};
 use tokio::sync::{broadcast, watch};
 
 use crate::events::Event;
@@ -21,6 +21,24 @@ pub struct Context {
 impl Context {
     pub fn publish(&self, event: Event) -> bool {
         self.events.send(event).is_ok()
+    }
+
+    pub async fn save<T: ConfigScope>(&self, scope: &SharedScope<T>) -> ComponentResult<()> {
+        T::save(scope, &self.store)
+            .await
+            .map_err(|error| error.to_string())?;
+        self.persistence.changed()
+    }
+
+    pub async fn save_defaults<T: ConfigScope>(
+        &self,
+        section: &str,
+        scope: &SharedScope<T>,
+    ) -> ComponentResult<()> {
+        if !self.store.has_section(section) {
+            self.save(scope).await?;
+        }
+        Ok(())
     }
 }
 

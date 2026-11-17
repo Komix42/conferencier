@@ -3,6 +3,10 @@
 mod component;
 mod events;
 mod persist;
+mod components {
+    pub mod heartbeat;
+    pub mod reminders;
+}
 
 use std::io::BufRead;
 use std::path::PathBuf;
@@ -27,7 +31,10 @@ async fn main() -> ExitCode {
 }
 
 fn components() -> Vec<Box<dyn Component>> {
-    Vec::new()
+    vec![
+        Box::new(components::heartbeat::Heartbeat),
+        Box::new(components::reminders::Reminders),
+    ]
 }
 
 async fn run(args: Vec<String>, components: Vec<Box<dyn Component>>) -> AppResult<()> {
