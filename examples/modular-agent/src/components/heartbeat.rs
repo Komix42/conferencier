@@ -11,6 +11,8 @@ use crate::component::{Component, ComponentFuture, ComponentResult, Context, Run
 use crate::events::Event;
 use crate::split_command;
 
+const SECTION: &str = "Heartbeat";
+
 /// Settings of the heartbeat, the `[Heartbeat]` section.
 #[derive(ConfigScope)]
 #[confer(section = "Heartbeat")]
@@ -34,7 +36,7 @@ impl Component for Heartbeat {
     }
 
     fn section(&self) -> &'static str {
-        "Heartbeat"
+        SECTION
     }
 
     fn start<'a>(&'a self, context: Context) -> ComponentFuture<'a, Box<dyn RunningComponent>> {
@@ -42,7 +44,7 @@ impl Component for Heartbeat {
             let config =
                 HeartbeatConfig::from_store(&context.store).map_err(|error| error.to_string())?;
             validate(&*config.read().await)?;
-            context.save_defaults("Heartbeat", &config).await?;
+            context.save_defaults(SECTION, &config).await?;
 
             let wake = Arc::new(Notify::new());
             let worker = tokio::spawn(run_worker(
@@ -96,7 +98,12 @@ impl RunningComponent for HeartbeatInstance {
                         return Err("interval must be between 1 and i64::MAX seconds".into());
                     }
                     self.context
-                        .update(&self.config, |config| &mut config.interval_secs, seconds)
+                        .update(
+                            SECTION,
+                            &self.config,
+                            |config| &mut config.interval_secs,
+                            seconds,
+                        )
                         .await?;
                     self.wake.notify_one();
                     println!("Heartbeat interval set to {seconds}s");
@@ -108,6 +115,7 @@ impl RunningComponent for HeartbeatInstance {
                     }
                     self.context
                         .update(
+                            SECTION,
                             &self.config,
                             |config| &mut config.message,
                             message.to_owned(),
@@ -117,14 +125,14 @@ impl RunningComponent for HeartbeatInstance {
                 }
                 "pause" if value.is_none() => {
                     self.context
-                        .update(&self.config, |config| &mut config.enabled, false)
+                        .update(SECTION, &self.config, |config| &mut config.enabled, false)
                         .await?;
                     self.wake.notify_one();
                     println!("Heartbeat paused");
                 }
                 "resume" if value.is_none() => {
                     self.context
-                        .update(&self.config, |config| &mut config.enabled, true)
+                        .update(SECTION, &self.config, |config| &mut config.enabled, true)
                         .await?;
                     self.wake.notify_one();
                     println!("Heartbeat resumed");
@@ -261,7 +269,9 @@ mod tests {
 
     #[tokio::test]
     async fn failed_update_restores_changed_field_and_keeps_runtime_state() {
-        let store = ConfigStore::from_str("[Heartbeat]\ninterval_secs = 10\n").unwrap();
+        let store =
+            ConfigStore::from_str("[Heartbeat]\ninterval_secs = 10\nextra = 'preserve'\n").unwrap();
+        let before = store.save_str().unwrap();
         let config = HeartbeatConfig::from_store(&store).unwrap();
         config.write().await.ticks = 3;
         let (persist_tx, persist_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -269,7 +279,7 @@ mod tests {
         let (_shutdown_tx, shutdown) = watch::channel(false);
         let (events, _) = broadcast::channel(4);
         let context = Context {
-            store,
+            store: store.clone(),
             config_path: std::path::PathBuf::from("agent.toml"),
             persistence: PersistenceHandle::new(persist_tx),
             events,
@@ -290,6 +300,7 @@ mod tests {
             assert_eq!(config.message, "still here");
             assert!(config.enabled);
             assert_eq!(config.ticks, 3);
+            assert_eq!(store.save_str().unwrap(), before);
         }
         config.write().await.enabled = false;
         assert_eq!(
@@ -297,6 +308,27 @@ mod tests {
             "configuration persister has stopped"
         );
         assert!(!config.read().await.enabled);
+        assert_eq!(store.save_str().unwrap(), before);
+    }
+
+    #[tokio::test]
+    async fn failed_default_save_does_not_create_section() {
+        let store = ConfigStore::from_str("[Other]\nvalue = 1\n").unwrap();
+        let before = store.save_str().unwrap();
+        let (persist_tx, persist_rx) = tokio::sync::mpsc::unbounded_channel();
+        drop(persist_rx);
+        let (_shutdown_tx, shutdown) = watch::channel(false);
+        let (events, _) = broadcast::channel(4);
+        let context = Context {
+            store: store.clone(),
+            config_path: std::path::PathBuf::from("agent.toml"),
+            persistence: PersistenceHandle::new(persist_tx),
+            events,
+            shutdown,
+        };
+
+        assert!(Heartbeat.start(context).await.is_err());
+        assert_eq!(store.save_str().unwrap(), before);
     }
 
     #[tokio::test]

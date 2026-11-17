@@ -12,6 +12,8 @@ use crate::component::{Component, ComponentFuture, ComponentResult, Context, Run
 use crate::events::Event;
 use crate::split_command;
 
+const SECTION: &str = "Journal";
+
 /// Settings of the journal, the `[Journal]` section.
 #[derive(ConfigScope)]
 #[confer(section = "Journal", deny_unknown_keys)]
@@ -41,7 +43,7 @@ impl Component for Journal {
     }
 
     fn section(&self) -> &'static str {
-        "Journal"
+        SECTION
     }
 
     fn start<'a>(&'a self, context: Context) -> ComponentFuture<'a, Box<dyn RunningComponent>> {
@@ -59,7 +61,7 @@ impl Component for Journal {
             if let Some(path) = file_path {
                 validate_output_path(&path, &context.config_path).await?;
             }
-            context.save_defaults("Journal", &config).await?;
+            context.save_defaults(SECTION, &config).await?;
 
             let (finish, finish_signal) = oneshot::channel();
             let worker = tokio::spawn(run_worker(
@@ -116,7 +118,12 @@ impl RunningComponent for JournalInstance {
                         })
                     };
                     self.context
-                        .update(&self.config, |config| &mut config.file, replacement)
+                        .update(
+                            SECTION,
+                            &self.config,
+                            |config| &mut config.file,
+                            replacement,
+                        )
                         .await?;
                     match value {
                         "off" => println!("Journal file output disabled"),
@@ -488,6 +495,7 @@ mod tests {
     #[tokio::test]
     async fn failed_file_update_restores_optional_table() {
         let store = ConfigStore::from_str("[Journal.file]\npath = 'events.log'\n").unwrap();
+        let before = store.save_str().unwrap();
         let config = JournalConfig::from_store(&store).unwrap();
         let (persist_tx, persist_rx) = tokio::sync::mpsc::unbounded_channel();
         drop(persist_rx);
@@ -496,7 +504,7 @@ mod tests {
         let mut component = JournalInstance {
             config: config.clone(),
             context: Context {
-                store,
+                store: store.clone(),
                 config_path: PathBuf::from("agent.toml"),
                 persistence: PersistenceHandle::new(persist_tx),
                 events,
@@ -514,6 +522,7 @@ mod tests {
             config.read().await.file.as_ref().unwrap().path,
             "events.log"
         );
+        assert_eq!(store.save_str().unwrap(), before);
     }
 
     #[tokio::test]

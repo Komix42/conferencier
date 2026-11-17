@@ -29,19 +29,37 @@ impl Context {
     }
 
     /// Saves the scope to the store, then requests an asynchronous file write.
-    /// Release any scope guard before calling this method.
-    pub async fn save<T: ConfigScope>(&self, scope: &SharedScope<T>) -> ComponentResult<()> {
+    /// The section must match the scope; release any scope guard before calling.
+    pub async fn save<T: ConfigScope>(
+        &self,
+        section: &str,
+        scope: &SharedScope<T>,
+    ) -> ComponentResult<()> {
+        // Components own separate sections, and the host serializes their commands.
+        let previous = self.store.get_section(section);
         T::save(scope, &self.store)
             .await
             .map_err(|error| error.to_string())?;
-        self.persistence.changed()
+        if let Err(error) = self.persistence.changed() {
+            match previous {
+                Some(previous) => self
+                    .store
+                    .set_section(section, previous)
+                    .map_err(|restore| {
+                        format!("{error}; cannot restore section {section:?}: {restore}")
+                    })?,
+                None => self.store.remove_section(section),
+            }
+            return Err(error);
+        }
+        Ok(())
     }
 
     /// Replaces a field, restoring it if saving or requesting persistence fails.
     /// A successful request does not wait for the file write.
-    /// If the request fails, the store may already contain the new value.
     pub async fn update<T: ConfigScope, V: Send>(
         &self,
+        section: &str,
         scope: &SharedScope<T>,
         field: fn(&mut T) -> &mut V,
         value: V,
@@ -50,7 +68,7 @@ impl Context {
             let mut config = scope.write().await;
             std::mem::replace(field(&mut config), value)
         };
-        if let Err(error) = self.save(scope).await {
+        if let Err(error) = self.save(section, scope).await {
             *field(&mut *scope.write().await) = previous;
             return Err(error);
         }
@@ -64,7 +82,7 @@ impl Context {
         scope: &SharedScope<T>,
     ) -> ComponentResult<()> {
         if !self.store.has_section(section) {
-            self.save(scope).await?;
+            self.save(section, scope).await?;
         }
         Ok(())
     }
@@ -73,7 +91,7 @@ impl Context {
 /// A registered component creates its own scope from the shared store.
 pub trait Component: Send + Sync {
     fn name(&self) -> &'static str;
-    /// Must match the scope's `section` attribute and the `save_defaults` argument.
+    /// Must match the scope's `section` attribute and the section passed to `Context`.
     fn section(&self) -> &'static str;
     fn start<'a>(&'a self, context: Context) -> ComponentFuture<'a, Box<dyn RunningComponent>>;
 }

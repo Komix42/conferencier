@@ -10,6 +10,8 @@ use crate::component::{Component, ComponentFuture, ComponentResult, Context, Run
 use crate::events::Event;
 use crate::split_command;
 
+const SECTION: &str = "Reminders";
+
 /// Settings of reminders, the `[Reminders]` section.
 #[derive(ConfigScope)]
 #[confer(section = "Reminders", deny_unknown_keys)]
@@ -42,7 +44,7 @@ impl Component for Reminders {
     }
 
     fn section(&self) -> &'static str {
-        "Reminders"
+        SECTION
     }
 
     fn start<'a>(&'a self, context: Context) -> ComponentFuture<'a, Box<dyn RunningComponent>> {
@@ -50,7 +52,7 @@ impl Component for Reminders {
             let config =
                 ReminderConfig::from_store(&context.store).map_err(|error| error.to_string())?;
             validate(&*config.read().await)?;
-            context.save_defaults("Reminders", &config).await?;
+            context.save_defaults(SECTION, &config).await?;
 
             let worker = tokio::spawn(run_worker(
                 config.clone(),
@@ -124,7 +126,7 @@ impl RunningComponent for RemindersInstance {
                             return Err(error);
                         }
                     }
-                    if let Err(error) = self.context.save(&self.config).await {
+                    if let Err(error) = self.context.save(SECTION, &self.config).await {
                         let mut config = self.config.write().await;
                         if let Some(index) = config
                             .items
@@ -148,7 +150,7 @@ impl RunningComponent for RemindersInstance {
                             .ok_or_else(|| format!("no reminder named {name:?}"))?;
                         (index, config.items.remove(index))
                     };
-                    if let Err(error) = self.context.save(&self.config).await {
+                    if let Err(error) = self.context.save(SECTION, &self.config).await {
                         self.config.write().await.items.insert(index, removed);
                         return Err(error);
                     }
@@ -324,6 +326,45 @@ mod tests {
 
         let _ = shutdown_tx.send(true);
         component.quiesce().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn failed_commands_restore_reminders_and_store() {
+        let store = ConfigStore::from_str(
+            "[[Reminders.items]]\nname = 'tea'\nafter_secs = 60\nmessage = 'ready'\n\
+             [Other]\nvalue = 1\n",
+        )
+        .unwrap();
+        let before = store.save_str().unwrap();
+        let config = ReminderConfig::from_store(&store).unwrap();
+        config.write().await.items[0].fired = true;
+        let (persist_tx, persist_rx) = tokio::sync::mpsc::unbounded_channel();
+        drop(persist_rx);
+        let (_shutdown_tx, shutdown) = watch::channel(false);
+        let (events, _) = broadcast::channel(4);
+        let mut component = RemindersInstance {
+            config: config.clone(),
+            context: Context {
+                store: store.clone(),
+                config_path: std::path::PathBuf::from("agent.toml"),
+                persistence: PersistenceHandle::new(persist_tx),
+                events,
+                shutdown,
+            },
+            worker: None,
+        };
+
+        for command in ["add coffee 30 ready", "remove tea"] {
+            assert_eq!(
+                component.handle_command(command).await.unwrap_err(),
+                "configuration persister has stopped"
+            );
+            let config = config.read().await;
+            assert_eq!(config.items.len(), 1);
+            assert_eq!(config.items[0].name, "tea");
+            assert!(config.items[0].fired);
+            assert_eq!(store.save_str().unwrap(), before);
+        }
     }
 
     #[tokio::test]

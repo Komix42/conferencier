@@ -168,7 +168,7 @@ Disabling a component skips its `start` method. A component that fails to load o
 
 ### Saving
 
-The persister serializes complete-store writes. A command reports success once its scope is saved to the store; the file is written afterwards. A failed write is printed and the in-memory store remains available; another save request or the final shutdown flush retries it. If the final flush fails, the application prints the error and exits with a nonzero status. Runtime state, including heartbeat ticks, reminder timers and recent journal events, is not written to TOML.
+The persister serializes complete-store writes. A command reports success once its scope is saved to the store and a write is requested; the file is written afterwards. If the request fails because the persister has stopped, the command restores its previous scope and store section. A later file-write failure is printed and the in-memory store remains available; another save request or the final shutdown flush retries it. If the final flush fails, the application prints the error and exits with a nonzero status. Runtime state, including heartbeat ticks, reminder timers and recent journal events, is not written to TOML.
 
 ### Shutdown
 
