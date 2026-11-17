@@ -6,6 +6,17 @@ Unlike the RFCs and implementation reports in the version folders such as [`deve
 
 Each entry states the problem, a possible direction and where it comes from.
 
+## Planned for 0.1.0-beta.1
+
+Resolve the findings of the [quality audit of 0.0.8](./devel-0.0.x/AUDIT-001_quality_0.0.8.md) and publish the result as a candidate for the stable 0.1.0 API. No new configuration features are added.
+
+1. **Draft RFC-0011 (audit A1–A7).** Write an RFC in a new `devel-0.1.x/` folder that specifies the public behavior changes: error messages and sources, file paths in parse errors, the Tokio features required by the library, non-finite `f32` values, setter signatures and the `Debug` output of `ConfigStore`. For each finding it chooses the solution and states the migration impact; review it and mark it Approved before implementation.
+2. **Implement RFC-0011.** Change the code, tests, rustdoc and guide accordingly, record the breaking changes in the changelog and mark the RFC Implemented, or write an implementation report if the implementation deviates from it.
+3. **Internal fixes (audit A8, B1–B5).** Pin `conferencier-derive` with an exact `=` requirement, make the generated code hygienic and cover it with a trybuild test, remove the unused `once_cell` dev-dependency and the dead branch in `annotate_with_index`, configure or remove `doc_cfg`, and improve the derive's diagnostics and documentation for field types it recognizes by name. No RFC is written; changes users notice go to the changelog.
+4. **Beta release.** Update the README's development-status note and the migration guide for the beta, verify the packages with the exact derive requirement, and close the audit by linking each finding to the RFC or release that resolved it.
+
+Breaking changes between betas are avoided where possible, because a requirement such as `"0.1.0-beta.1"` also accepts later betas and the final 0.1.0. The stable 0.1.0 follows once the example applications use the beta and no further breaking changes are pending. The section-name migration guard stays until 0.2.0.
+
 ## Technical debt
 
 - **Temporary section-name migration guard.** Following [RFC-0005](./devel-0.0.x/RFC-0005_api_redesign.md), `ConfigScope` derives in 0.0.5 and later 0.0.x and 0.1.x releases whose implicit section was affected by the old `Confer` prefix rule require an explicit section. Remove the guard in 0.2.0, and warn in its migration notes that a direct upgrade from 0.0.4 bypasses the guard. Origin: RFC-0005 N7.
