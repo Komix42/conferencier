@@ -78,7 +78,7 @@ Conferencier supports TOML and uses Tokio for async operations. It does not laye
 ## Learn more
 
 - [Guide and API reference](https://docs.rs/conferencier/latest/conferencier/), including [concepts](https://docs.rs/conferencier/latest/conferencier/guide/concepts/index.html), the [derive attributes](https://docs.rs/conferencier/latest/conferencier/guide/derive/index.html), and [migration guides](https://docs.rs/conferencier/latest/conferencier/guide/migration/index.html).
-- [Examples](https://github.com/Komix42/conferencier/tree/main/conferencier/examples) in the repository, and two runnable applications: an [uptime monitor](https://github.com/Komix42/conferencier/tree/main/examples/uptime-monitor) with configuration reload and a [folder indexer](https://github.com/Komix42/conferencier/tree/main/examples/folder-indexer) that manages its own configuration.
+- [Examples](https://github.com/Komix42/conferencier/tree/main/conferencier/examples) in the repository, and three runnable applications: an [uptime monitor](https://github.com/Komix42/conferencier/tree/main/examples/uptime-monitor) with configuration reload, a [folder indexer](https://github.com/Komix42/conferencier/tree/main/examples/folder-indexer) that manages its own configuration, and a [modular agent](https://github.com/Komix42/conferencier/tree/main/examples/modular-agent) whose independent components own their configuration.
 - [Changelog](https://github.com/Komix42/conferencier/blob/main/CHANGELOG.md) for release history.
 - [Contributing](https://github.com/Komix42/conferencier/blob/main/CONTRIBUTING.md) and [issue tracker](https://github.com/Komix42/conferencier/issues).
 
