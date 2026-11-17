@@ -1,3 +1,5 @@
+//! Component interfaces and shared services for configuration and events.
+
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -11,6 +13,7 @@ use crate::persist::PersistenceHandle;
 pub type ComponentResult<T> = Result<T, String>;
 pub type ComponentFuture<'a, T> = Pin<Box<dyn Future<Output = ComponentResult<T>> + Send + 'a>>;
 
+/// Services shared with each component; configuration remains component-owned.
 #[derive(Clone)]
 pub struct Context {
     pub store: ConfigStore,
@@ -25,6 +28,8 @@ impl Context {
         self.events.send(event).is_ok()
     }
 
+    /// Saves the scope to the store, then requests an asynchronous file write.
+    /// Release any scope guard before calling this method.
     pub async fn save<T: ConfigScope>(&self, scope: &SharedScope<T>) -> ComponentResult<()> {
         T::save(scope, &self.store)
             .await
@@ -34,6 +39,7 @@ impl Context {
 
     /// Replaces a field, restoring it if saving or requesting persistence fails.
     /// A successful request does not wait for the file write.
+    /// If the request fails, the store may already contain the new value.
     pub async fn update<T: ConfigScope, V: Send>(
         &self,
         scope: &SharedScope<T>,
@@ -51,6 +57,7 @@ impl Context {
         Ok(())
     }
 
+    /// Saves defaults only if the entire section is absent, not for missing keys.
     pub async fn save_defaults<T: ConfigScope>(
         &self,
         section: &str,
@@ -63,12 +70,15 @@ impl Context {
     }
 }
 
+/// A registered component creates its own scope from the shared store.
 pub trait Component: Send + Sync {
     fn name(&self) -> &'static str;
+    /// Must match the scope's `section` attribute and the `save_defaults` argument.
     fn section(&self) -> &'static str;
     fn start<'a>(&'a self, context: Context) -> ComponentFuture<'a, Box<dyn RunningComponent>>;
 }
 
+/// Commands and shutdown hooks for a successfully started component.
 pub trait RunningComponent: Send {
     fn name(&self) -> &'static str;
     fn handle_command<'a>(&'a mut self, args: &'a str) -> ComponentFuture<'a, ()>;

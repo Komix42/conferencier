@@ -1,15 +1,20 @@
+//! A single task serializes writes of the shared store to the configuration file.
+
 use std::path::PathBuf;
 
 use conferencier::ConfigStore;
 use tokio::sync::{mpsc, oneshot};
 
+/// Sends write requests to the persister.
 #[derive(Clone)]
 pub struct PersistenceHandle {
     sender: mpsc::UnboundedSender<PersistMessage>,
 }
 
 pub enum PersistMessage {
+    /// Request a write; failures are reported by the persister.
     Changed,
+    /// Write the current store and return that write's result.
     Flush(oneshot::Sender<Result<(), String>>),
 }
 

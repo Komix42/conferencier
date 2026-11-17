@@ -1,3 +1,5 @@
+//! Periodic messages published as events.
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -9,6 +11,7 @@ use crate::component::{Component, ComponentFuture, ComponentResult, Context, Run
 use crate::events::Event;
 use crate::split_command;
 
+/// Settings of the heartbeat, the `[Heartbeat]` section.
 #[derive(ConfigScope)]
 #[confer(section = "Heartbeat")]
 struct HeartbeatConfig {
@@ -18,6 +21,7 @@ struct HeartbeatConfig {
     interval_secs: u64,
     #[confer(default = "still here".into())]
     message: String,
+    /// Runtime counter, never loaded from or saved to TOML.
     #[confer(ignore = 0)]
     ticks: u64,
 }
@@ -146,7 +150,7 @@ impl RunningComponent for HeartbeatInstance {
     }
 }
 
-/// Sleeps for the current interval; a saved command wakes it to apply new settings at once.
+/// Interval and pause/resume commands wake the worker to apply settings without waiting.
 async fn run_worker(
     config: SharedScope<HeartbeatConfig>,
     context: Context,
@@ -178,6 +182,7 @@ async fn run_worker(
     }
 }
 
+/// Checks application rules after conferencier converts the field types.
 fn validate(config: &HeartbeatConfig) -> ComponentResult<()> {
     if config.interval_secs == 0 {
         return Err("Heartbeat.interval_secs must be greater than zero".into());

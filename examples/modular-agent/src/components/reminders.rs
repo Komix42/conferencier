@@ -1,3 +1,5 @@
+//! Timed reminders that publish events when due.
+
 use std::time::{Duration, Instant};
 
 use conferencier::{ConfigScope, ConfigTable, SharedScope};
@@ -8,21 +10,26 @@ use crate::component::{Component, ComponentFuture, ComponentResult, Context, Run
 use crate::events::Event;
 use crate::split_command;
 
+/// Settings of reminders, the `[Reminders]` section.
 #[derive(ConfigScope)]
 #[confer(section = "Reminders", deny_unknown_keys)]
 struct ReminderConfig {
+    /// A missing `[[Reminders.items]]` array loads as an empty list.
     #[confer(table, default)]
     items: Vec<Reminder>,
 }
 
+/// One `[[Reminders.items]]` table; unknown keys are rejected here too.
 #[derive(Clone, ConfigTable)]
 #[confer(deny_unknown_keys)]
 struct Reminder {
     name: String,
     after_secs: u64,
     message: String,
+    /// Runtime timer, initialized when loaded or added; not saved in TOML.
     #[confer(ignore = Instant::now())]
     added_at: Instant,
+    /// Runtime state inside a `ConfigTable`: a saved reminder fires again on restart.
     #[confer(ignore = false)]
     fired: bool,
 }
@@ -203,6 +210,7 @@ async fn run_worker(
     }
 }
 
+/// Checks application rules after conferencier converts the field types.
 fn validate(config: &ReminderConfig) -> ComponentResult<()> {
     let mut names = std::collections::HashSet::new();
     for (index, reminder) in config.items.iter().enumerate() {

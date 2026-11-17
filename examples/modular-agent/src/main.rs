@@ -1,4 +1,7 @@
 //! Modular agent: an example application configured with conferencier.
+//!
+//! Components own separate configuration sections and communicate through
+//! events. See `README.md` for usage and architecture.
 
 mod component;
 mod events;
@@ -110,6 +113,7 @@ async fn run(args: Vec<String>, components: Vec<Box<dyn Component>>) -> AppResul
     outcome
 }
 
+/// Signals shutdown, waits for producers, then shuts down subscribers and flushes.
 async fn stop(
     shutdown: watch::Sender<bool>,
     mut running: Vec<Box<dyn RunningComponent>>,
@@ -209,6 +213,7 @@ async fn handle(
                 println!("{}", component.name());
             }
         }
+        // Unlike a scope snapshot, the store preserves existing disabled and unowned sections.
         "config" => print!("{}", store.save_str()?),
         "quit" => return Ok(Continue::No),
         name => {

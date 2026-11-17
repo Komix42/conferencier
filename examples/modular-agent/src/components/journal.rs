@@ -1,3 +1,5 @@
+//! Event history in memory, with optional append-only file output.
+
 use std::collections::VecDeque;
 use std::path::{Component as PathComponent, Path, PathBuf};
 
@@ -10,17 +12,21 @@ use crate::component::{Component, ComponentFuture, ComponentResult, Context, Run
 use crate::events::Event;
 use crate::split_command;
 
+/// Settings of the journal, the `[Journal]` section.
 #[derive(ConfigScope)]
 #[confer(section = "Journal", deny_unknown_keys)]
 struct JournalConfig {
     #[confer(default = 100)]
     keep: u32,
+    /// An absent `[Journal.file]` disables file output; saving `None` removes it.
     #[confer(table)]
     file: Option<JournalFile>,
+    /// Recent events are runtime state, not configuration.
     #[confer(ignore = VecDeque::new())]
     events: VecDeque<Event>,
 }
 
+/// The optional `[Journal.file]` table rejects unknown keys too.
 #[derive(Clone, ConfigTable)]
 #[confer(deny_unknown_keys)]
 struct JournalFile {
@@ -137,6 +143,7 @@ impl RunningComponent for JournalInstance {
     }
 }
 
+/// After `finish`, drain the events still available following producer quiescence.
 async fn run_worker(
     config: SharedScope<JournalConfig>,
     config_dir: PathBuf,
@@ -248,6 +255,7 @@ fn same_path(left: &Path, right: &Path) -> bool {
     }
 }
 
+/// Resolve the nearest existing ancestor for comparisons, even if the path is new.
 async fn resolve_path(path: &Path) -> ComponentResult<PathBuf> {
     let absolute = if path.is_absolute() {
         path.to_owned()
@@ -304,6 +312,7 @@ fn normalize_path(path: &Path) -> PathBuf {
     normalized
 }
 
+/// Checks application rules after conferencier converts the field types.
 fn validate(config: &JournalConfig) -> ComponentResult<()> {
     if config.keep == 0 {
         return Err("Journal.keep must be greater than zero".into());
