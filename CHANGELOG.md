@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Fixed
 - `modular-agent` now preserves whitespace in command arguments, refuses journal output paths that resolve to its configuration file, and flushes journal writes before reporting success.
 - `modular-agent` waits for event producers and drains the journal's remaining events during shutdown.
+- `folder-indexer` preserves backslashes in Unix file names and remembers Ctrl+C during commands, finishing the current scan or save before exiting.
 
 ## [0.0.7] - 2026-11-16
 

@@ -184,7 +184,11 @@ async fn scan_source(
                 .map(|duration| duration.as_secs());
             files.push(IndexedFile {
                 source: source.name.clone(),
-                path: relative.to_string_lossy().replace('\\', "/"),
+                path: relative
+                    .components()
+                    .map(|component| component.as_os_str().to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join("/"),
                 extension,
                 size_bytes: metadata.len(),
                 modified_unix_secs,
@@ -229,6 +233,45 @@ mod tests {
             .iter()
             .map(|file| format!("{}:{}", file.source, file.path))
             .collect()
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn backslashes_in_filenames_do_not_collide_with_directory_separators() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("notes");
+        tokio::fs::create_dir_all(root.join("a")).await.unwrap();
+        tokio::fs::write(root.join("a").join("b.txt"), "nested")
+            .await
+            .unwrap();
+        tokio::fs::write(root.join(r"a\b.txt"), "backslash")
+            .await
+            .unwrap();
+        let (settings, _) = Settings::open(dir.path().join("indexer.toml"))
+            .await
+            .unwrap();
+        settings.indexer.write().await.sources.push(Source {
+            name: "notes".into(),
+            path: "notes".into(),
+            exclude: None,
+        });
+        settings.report.write().await.catalog = Some(CatalogFile {
+            path: "catalog.json".into(),
+            pretty: false,
+        });
+
+        run(&settings).await.unwrap();
+
+        assert_eq!(paths(&settings).await, ["notes:a/b.txt", r"notes:a\b.txt"]);
+        let catalog: serde_json::Value = serde_json::from_slice(
+            &tokio::fs::read(dir.path().join("catalog.json"))
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(catalog["total_files"], 2);
+        assert_eq!(catalog["files"][0]["path"], "a/b.txt");
+        assert_eq!(catalog["files"][1]["path"], r"a\b.txt");
     }
 
     #[tokio::test]

@@ -53,9 +53,11 @@ No scan results yet. Type `scan` to index the configured folders.
 | `scan` | Scan the configured folders concurrently, print a report and write the optional catalog. |
 | `report` | Print the most recent scan's report without scanning again or writing a catalog. |
 | `help` | List commands. |
-| `quit` | Exit. Ctrl+C and end of input also exit. |
+| `quit` | Exit. Ctrl+C and end of input also exit; an in-progress command finishes first. |
 
 Configuration-changing commands save immediately. Invalid commands and validation errors leave the configuration unchanged. If saving fails, the application reports the error and restores its previous in-memory settings; see the [file-saving guide](../../conferencier/guide/files.md#replacing-the-file) for filesystem limitations.
+
+Ctrl+C received during a command is remembered. The current command, including a scan, catalog write or configuration save, finishes before the application exits; queued commands are not run.
 
 The console splits commands on whitespace and does not interpret quotes. Source names and paths entered there cannot contain spaces; use a TOML file instead when they do. `--config` is parsed separately by the shell and can contain spaces.
 
@@ -92,7 +94,7 @@ The catalog contains an entry per file and totals across all sources. For exampl
 }
 ```
 
-Paths are relative to their source, not to the catalog. `extension` is `null` for a file without one. Size and modification time depend on the files and filesystem.
+Paths are relative to their source, not to the catalog, and use `/` between path components. On Unix, a backslash in a file name remains a backslash, escaped as `\\` in JSON. `extension` is `null` for a file without one. Size and modification time depend on the files and filesystem.
 
 ## Configuration
 

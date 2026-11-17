@@ -7,7 +7,8 @@ mod config;
 mod report;
 mod scan;
 
-use std::io::BufRead;
+use std::future::Future;
+use std::io::{self, BufRead};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -45,24 +46,35 @@ async fn run() -> AppResult<()> {
     println!("Type `help` for commands.");
     report::print(&settings).await;
 
-    let mut console = spawn_console();
+    command_loop(&settings, spawn_console(), tokio::signal::ctrl_c()).await?;
+    println!("Goodbye");
+    Ok(())
+}
+
+async fn command_loop(
+    settings: &Settings,
+    mut console: mpsc::Receiver<String>,
+    interrupt: impl Future<Output = io::Result<()>>,
+) -> AppResult<()> {
+    // Keep the registered listener alive while a command runs.
+    tokio::pin!(interrupt);
     loop {
         tokio::select! {
+            biased;
+            result = &mut interrupt => {
+                result?;
+                break;
+            }
             line = console.recv() => {
                 let Some(line) = line else { break };
-                match handle(&settings, line.trim()).await {
+                match handle(settings, line.trim()).await {
                     Ok(Continue::Yes) => {}
                     Ok(Continue::No) => break,
                     Err(error) => eprintln!("error: {error}"),
                 }
             }
-            result = tokio::signal::ctrl_c() => {
-                result?;
-                break;
-            }
         }
     }
-    println!("Goodbye");
     Ok(())
 }
 
@@ -237,7 +249,93 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use crate::config::{IndexerConfig, ReportConfig};
+    use crate::config::{CatalogFile, IndexerConfig, ReportConfig};
+
+    #[tokio::test]
+    async fn interrupt_during_scan_finishes_scan_and_skips_queued_commands() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("notes");
+        tokio::fs::create_dir(&root).await.unwrap();
+        tokio::fs::write(root.join("note.txt"), "a note")
+            .await
+            .unwrap();
+        let (settings, _) = Settings::open(dir.path().join("indexer.toml"))
+            .await
+            .unwrap();
+        settings.report.write().await.catalog = Some(CatalogFile {
+            path: "catalog.json".into(),
+            pretty: true,
+        });
+        let mut indexer = settings.indexer.write().await;
+        indexer.sources.push(Source {
+            name: "notes".into(),
+            path: "notes".into(),
+            exclude: None,
+        });
+        let (sender, console) = mpsc::channel(8);
+        sender.send("scan".into()).await.unwrap();
+        let (interrupt_tx, interrupt_rx) = tokio::sync::oneshot::channel();
+        let running = command_loop(&settings, console, async {
+            interrupt_rx.await.unwrap();
+            Ok(())
+        });
+        tokio::pin!(running);
+        std::future::poll_fn(|cx| {
+            assert!(running.as_mut().poll(cx).is_pending());
+            std::task::Poll::Ready(())
+        })
+        .await;
+
+        interrupt_tx.send(()).unwrap();
+        sender.send("largest 99".into()).await.unwrap();
+        assert!(!indexer.has_scanned);
+        drop(indexer);
+        running.await.unwrap();
+
+        let indexer = settings.indexer.read().await;
+        assert!(indexer.has_scanned);
+        assert_eq!(indexer.files.len(), 1);
+        assert_eq!(indexer.files[0].path, "note.txt");
+        assert_eq!(settings.report.read().await.summary.largest, 5);
+        let catalog: serde_json::Value = serde_json::from_slice(
+            &tokio::fs::read(dir.path().join("catalog.json"))
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(catalog["total_files"], 1);
+        assert_eq!(catalog["files"][0]["path"], "note.txt");
+    }
+
+    #[tokio::test]
+    async fn interrupt_during_configuration_edit_does_not_cancel_save() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("indexer.toml");
+        let (settings, _) = Settings::open(path.clone()).await.unwrap();
+        let indexer = settings.indexer.write().await;
+        let (sender, console) = mpsc::channel(8);
+        sender.send("largest 2".into()).await.unwrap();
+        let (interrupt_tx, interrupt_rx) = tokio::sync::oneshot::channel();
+        let running = command_loop(&settings, console, async {
+            interrupt_rx.await.unwrap();
+            Ok(())
+        });
+        tokio::pin!(running);
+        std::future::poll_fn(|cx| {
+            assert!(running.as_mut().poll(cx).is_pending());
+            std::task::Poll::Ready(())
+        })
+        .await;
+
+        assert_eq!(settings.report.read().await.summary.largest, 2);
+        interrupt_tx.send(()).unwrap();
+        drop(indexer);
+        running.await.unwrap();
+
+        let store = ConfigStore::from_file(&path).await.unwrap();
+        let report = ReportConfig::from_store(&store).unwrap();
+        assert_eq!(report.read().await.summary.largest, 2);
+    }
 
     #[tokio::test]
     async fn console_edits_persist_and_remove_optional_keys() {
