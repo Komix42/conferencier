@@ -100,21 +100,16 @@ async fn handle(settings: &Settings, line: &str) -> AppResult<Continue> {
             no_more_args(words, "usage: add-source <name> <path>")?;
 
             let mut indexer = settings.indexer.write().await;
-            if name.trim().is_empty() {
-                return Err("source name must not be empty".into());
-            }
-            if path.trim().is_empty() {
-                return Err("source path must not be empty".into());
-            }
-            if indexer.sources.iter().any(|source| source.name == name) {
-                return Err(format!("duplicate source name {name:?}").into());
-            }
             indexer.sources.push(Source {
                 name: name.to_owned(),
                 path: path.to_owned(),
                 exclude: None,
             });
             drop(indexer);
+            if let Err(error) = validate_settings(settings).await {
+                settings.indexer.write().await.sources.pop();
+                return Err(error.into());
+            }
             settings.save().await?;
             println!("Added source {name:?}");
         }
@@ -129,8 +124,17 @@ async fn handle(settings: &Settings, line: &str) -> AppResult<Continue> {
             else {
                 return Err(format!("no source named {name:?}").into());
             };
-            indexer.sources.remove(position);
+            let removed = indexer.sources.remove(position);
             drop(indexer);
+            if let Err(error) = validate_settings(settings).await {
+                settings
+                    .indexer
+                    .write()
+                    .await
+                    .sources
+                    .insert(position, removed);
+                return Err(error.into());
+            }
             settings.save().await?;
             println!("Removed source {name:?}");
         }
@@ -143,20 +147,12 @@ async fn handle(settings: &Settings, line: &str) -> AppResult<Continue> {
                 Some(value.split(',').map(str::to_owned).collect())
             };
             let mut indexer = settings.indexer.write().await;
-            if let Some(extensions) = &extensions {
-                if let Some((index, _)) = extensions
-                    .iter()
-                    .enumerate()
-                    .find(|(_, extension)| extension.is_empty() || extension.starts_with('.'))
-                {
-                    return Err(format!(
-                        "Indexer.extensions[{index}] must be an extension without the dot, such as \"md\""
-                    )
-                    .into());
-                }
-            }
-            indexer.extensions = extensions;
+            let previous = std::mem::replace(&mut indexer.extensions, extensions);
             drop(indexer);
+            if let Err(error) = validate_settings(settings).await {
+                settings.indexer.write().await.extensions = previous;
+                return Err(error.into());
+            }
             settings.save().await?;
             println!("Updated the extension filter");
         }
@@ -166,7 +162,14 @@ async fn handle(settings: &Settings, line: &str) -> AppResult<Continue> {
             let count = value
                 .parse::<u32>()
                 .map_err(|error| format!("invalid largest-file count {value:?}: {error}"))?;
-            settings.report.write().await.summary.largest = count;
+            let previous = {
+                let mut report = settings.report.write().await;
+                std::mem::replace(&mut report.summary.largest, count)
+            };
+            if let Err(error) = validate_settings(settings).await {
+                settings.report.write().await.summary.largest = previous;
+                return Err(error.into());
+            }
             settings.save().await?;
             println!("The report will list up to {count} largest files");
         }
@@ -174,10 +177,8 @@ async fn handle(settings: &Settings, line: &str) -> AppResult<Continue> {
             let value = required_arg(&mut words, "usage: catalog <off|path>")?;
             no_more_args(words, "usage: catalog <off|path>")?;
             let mut report = settings.report.write().await;
-            let catalog = if value == "off" {
+            let replacement = if value == "off" {
                 None
-            } else if value.trim().is_empty() {
-                return Err("catalog path must not be empty".into());
             } else {
                 // Keep a `pretty` setting edited in the file.
                 let pretty = report.catalog.as_ref().is_none_or(|catalog| catalog.pretty);
@@ -186,14 +187,24 @@ async fn handle(settings: &Settings, line: &str) -> AppResult<Continue> {
                     pretty,
                 })
             };
-            report.catalog = catalog;
+            let previous = std::mem::replace(&mut report.catalog, replacement);
             drop(report);
+            if let Err(error) = validate_settings(settings).await {
+                settings.report.write().await.catalog = previous;
+                return Err(error.into());
+            }
             settings.save().await?;
             println!("Updated the catalog setting");
         }
         other => println!("Unknown command {other:?}; type `help` for the list."),
     }
     Ok(Continue::Yes)
+}
+
+async fn validate_settings(settings: &Settings) -> Result<(), String> {
+    let indexer = settings.indexer.read().await;
+    let report = settings.report.read().await;
+    crate::config::validate(&indexer, &report)
 }
 
 fn required_arg<'a>(words: &mut impl Iterator<Item = &'a str>, usage: &str) -> AppResult<&'a str> {
@@ -389,12 +400,17 @@ mod tests {
         for command in [
             "add-source notes another",
             "extensions .md",
+            "extensions md,,txt",
             "remove-source missing",
             "largest nope",
         ] {
             assert!(handle(&settings, command).await.is_err(), "{command}");
             assert_eq!(tokio::fs::read_to_string(&path).await.unwrap(), before);
             assert_eq!(settings.indexer.read().await.sources.len(), 1);
+            assert_eq!(
+                settings.indexer.read().await.extensions.as_deref().unwrap(),
+                ["md", "txt"]
+            );
         }
 
         for command in ["extensions all", "catalog off", "remove-source notes"] {
