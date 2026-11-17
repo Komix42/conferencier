@@ -252,7 +252,8 @@ fn print_help(components: &[Box<dyn RunningComponent>]) {
     }
 }
 
-/// Reads console commands on a dedicated thread, which Tokio does not wait on at shutdown.
+/// Reads stdin on a dedicated thread: unlike Tokio's blocking stdin worker,
+/// it does not hold up runtime shutdown.
 fn spawn_console() -> mpsc::UnboundedReceiver<String> {
     let (sender, receiver) = mpsc::unbounded_channel();
     std::thread::spawn(move || {
@@ -304,6 +305,7 @@ impl Options {
 mod tests {
     use super::*;
 
+    // Publishes during shutdown to test that the journal drains producer events.
     struct FinalPublisher {
         release: Option<tokio::sync::oneshot::Sender<()>>,
         worker: Option<tokio::task::JoinHandle<()>>,

@@ -106,6 +106,7 @@ async fn handle(settings: &Settings, line: &str) -> AppResult<Continue> {
                 path: path.to_owned(),
                 exclude: None,
             });
+            // Validation and saving need to acquire the scope locks themselves.
             drop(indexer);
             if let Err(error) = validate_settings(settings).await {
                 settings.indexer.write().await.sources.pop();
@@ -234,8 +235,8 @@ fn print_help() {
     println!("  quit                            exit (or press Ctrl+C)");
 }
 
-/// Reads console commands on a dedicated thread. A plain thread is not waited
-/// for by Tokio at shutdown, unlike Tokio's blocking stdin worker.
+/// Reads stdin on a dedicated thread: unlike Tokio's blocking stdin worker,
+/// it does not hold up runtime shutdown.
 fn spawn_console() -> mpsc::Receiver<String> {
     let (sender, receiver) = mpsc::channel(8);
     std::thread::spawn(move || {
@@ -296,6 +297,7 @@ mod tests {
             Ok(())
         });
         tokio::pin!(running);
+        // Poll until the scan waits for the held indexer lock, then send the interrupt.
         std::future::poll_fn(|cx| {
             assert!(running.as_mut().poll(cx).is_pending());
             std::task::Poll::Ready(())
@@ -337,6 +339,7 @@ mod tests {
             Ok(())
         });
         tokio::pin!(running);
+        // Pause the command at validation on the held indexer lock.
         std::future::poll_fn(|cx| {
             assert!(running.as_mut().poll(cx).is_pending());
             std::task::Poll::Ready(())

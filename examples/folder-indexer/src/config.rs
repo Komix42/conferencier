@@ -22,7 +22,6 @@ pub type BoxError = Box<dyn Error + Send + Sync>;
 #[derive(ConfigScope)]
 #[confer(section = "Indexer", deny_unknown_keys)]
 pub struct IndexerConfig {
-    /// Whether subfolders are indexed too.
     #[confer(default = true)]
     pub recursive: bool,
     /// `rename` maps the field to a kebab-case TOML key. `default` without a
@@ -103,7 +102,6 @@ pub struct Summary {
 pub struct CatalogFile {
     /// The JSON file, relative to the configuration file or absolute.
     pub path: String,
-    /// Whether the JSON is indented for reading.
     #[confer(default = true)]
     pub pretty: bool,
 }
@@ -120,6 +118,7 @@ pub struct Settings {
 }
 
 impl Settings {
+    /// Resolves relative source and catalog paths from the configuration directory.
     pub fn resolve_path(&self, path: &str) -> PathBuf {
         let path = PathBuf::from(path);
         if path.is_absolute() {

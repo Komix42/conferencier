@@ -200,11 +200,8 @@ fn print_help() {
     println!("Commands: reload, pause, resume, export, help, quit (or Ctrl+C)");
 }
 
-/// Reads console lines on a dedicated thread.
-///
-/// Tokio's `stdin` reads on a blocking thread that the runtime waits for when it
-/// shuts down, so Ctrl+C would not quit until Enter is pressed. A plain thread is
-/// not waited for; it ends with the process.
+/// Reads stdin on a dedicated thread: unlike Tokio's blocking stdin worker,
+/// it does not hold up runtime shutdown.
 fn spawn_console() -> mpsc::Receiver<String> {
     let (sender, receiver) = mpsc::channel(8);
     std::thread::spawn(move || {

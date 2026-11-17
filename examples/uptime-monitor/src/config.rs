@@ -46,7 +46,7 @@ pub struct MonitorConfig {
     /// the worker and read by the HTTP server.
     #[confer(ignore = HashMap::new())]
     pub results: HashMap<String, CheckResult>,
-    /// Identifies the configuration under which a round of checks started.
+    /// Runtime token compared by `Arc` identity; reload replaces it.
     #[confer(ignore = Arc::new(()))]
     pub generation: Arc<()>,
 }
@@ -120,6 +120,8 @@ pub async fn reload(
     store.load_str(source)?;
     HttpConfig::load(http, store).await?;
     MonitorConfig::load(monitor, store).await?;
+    // `load` leaves ignored fields untouched; replace the generation and
+    // remove results for targets that were removed or changed.
     let mut monitor = monitor.write().await;
     let MonitorConfig {
         targets,
