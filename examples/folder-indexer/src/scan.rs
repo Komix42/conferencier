@@ -36,7 +36,8 @@ struct SourceScan {
 }
 
 /// Scans each source concurrently and publishes results only after every
-/// source succeeds. A failed scan leaves the previous runtime results intact.
+/// source succeeds. A failed source leaves the previous results intact.
+/// A later catalog-write error does not undo a successful scan.
 pub async fn run(settings: &Settings) -> Result<(), BoxError> {
     let (recursive, include_hidden, extensions, sources) = {
         let config = settings.indexer.read().await;
@@ -197,4 +198,196 @@ async fn scan_source(
         bytes: files.iter().map(|file| file.size_bytes).sum(),
     };
     Ok(SourceScan { files, stats })
+}
+
+#[cfg(test)]
+mod tests {
+    use tempfile::tempdir;
+
+    use super::*;
+    use crate::config::CatalogFile;
+
+    fn sample_source(name: &str) -> Source {
+        Source {
+            name: name.into(),
+            path: Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("sample")
+                .join(name)
+                .to_str()
+                .unwrap()
+                .to_owned(),
+            exclude: None,
+        }
+    }
+
+    async fn paths(settings: &Settings) -> Vec<String> {
+        settings
+            .indexer
+            .read()
+            .await
+            .files
+            .iter()
+            .map(|file| format!("{}:{}", file.source, file.path))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn scan_filters_sources_and_writes_catalog() {
+        let dir = tempdir().unwrap();
+        let (settings, _) = Settings::open(dir.path().join("indexer.toml"))
+            .await
+            .unwrap();
+        {
+            let mut indexer = settings.indexer.write().await;
+            indexer.sources = vec![sample_source("manuals"), sample_source("notes")];
+            indexer.extensions = Some(vec!["MD".into()]);
+        }
+        settings.report.write().await.catalog = Some(CatalogFile {
+            path: "catalog.json".into(),
+            pretty: true,
+        });
+        run(&settings).await.unwrap();
+        assert_eq!(
+            paths(&settings).await,
+            [
+                "manuals:setup.md",
+                "notes:drafts/idea.md",
+                "notes:meeting.md",
+            ]
+        );
+        {
+            let indexer = settings.indexer.read().await;
+            assert!(indexer.has_scanned);
+            assert_eq!(indexer.source_stats[0].name, "manuals");
+            assert_eq!(indexer.source_stats[0].files, 1);
+            assert_eq!(indexer.source_stats[1].name, "notes");
+            assert_eq!(indexer.source_stats[1].files, 2);
+            let catalog: serde_json::Value = serde_json::from_slice(
+                &tokio::fs::read(dir.path().join("catalog.json"))
+                    .await
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(catalog["total_files"], 3);
+            assert_eq!(catalog["files"][0]["source"], "manuals");
+            assert_eq!(catalog["files"][0]["path"], "setup.md");
+            assert_eq!(
+                catalog["total_bytes"].as_u64().unwrap(),
+                indexer
+                    .files
+                    .iter()
+                    .map(|file| file.size_bytes)
+                    .sum::<u64>()
+            );
+        }
+
+        settings.report.write().await.catalog = None;
+        {
+            let mut indexer = settings.indexer.write().await;
+            indexer.sources = vec![sample_source("notes")];
+            indexer.include_hidden = true;
+            indexer.recursive = false;
+            indexer.extensions = None;
+        }
+        run(&settings).await.unwrap();
+        assert_eq!(
+            paths(&settings).await,
+            ["notes:.private.md", "notes:meeting.md", "notes:todo.txt"]
+        );
+
+        {
+            let mut indexer = settings.indexer.write().await;
+            indexer.recursive = true;
+            indexer.sources[0].exclude = Some(vec!["drafts".into(), "todo.txt".into()]);
+        }
+        run(&settings).await.unwrap();
+        assert_eq!(
+            paths(&settings).await,
+            ["notes:.private.md", "notes:meeting.md"]
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_source_keeps_previous_results_and_catalog() {
+        let dir = tempdir().unwrap();
+        let (settings, _) = Settings::open(dir.path().join("indexer.toml"))
+            .await
+            .unwrap();
+        settings
+            .indexer
+            .write()
+            .await
+            .sources
+            .push(sample_source("notes"));
+        settings.report.write().await.catalog = Some(CatalogFile {
+            path: "catalog.json".into(),
+            pretty: true,
+        });
+        run(&settings).await.unwrap();
+        let before = paths(&settings).await;
+        let catalog = tokio::fs::read(dir.path().join("catalog.json"))
+            .await
+            .unwrap();
+        settings.indexer.write().await.sources.push(Source {
+            name: "missing".into(),
+            path: "missing".into(),
+            exclude: None,
+        });
+
+        let error = run(&settings).await.unwrap_err();
+        assert!(error.to_string().contains("missing"));
+        assert_eq!(paths(&settings).await, before);
+        assert_eq!(
+            tokio::fs::read(dir.path().join("catalog.json"))
+                .await
+                .unwrap(),
+            catalog
+        );
+    }
+
+    #[tokio::test]
+    async fn catalog_never_overwrites_existing_files() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("indexer.toml");
+        let source_path = dir.path().join("document.md");
+        tokio::fs::write(&source_path, "original document")
+            .await
+            .unwrap();
+        let (settings, _) = Settings::open(config_path.clone()).await.unwrap();
+        let config_before = tokio::fs::read(&config_path).await.unwrap();
+        settings.indexer.write().await.sources.push(Source {
+            name: "docs".into(),
+            path: ".".into(),
+            exclude: None,
+        });
+
+        for path in ["document.md", "indexer.toml"] {
+            settings.report.write().await.catalog = Some(CatalogFile {
+                path: path.into(),
+                pretty: true,
+            });
+            let error = run(&settings).await.unwrap_err();
+            assert!(error.to_string().contains("cannot create new catalog"));
+            assert_eq!(
+                tokio::fs::read(&source_path).await.unwrap(),
+                b"original document"
+            );
+            assert_eq!(tokio::fs::read(&config_path).await.unwrap(), config_before);
+        }
+
+        settings.report.write().await.catalog = Some(CatalogFile {
+            path: "catalog.json".into(),
+            pretty: true,
+        });
+        run(&settings).await.unwrap();
+        let catalog_path = dir.path().join("catalog.json");
+        let catalog_before = tokio::fs::read(&catalog_path).await.unwrap();
+        tokio::fs::write(dir.path().join("new.md"), "new document")
+            .await
+            .unwrap();
+        let error = run(&settings).await.unwrap_err();
+        assert!(error.to_string().contains("cannot create new catalog"));
+        assert_eq!(tokio::fs::read(catalog_path).await.unwrap(), catalog_before);
+        assert!(paths(&settings).await.contains(&"docs:new.md".to_string()));
+    }
 }

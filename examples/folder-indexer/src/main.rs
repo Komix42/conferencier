@@ -199,7 +199,7 @@ fn print_help() {
     println!("  remove-source <name>            remove a folder");
     println!("  extensions <all|md,txt>         select extensions; `all` removes the key");
     println!("  largest <count>                 set the number of large files in the report");
-    println!("  catalog <off|path>              write or disable the JSON catalog");
+    println!("  catalog <off|path>              write to a new JSON file, or disable it");
     println!("  scan                            scan all configured folders");
     println!("  report                          print the last scan report again");
     println!("  help                            show this list");
@@ -228,5 +228,69 @@ fn config_path(mut args: impl Iterator<Item = String>) -> AppResult<PathBuf> {
         (None, _, _) => Ok(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("indexer.toml")),
         (Some("--config"), Some(path), None) => Ok(PathBuf::from(path)),
         _ => Err("usage: folder-indexer [--config <path>]".into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use conferencier::{ConfigScope, ConfigStore};
+    use tempfile::tempdir;
+
+    use super::*;
+    use crate::config::{IndexerConfig, ReportConfig};
+
+    #[tokio::test]
+    async fn console_edits_persist_and_remove_optional_keys() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("indexer.toml");
+        let (settings, _) = Settings::open(path.clone()).await.unwrap();
+
+        for command in [
+            "add-source notes sample/notes",
+            "extensions md,txt",
+            "catalog catalog.json",
+            "largest 2",
+        ] {
+            assert!(handle(&settings, command).await.is_ok(), "{command}");
+        }
+        let store = ConfigStore::from_file(&path).await.unwrap();
+        let indexer = IndexerConfig::from_store(&store).unwrap();
+        let indexer = indexer.read().await;
+        assert_eq!(indexer.sources[0].name, "notes");
+        assert_eq!(indexer.sources[0].path, "sample/notes");
+        assert_eq!(indexer.extensions.as_deref().unwrap(), ["md", "txt"]);
+        let report = ReportConfig::from_store(&store).unwrap();
+        let report = report.read().await;
+        assert_eq!(report.summary.largest, 2);
+        assert_eq!(report.catalog.as_ref().unwrap().path, "catalog.json");
+        drop(report);
+        drop(indexer);
+
+        let before = tokio::fs::read_to_string(&path).await.unwrap();
+        for command in [
+            "add-source notes another",
+            "extensions .md",
+            "remove-source missing",
+            "largest nope",
+        ] {
+            assert!(handle(&settings, command).await.is_err(), "{command}");
+            assert_eq!(tokio::fs::read_to_string(&path).await.unwrap(), before);
+            assert_eq!(settings.indexer.read().await.sources.len(), 1);
+        }
+
+        for command in ["extensions all", "catalog off", "remove-source notes"] {
+            assert!(handle(&settings, command).await.is_ok(), "{command}");
+        }
+        let store = ConfigStore::from_file(&path).await.unwrap();
+        assert!(store.get_value("Indexer", "extensions").is_none());
+        assert!(store.get_value("Report", "catalog").is_none());
+        assert!(
+            IndexerConfig::from_store(&store)
+                .unwrap()
+                .read()
+                .await
+                .sources
+                .is_empty()
+        );
     }
 }

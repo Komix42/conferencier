@@ -250,3 +250,123 @@ pub fn validate(indexer: &IndexerConfig, report: &ReportConfig) -> Result<(), St
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use conferencier::Error;
+    use tempfile::tempdir;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn first_start_persists_defaults_and_reopens() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("indexer.toml");
+        let (settings, created) = Settings::open(path.clone()).await.unwrap();
+        assert!(created);
+
+        let store = ConfigStore::from_file(&path).await.unwrap();
+        let indexer = IndexerConfig::from_store(&store).unwrap();
+        let indexer = indexer.read().await;
+        assert!(indexer.recursive);
+        assert!(!indexer.include_hidden);
+        assert!(indexer.extensions.is_none());
+        assert!(indexer.sources.is_empty());
+        let report = ReportConfig::from_store(&store).unwrap();
+        assert_eq!(report.read().await.summary.largest, 5);
+        assert!(report.read().await.summary.by_extension);
+        assert!(report.read().await.catalog.is_none());
+        let serialized = store.save_str().unwrap();
+        assert!(serialized.contains("sources = []"));
+        assert!(serialized.contains("[Report.summary]"));
+        assert!(!serialized.contains("extensions"));
+        assert!(!serialized.contains("[Report.catalog]"));
+        assert!(!serialized.contains("has_scanned"));
+        assert_eq!(settings.effective_toml().await.unwrap(), serialized);
+
+        let (_, created) = Settings::open(path).await.unwrap();
+        assert!(!created);
+    }
+
+    #[tokio::test]
+    async fn strict_keys_and_unowned_sections_are_reported() {
+        let invalid = [
+            ("[Indexer]\ninclude_hiden = true", "include_hiden"),
+            ("[[Indexer.sources]]\nname = 'a'\npth = '.'", "pth"),
+            ("[Report.catalog]\npath = 'x'\nprety = true", "prety"),
+        ];
+        for (source, expected_key) in invalid {
+            let store = ConfigStore::from_str(source).unwrap();
+            let error = match IndexerConfig::from_store(&store) {
+                Err(error) => error,
+                Ok(_) => match ReportConfig::from_store(&store) {
+                    Err(error) => error,
+                    Ok(_) => panic!("accepted invalid configuration: {source}"),
+                },
+            };
+            match error {
+                Error::UnknownKey { key, .. } => assert_eq!(key, expected_key),
+                other => panic!("unexpected error: {other}"),
+            }
+        }
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("indexer.toml");
+        let source = "[Report]\ncolour = true\n[Reprot]\nlargest = 10\n";
+        tokio::fs::write(&path, source).await.unwrap();
+        let (settings, _) = Settings::open(path.clone()).await.unwrap();
+        assert_eq!(settings.unexpected_sections(), vec!["Reprot"]);
+        assert_eq!(settings.report.read().await.summary.largest, 5);
+        assert_eq!(tokio::fs::read_to_string(&path).await.unwrap(), source);
+
+        settings.save().await.unwrap();
+        let saved = ConfigStore::from_file(path).await.unwrap();
+        assert!(saved.get_section("Reprot").is_some());
+        assert!(saved.get_value("Report", "colour").is_none());
+    }
+
+    #[tokio::test]
+    async fn validation_rejects_invalid_values() {
+        let invalid = [
+            ("[Indexer]\nextensions = ['.md']", "extensions[0]"),
+            ("[Indexer]\nextensions = ['']", "extensions[0]"),
+            ("[[Indexer.sources]]\nname = ' '\npath = '.'", "name"),
+            ("[[Indexer.sources]]\nname = 'a'\npath = ' '", "path"),
+            (
+                "[[Indexer.sources]]\nname = 'a'\npath = '.'\n\
+                 [[Indexer.sources]]\nname = 'a'\npath = '.'",
+                "duplicate source name",
+            ),
+            ("[Report.catalog]\npath = ' '", "Report.catalog.path"),
+        ];
+        for (source, expected) in invalid {
+            let store = ConfigStore::from_str(source).unwrap();
+            let indexer = IndexerConfig::from_store(&store).unwrap();
+            let report = ReportConfig::from_store(&store).unwrap();
+            let error = validate(&*indexer.read().await, &*report.read().await).unwrap_err();
+            assert!(error.contains(expected), "{source}: {error}");
+        }
+    }
+
+    #[tokio::test]
+    async fn failed_save_restores_scopes_and_preserves_runtime_state() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("indexer.toml");
+        let (mut settings, _) = Settings::open(path.clone()).await.unwrap();
+        let before = tokio::fs::read_to_string(&path).await.unwrap();
+        settings.indexer.write().await.has_scanned = true;
+        settings.indexer.write().await.recursive = false;
+        settings.report.write().await.summary.largest = 1;
+        // A directory cannot be replaced by save_file; the original config
+        // remains available for checking the failed write.
+        settings.path = dir.path().to_path_buf();
+
+        assert!(settings.save().await.is_err());
+        let indexer = settings.indexer.read().await;
+        assert!(indexer.recursive);
+        assert!(indexer.has_scanned);
+        assert_eq!(settings.report.read().await.summary.largest, 5);
+        assert_eq!(settings.store.save_str().unwrap(), before);
+        assert_eq!(tokio::fs::read_to_string(path).await.unwrap(), before);
+    }
+}

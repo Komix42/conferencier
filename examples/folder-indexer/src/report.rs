@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde_json::json;
+use tokio::io::AsyncWriteExt;
 
 use crate::config::{BoxError, Settings};
 use crate::scan::IndexedFile;
@@ -86,6 +87,7 @@ pub async fn print(settings: &Settings) {
 ///
 /// The catalog is generated from runtime results; it is not a conferencier
 /// scope, so `serde_json::json!` is used only for this output format.
+/// A catalog never overwrites an existing file, including a previous catalog.
 pub async fn write_catalog(settings: &Settings) -> Result<(), BoxError> {
     let (catalog, files) = {
         let config = settings.report.read().await;
@@ -115,9 +117,24 @@ pub async fn write_catalog(settings: &Settings) -> Result<(), BoxError> {
             .await
             .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
     }
-    tokio::fs::write(&path, contents)
+    let mut file = tokio::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
         .await
-        .map_err(|error| format!("cannot write catalog {}: {error}", path.display()))?;
+        .map_err(|error| format!("cannot create new catalog {}: {error}", path.display()))?;
+    file.write_all(&contents).await.map_err(|error| {
+        format!(
+            "cannot write catalog {}; it may be incomplete: {error}",
+            path.display()
+        )
+    })?;
+    file.flush().await.map_err(|error| {
+        format!(
+            "cannot finish catalog {}; it may be incomplete: {error}",
+            path.display()
+        )
+    })?;
     println!("Wrote {} files to {}", files.len(), path.display());
     Ok(())
 }
