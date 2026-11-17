@@ -5,6 +5,7 @@ mod events;
 mod persist;
 mod components {
     pub mod heartbeat;
+    pub mod journal;
     pub mod reminders;
 }
 
@@ -34,6 +35,7 @@ fn components() -> Vec<Box<dyn Component>> {
     vec![
         Box::new(components::heartbeat::Heartbeat),
         Box::new(components::reminders::Reminders),
+        Box::new(components::journal::Journal),
     ]
 }
 
@@ -72,20 +74,7 @@ async fn run(args: Vec<String>, components: Vec<Box<dyn Component>>) -> AppResul
         events: events_tx,
         shutdown: shutdown_rx,
     };
-    let mut running = Vec::<Box<dyn RunningComponent>>::new();
-    for component in &components {
-        if options.without.iter().any(|name| name == component.name()) {
-            println!(
-                "Component {:?} disabled; its configuration is left untouched",
-                component.name()
-            );
-            continue;
-        }
-        match component.start(context.clone()).await {
-            Ok(instance) => running.push(instance),
-            Err(error) => eprintln!("component {}: {error}", component.name()),
-        }
-    }
+    let mut running = start_components(&components, &options.without, context).await;
 
     let owned_sections = components
         .iter()
@@ -127,6 +116,28 @@ async fn run(args: Vec<String>, components: Vec<Box<dyn Component>>) -> AppResul
     let _ = persister.await;
     flush_result?;
     outcome
+}
+
+async fn start_components(
+    components: &[Box<dyn Component>],
+    disabled: &[String],
+    context: component::Context,
+) -> Vec<Box<dyn RunningComponent>> {
+    let mut running = Vec::new();
+    for component in components {
+        if disabled.iter().any(|name| name == component.name()) {
+            println!(
+                "Component {:?} disabled; its configuration is left untouched",
+                component.name()
+            );
+            continue;
+        }
+        match component.start(context.clone()).await {
+            Ok(instance) => running.push(instance),
+            Err(error) => eprintln!("component {}: {error}", component.name()),
+        }
+    }
+    running
 }
 
 fn validate_registry(components: &[Box<dyn Component>]) -> AppResult<()> {
@@ -290,5 +301,65 @@ mod tests {
             .is_err()
         );
         assert!(Options::parse(vec!["--other".into()]).is_err());
+    }
+
+    #[tokio::test]
+    async fn disabled_component_leaves_its_configuration_untouched() {
+        let store =
+            ConfigStore::from_str("[Journal]\nkeep = 7\n[Journal.file]\npath = \"journal.log\"\n")
+                .unwrap();
+        let before = store.save_str().unwrap();
+        let (persist_tx, mut persist_rx) = mpsc::unbounded_channel();
+        let persistence = PersistenceHandle::new(persist_tx);
+        let (shutdown_tx, shutdown) = watch::channel(false);
+        let (events, _) = broadcast::channel(4);
+        let context = component::Context {
+            store: store.clone(),
+            persistence,
+            events,
+            shutdown,
+        };
+        let components = vec![Box::new(components::journal::Journal) as Box<dyn Component>];
+
+        let running = start_components(&components, &["journal".into()], context).await;
+
+        assert!(running.is_empty());
+        assert_eq!(store.save_str().unwrap(), before);
+        assert!(matches!(
+            persist_rx.try_recv(),
+            Err(mpsc::error::TryRecvError::Disconnected)
+        ));
+        let _ = shutdown_tx.send(true);
+    }
+
+    #[tokio::test]
+    async fn invalid_component_keeps_its_section_and_does_not_stop_others() {
+        let store = ConfigStore::from_str("[Journal]\nkeep = 0\n").unwrap();
+        let before = store.get_section("Journal").unwrap();
+        let (persist_tx, _persist_rx) = mpsc::unbounded_channel();
+        let persistence = PersistenceHandle::new(persist_tx);
+        let (shutdown_tx, shutdown) = watch::channel(false);
+        let (events, _) = broadcast::channel(4);
+        let context = component::Context {
+            store: store.clone(),
+            persistence,
+            events,
+            shutdown,
+        };
+
+        let mut running = start_components(&components(), &[], context).await;
+
+        assert_eq!(
+            running
+                .iter()
+                .map(|component| component.name())
+                .collect::<Vec<_>>(),
+            ["heartbeat", "reminders"]
+        );
+        assert_eq!(store.get_section("Journal").unwrap(), before);
+        let _ = shutdown_tx.send(true);
+        for component in &mut running {
+            component.shutdown().await.unwrap();
+        }
     }
 }
