@@ -56,10 +56,11 @@ async fn command_loop(
     mut console: mpsc::Receiver<String>,
     interrupt: impl Future<Output = io::Result<()>>,
 ) -> AppResult<()> {
-    // Keep the registered listener alive while a command runs.
+    // Keep the interrupt listener alive while a command runs.
     tokio::pin!(interrupt);
     loop {
         tokio::select! {
+            // Handle an interrupt before any queued command.
             biased;
             result = &mut interrupt => {
                 result?;

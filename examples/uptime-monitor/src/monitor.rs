@@ -122,11 +122,13 @@ async fn record(
 ) {
     let mut guard = monitor.write().await;
     let config = &mut *guard;
+    // A completed reload changes the generation; discard results from an older round.
     if !Arc::ptr_eq(&config.generation, generation) {
         return;
     }
     for (name, result) in results {
-        // A reload during the checks may have removed the target or changed its address.
+        // Loading targets and changing the generation take separate locks.
+        // A reload can therefore change targets before it invalidates the round.
         let configured = config
             .targets
             .iter()

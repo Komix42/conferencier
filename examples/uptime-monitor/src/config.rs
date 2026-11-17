@@ -103,8 +103,8 @@ pub fn validate(monitor: &MonitorConfig) -> Result<(), String> {
 ///
 /// The source is first loaded into a separate store and checked there, so on
 /// any error the application's store and scopes keep their previous values.
-/// The request counter and results for unchanged targets are kept. In-flight
-/// checks from before the reload are invalidated.
+/// The request counter and results for unchanged targets are kept. Once the
+/// generation changes, results from earlier checks are discarded.
 pub async fn reload(
     store: &ConfigStore,
     http: &SharedScope<HttpConfig>,

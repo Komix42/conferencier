@@ -26,10 +26,11 @@ struct App {
     store: ConfigStore,
     http: SharedScope<HttpConfig>,
     monitor: SharedScope<MonitorConfig>,
-    /// Starts the worker's next round immediately.
+    /// Wakes the worker to recheck its settings without waiting for the interval.
     wake: Arc<Notify>,
-    /// The configuration used to bind, and the actual address chosen by the OS.
+    /// The address and port requested when binding.
     listener_config: (String, u16),
+    /// The address actually bound, including any port chosen by the OS.
     listening: SocketAddr,
 }
 
@@ -217,7 +218,7 @@ fn spawn_console() -> mpsc::Receiver<String> {
     receiver
 }
 
-/// The exported configuration if it exists, otherwise the hand-written default.
+/// The exported configuration if it exists, otherwise the bundled configuration.
 fn config_path() -> PathBuf {
     let effective = effective_config_path();
     if effective.exists() {

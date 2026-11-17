@@ -232,8 +232,7 @@ impl Settings {
 ///
 /// Conferencier converts values to the field types but deliberately does not
 /// validate application-specific rules, so the application checks them itself:
-/// after loading the file, which may have been edited by hand, and before
-/// applying a change made by a command.
+/// after loading a file and after a command changes the settings, before saving.
 pub fn validate(indexer: &IndexerConfig, report: &ReportConfig) -> Result<(), String> {
     if let Some(extensions) = &indexer.extensions {
         for (index, extension) in extensions.iter().enumerate() {
