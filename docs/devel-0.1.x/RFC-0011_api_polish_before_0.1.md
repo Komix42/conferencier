@@ -538,10 +538,11 @@ input has still been consumed but the store remains unchanged.
   acquisition would block, it indicates that the keys could not be read because
   the store is locked, instead of listing keys. If the lock is poisoned but can
   be acquired, it recovers the data like other store reads, lists the keys and
-  visibly reports the poisoned state. These are content guarantees, not a
-  promise of exact marker text or formatting. The key names are copied under the
-  lock and formatted after it is released, so user code behind the formatter
-  never runs while the lock is held.
+  may indicate that the lock was poisoned. Recovery and listing the keys are
+  content guarantees; whether `Debug` indicates the poisoned state is an
+  implementation detail. The key names are copied under the lock and formatted
+  after it is released, so user code behind the formatter never runs while the
+  lock is held.
 
 Applications that need the content use the existing read methods.
 Top-level key names may themselves be sensitive. The application controls the
@@ -999,10 +1000,11 @@ No existing variant is removed; changes to existing variants are listed above.
 - Tests assert that ordinary and alternate `Debug` output contains all top-level
   keys, including non-table keys, and no values, without relying on key order.
   With the write lock held, `Debug` does not wait and indicates that it could not
-  read keys because the store is locked; a poisoned lock still yields the keys
-  and visibly reports its state. These tests do not require a particular text
-  format. The contention test uses a bounded wait and releases the lock even on
-  timeout, so a regression cannot leave the test blocked indefinitely.
+  read keys because the store is locked; a poisoned lock still yields the keys,
+  but tests do not require a separate poison-state marker. These tests do not
+  require a particular text format. The contention test uses a bounded wait and
+  releases the lock even on timeout, so a regression cannot leave the test
+  blocked indefinitely.
 - The guide's custom scope `Debug` example is tested as a doctest.
 - Before publishing `0.1.0-beta.1`, build three small downstream consumer
   projects outside the repository workspace against the actual `.crate`
@@ -1152,9 +1154,10 @@ No existing variant is removed; changes to existing variants are listed above.
   `target_path`; `path` names only a file directly involved in an operation.
 - **Q3 — Debug content.** Top-level keys are enough; their order and the exact
   text format are unspecified. D2 retains non-blocking lock acquisition and
-  makes lock contention and a poisoned lock visible while still showing the
-  available keys when possible. `Error`'s `Display` likewise has content
-  guarantees but not a stable text format (E3).
+  makes lock contention visible. A poisoned lock is recovered and its available
+  keys are shown, but whether the poison state is reported is an implementation
+  detail. `Error`'s `Display` likewise has content guarantees but not a stable
+  text format (E3).
 - **Q4 — Strict unknown keys by default.** Keep the lenient default and make
   `deny_unknown_keys` opt-in per type. This preserves compatibility with shared
   and forward-extended configuration files. A separate API for inspecting
