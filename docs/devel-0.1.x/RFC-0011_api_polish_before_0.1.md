@@ -490,13 +490,22 @@ major versions of either dependency.
 After implementing this RFC and before publishing `0.1.0-beta.1`, run
 `cargo-semver-checks` against the published `0.0.8` baseline for both
 `conferencier` and `conferencier-derive`, treating the candidate as a compatible
-patch release for the purpose of this comparison:
+release for the purpose of this comparison:
 
 ```sh
-cargo semver-checks --package conferencier --baseline-version 0.0.8 --release-type patch --default-features
-cargo semver-checks --package conferencier --baseline-version 0.0.8 --release-type patch --only-explicit-features
-cargo semver-checks --package conferencier-derive --baseline-version 0.0.8 --release-type patch
+cargo semver-checks --package conferencier --baseline-version 0.0.8 --release-type minor --default-features
+cargo semver-checks --package conferencier --baseline-version 0.0.8 --release-type minor --only-explicit-features
+cargo semver-checks --package conferencier-derive --baseline-version 0.0.8 --release-type minor
 ```
+
+The release type is `minor` because, for a `0.y.z` version with `y > 0`, the
+checker's `minor` level corresponds to this RFC's compatible 0.x release: it
+reports every breaking change but allows additive changes, such as newly
+deprecated items, that the policy permits within 0.1.x. `patch` would also
+reject those additive changes. The release type must be given explicitly: from
+the version numbers alone, the checker treats `0.0.8 → 0.1.0-beta.1` and any
+change between pre-releases as a major change and skips the breaking-change
+checks.
 
 For `conferencier`, the first command checks the default `derive` feature and
 the second checks with no features enabled, matching its supported
@@ -518,8 +527,8 @@ against the immediately preceding published 0.1.x release tag, including
 pre-releases. Set `baseline-rev` explicitly because the default crates.io
 baseline excludes pre-releases. After each 0.1.x release, advance the configured
 baseline to its tag so the next candidate is checked against the latest
-published API. Set the release type to `patch` to enforce the
-backward-compatibility policy for every candidate.
+published API. Set the release type explicitly to `minor`, as above, to enforce
+the backward-compatibility policy for every candidate.
 
 ## Trait evolution
 
@@ -803,12 +812,13 @@ No existing variant is removed; changes to existing variants are listed above.
   upgrading either is a breaking change under this policy; compatible upgrades
   within a dependency major remain allowed.
 - **Q10 — Public API compatibility checks.** Before publishing beta.1, compare
-  both published crates against 0.0.8 with `cargo-semver-checks` in patch mode
-  and reconcile its findings with the migration documentation. After beta.1 is
-  tagged, compare each candidate with the immediately preceding published 0.1.x
-  release tag, including pre-releases, and advance the configured baseline after
-  each release. Keep manual review for behavior and derive attribute syntax,
-  which the tool does not check.
+  both published crates against 0.0.8 with `cargo-semver-checks` using the
+  explicit release type `minor`, which detects breaking changes but permits
+  additive ones, and reconcile its findings with the migration documentation.
+  After beta.1 is tagged, compare each candidate with the immediately preceding
+  published 0.1.x release tag, including pre-releases, and advance the
+  configured baseline after each release. Keep manual review for behavior and
+  derive attribute syntax, which the tool does not check.
 - **Q11 — Beta policy and stable exit criteria.** Treat beta.1 as the first
   release covered by the 0.1.x compatibility commitment: each subsequent
   pre-release and release must remain backward compatible with the immediately
