@@ -48,8 +48,9 @@ public behavior beyond what the changelog records.
 - `f32` fields accept infinity and NaN like `f64` fields (F1–F2).
 - `set_string` accepts `impl Into<String>`, the vector setters accept compatible
   iterators (S1–S3).
-- `Debug` of `ConfigStore` lists the top-level keys when available, not the values
-  (D1–D2). Error diagnostics are not redacted and may contain sensitive input (E7).
+- `Debug` of `ConfigStore` lists the top-level keys when available, not the values;
+  its text format is not stable (D1–D2). Error diagnostics are not redacted and
+  may contain sensitive input (E7).
 - Unknown keys stay accepted by default; strictness remains opt-in (K1).
 
 ## Table of Contents
@@ -229,6 +230,13 @@ Non-goals:
   | `Serialize { path: None, .. }` | `failed to serialize TOML` |
   | `SaveFileCleanup { .. }` | `failed to save "<target>"; removing temporary file "<t>" also failed (<cleanup_error>)` |
 
+  The message templates in this table, including their wording and punctuation,
+  are part of the 0.1.x compatibility contract. Changing a template is a
+  breaking change and is deferred to 0.2.0. Substituted paths and underlying
+  error messages are rendered from platform- and environment-dependent values;
+  the contract does not make those values byte-for-byte identical across
+  platforms.
+
   The first matching row applies. `<op>` uses the operation names above without
   a path, for example `failed to write temporary file`. For `CreateTemporary`,
   `PrepareTemporary` and `WriteTemporary`, a `target_path` of `Some` appends
@@ -398,13 +406,18 @@ What the setters store, their section validation and their errors are unchanged.
 - **D1 — Keys only.** `ConfigStore` implements `Debug` manually. When the lock is
   available, the output lists all top-level keys of the document, including keys
   whose values are not tables, in unspecified order and without any values.
-  For example, `ConfigStore { keys: ["App", "Database"], .. }`. The alternate
-  form `{:#?}` prints the same information, pretty-printed. Use
-  `finish_non_exhaustive()` to indicate that the content is omitted.
+  For example, `ConfigStore { keys: ["App", "Database"], .. }`. This example is
+  illustrative: the exact text format, field labels, punctuation and key order
+  are not stable, and callers must not parse the output. The alternate form
+  `{:#?}` provides the same information, but its pretty-printing is not
+  specified. Use `finish_non_exhaustive()` to indicate that the content is
+  omitted.
 - **D2 — Locking.** `Debug` uses `try_read` and does not wait for the lock. If
-  acquisition would block, it prints `<locked>` instead of the keys. If the lock
-  is poisoned but can be acquired, it recovers the data like other store reads,
-  lists the keys and reports `poisoned: true`. The key names are copied under the
+  acquisition would block, it indicates that the keys could not be read because
+  the store is locked, instead of listing keys. If the lock is poisoned but can
+  be acquired, it recovers the data like other store reads, lists the keys and
+  visibly reports the poisoned state. These are content guarantees, not a
+  promise of exact marker text or formatting. The key names are copied under the
   lock and formatted after it is released, so user code behind the formatter
   never runs while the lock is held.
 
@@ -575,6 +588,11 @@ required method is reserved for the next breaking release as defined above.
 This RFC changes behavior that users can observe. It is released in
 0.1.0-beta.1, the first release of the 0.1.x line.
 
+The exact `Display` message templates specified in E3 are part of the 0.1.x
+compatibility contract; changing them is breaking and deferred to 0.2.0.
+`ConfigStore`'s `Debug` output has only the content guarantees in D1–D2, not a
+stable text format, and must not be parsed by callers.
+
 - **Breaking:** `Display` of `Io`, `Parse`, `Serialize` and `SaveFileCleanup` no
   longer contains the cause (E1, E3). Code that prints an error with `{}` and relies
   on the cause must print the source chain, for example with `anyhow`'s `{:#}` or by
@@ -741,10 +759,11 @@ No existing variant is removed; changes to existing variants are listed above.
   integer setter and a typed empty vector for the string setter.
 - Tests assert that ordinary and alternate `Debug` output contains all top-level
   keys, including non-table keys, and no values, without relying on key order.
-  With the write lock held, `Debug` does not wait and reports `<locked>`; a
-  poisoned lock still yields the keys and reports `poisoned: true`. The contention
-  test uses a bounded wait and releases the lock even on timeout, so a regression
-  cannot leave the test blocked indefinitely.
+  With the write lock held, `Debug` does not wait and indicates that it could not
+  read keys because the store is locked; a poisoned lock still yields the keys
+  and visibly reports its state. These tests do not require a particular text
+  format. The contention test uses a bounded wait and releases the lock even on
+  timeout, so a regression cannot leave the test blocked indefinitely.
 - The guide's custom scope `Debug` example is tested as a doctest.
 - Before publishing `0.1.0-beta.1`, compare both public crates with 0.0.8 using
   the commands in [Public API checks](#public-api-checks), including both
@@ -802,9 +821,11 @@ No existing variant is removed; changes to existing variants are listed above.
   from callers can leave it as `None`. E6 makes every `save_file` error name its
   target: `Io.target_path`, `Serialize.path`, `SaveFileCleanup.target_path` and
   `SaveFileTaskJoin.target_path`.
-- **Q3 — Debug content.** Top-level keys are enough; their order is unspecified.
-  D2 retains non-blocking lock acquisition and makes a poisoned lock visible
-  while still showing the available keys.
+- **Q3 — Debug content.** Top-level keys are enough; their order and the exact
+  text format are unspecified. D2 retains non-blocking lock acquisition and
+  makes lock contention and a poisoned lock visible while still showing the
+  available keys when possible. The E3 `Display` templates, in contrast, are
+  stable throughout 0.1.x.
 - **Q4 — Strict unknown keys by default.** Keep the lenient default and make
   `deny_unknown_keys` opt-in per type. This preserves compatibility with shared
   and forward-extended configuration files. A separate API for inspecting
