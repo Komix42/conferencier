@@ -687,13 +687,13 @@ the backward-compatibility policy for every candidate.
 implementations are supported; neither trait is sealed.
 
 The required method signatures, bounds and documented behavior of both traits
-are part of the stable 0.1 API. A 0.1.x release must not add a new required
-trait method or otherwise require existing manual implementations to change.
-Future additive methods may be added only with a default implementation that
-provides meaningful behavior for existing implementations. If no such default
-fits the contract, expose the capability through an extension trait or a
-standalone function instead. A new required method or a change to an existing
-required method is reserved for the next breaking release as defined above.
+are part of the stable 0.1 API. A 0.1.x release must not add any method to either
+trait or change an existing required method. Even a method with a default
+implementation can make an existing downstream call such as `value.method()`
+ambiguous when another in-scope trait provides a method with the same name.
+Expose new capabilities through a standalone function or, where method syntax
+is useful, a separate opt-in extension trait. Adding a method to either core
+trait is reserved for the next breaking release as defined above.
 
 ## Compatibility
 
@@ -1003,8 +1003,9 @@ No existing variant is removed; changes to existing variants are listed above.
   `load_file`), the crate-level note about Tokio features (T2), and `ConfigScope`
   and `ConfigTable` (manual
   implementations remain supported; their required signatures, bounds and
-  documented behavior are stable throughout 0.1.x). Replace `ConfigTable`'s
-  current statement that its signatures may change while the API is in alpha.
+  documented behavior are stable, and neither trait gains methods, throughout
+  0.1.x). Replace `ConfigTable`'s current statement that its signatures may
+  change while the API is in alpha.
 - `README.md`: remove the 0.0.x early-development notice from the introduction.
   Add a short "Status and compatibility" section after "Project scope" and
   before "Learn more", describing the beta status and the 0.1.x compatibility
@@ -1083,11 +1084,11 @@ No existing variant is removed; changes to existing variants are listed above.
   is added.
 - **Q8 — Evolution of `ConfigScope` and `ConfigTable`.** Keep both traits open
   for manual implementations. Their existing required method signatures, bounds
-  and documented behavior are stable in 0.1.x; do not add a required method in
-  that line. Additive methods need a meaningful default implementation, or the
-  capability must be exposed through an extension trait or standalone function.
-  Changes that require manual implementors to update are reserved for a breaking
-  release.
+  and documented behavior are stable in 0.1.x; add no methods to either trait,
+  even with a default, because additions can make downstream method calls
+  ambiguous. Expose new capabilities through a standalone function or a
+  separate opt-in extension trait. Adding a method to a core trait is reserved
+  for a breaking release.
 - **Q9 — Compatibility policy for `0.x` and public dependency majors.** Treat
   the minor version as the compatibility boundary throughout `0.x`: patch
   releases and pre-releases within the same minor preserve backward
