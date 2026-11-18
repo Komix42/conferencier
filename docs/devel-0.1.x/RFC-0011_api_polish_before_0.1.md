@@ -246,14 +246,17 @@ Non-goals:
 
 ## Tokio features
 
-- **T1 — Minimal features.** The `conferencier` crate enables only the Tokio
-  features `sync`, `rt` and `fs`. `macros` and `rt-multi-thread` move to the
-  dev-dependencies, where tests and doctests use them.
+- **T1 — Minimal features.** The `conferencier` crate's normal Tokio dependency
+  disables default features and enables only `sync`, `rt` and `fs`. `macros` and
+  `rt-multi-thread` move to the dev-dependencies, where tests and doctests use
+  them.
 - **T2 — Documented promise.** The crate documentation states that the library
   does not start a runtime and does not choose a runtime flavor; the application
   enables the Tokio features it needs, such as `macros` and `rt-multi-thread`. The
   async methods work on any Tokio runtime, including a current-thread runtime.
-  Adding a Tokio feature to the library later needs a changelog entry.
+  Adding a Tokio feature to the library later needs a changelog entry. Removing
+  one is a breaking change and is recorded as such in the changelog: applications
+  may depend on the feature being enabled transitively.
 
 ## Non-finite `f32` values
 
@@ -456,6 +459,17 @@ This RFC changes behavior that users can observe. It is released in
 - `cargo test -p conferencier --no-default-features --locked` and the workspace tests
   pass with the reduced Tokio features; a test or doctest runs an async method on
   a current-thread runtime.
+- CI checks the library without dev targets, both with the default `derive`
+  feature and without default features, using
+  `cargo check -p conferencier --lib --locked` and
+  `cargo check -p conferencier --lib --no-default-features --locked`. This checks
+  that the normal dependencies supply the features needed to compile the library;
+  test and doctest dev-dependencies cannot mask a missing Tokio feature.
+- During implementation, inspect the production Tokio feature graph with
+  `cargo tree -p conferencier --edges normal,build,features --invert tokio --locked`
+  both with and without `--no-default-features`, and verify that it enables only
+  `sync`, `rt` and `fs`. This manual check covers unwanted features; the CI
+  compile checks alone do not enforce their absence.
 - Derive tests load `inf`, `+inf`, `-inf` and `nan` into `f32` and `Vec<f32>`
   fields and verify infinities with equality and NaN with `is_nan()`, without
   asserting its sign or payload. Tests accept both finite endpoints and reject
