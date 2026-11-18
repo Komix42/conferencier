@@ -482,6 +482,15 @@ Non-goals:
   are unchanged; widening conversions such as `impl Into<i64>` are not added.
 
 What the setters store, their section validation and their errors are unchanged.
+Before acquiring the store's write lock, each setter completes all
+caller-provided conversions and input iteration and builds the complete TOML value.
+This includes `Into<String>::into`, `IntoIterator::into_iter` and consuming
+every item from an iterator. The setter then validates the section and replaces
+the value in one update under the lock. Consequently, caller-provided conversion
+or iterator code never runs while the write lock is held, and readers see the
+old value or the complete replacement, not a partially built array. Input
+preparation happens before section validation; if the section is invalid, the
+input has still been consumed but the store remains unchanged.
 
 ## `Debug` of `ConfigStore`
 
@@ -927,6 +936,12 @@ No existing variant is removed; changes to existing variants are listed above.
   `.iter().copied()`, and borrowed numeric, boolean and datetime slices via
   `.iter().copied()`. Empty arrays are stored using an inferred `vec![]` for an
   integer setter and a typed empty vector for the string setter.
+- A regression test verifies that a string-vector iterator can read from the
+  same store while producing its items, and that the setter stores the complete
+  array without deadlocking. Also verify that a custom `Into<String>`
+  conversion that reads from the same store completes before the write lock is
+  acquired. Use a bounded wait so a regression cannot leave a test blocked
+  indefinitely.
 - Tests assert that ordinary and alternate `Debug` output contains all top-level
   keys, including non-table keys, and no values, without relying on key order.
   With the write lock held, `Debug` does not wait and indicates that it could not
@@ -966,9 +981,11 @@ No existing variant is removed; changes to existing variants are listed above.
   example a function taking `&Error` that matches `SaveFileCleanup` and reads
   the nested `Io` kind and optional raw OS code from `save_error`, as required
   by RFC-0009 R3.
-- Rustdoc of `ConfigStore` (`Debug`, setters including borrowed slices and typed
-  empty string arrays, `from_file`, `load_file`), the crate-level note about
-  Tokio features (T2), and `ConfigScope` and `ConfigTable` (manual
+- Rustdoc of `ConfigStore` (`Debug`, setters including borrowed slices, typed
+  empty string arrays, and the guarantee that caller-provided conversions and
+  iteration complete before the write lock is acquired; `from_file`,
+  `load_file`), the crate-level note about Tokio features (T2), and `ConfigScope`
+  and `ConfigTable` (manual
   implementations remain supported; their required signatures, bounds and
   documented behavior are stable throughout 0.1.x). Replace `ConfigTable`'s
   current statement that its signatures may change while the API is in alpha.
@@ -1150,6 +1167,12 @@ No existing variant is removed; changes to existing variants are listed above.
   exact message wording, throughout 0.1.x. Escape file paths in `Display` as
   described in E2, without promising that other diagnostics or sources are
   single-line or sanitized.
+- **Q24 — Setter input preparation.** Finish caller-provided conversions and
+  consume iterators before acquiring the store's write lock. Then validate the
+  section and commit the complete value under the lock as one update. If section
+  validation fails, the input has already been consumed but the store remains
+  unchanged. This prevents caller code from executing while the write lock is
+  held and ensures readers see only complete values.
 
 ## Open questions
 
