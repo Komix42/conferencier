@@ -429,6 +429,13 @@ policy also applies between pre-releases of the same minor version; for example,
 `0.1.0-beta.2` must remain backward compatible with `0.1.0-beta.1`. Starting
 with `1.0.0`, the project follows SemVer.
 
+The current MSRV is Rust 1.85 and remains supported throughout the 0.1.x line.
+Raising the MSRV is a breaking change under this policy and requires a later
+minor version, no earlier than 0.2.0. A new minor version does not itself
+require an MSRV increase; it may retain 1.85. When the MSRV is raised, update
+`rust-version`, the CI MSRV jobs, contributor documentation and the release's
+changelog and migration notes. Starting with 1.0.0, MSRV changes follow SemVer.
+
 The public API exposes types from both `toml` and `tokio`: `toml` is re-exported
 from the crate root, its values and errors appear in public interfaces, and
 [`SharedScope`](crate::SharedScope) is an alias for
@@ -755,6 +762,11 @@ This RFC changes behavior that users can observe. It is released in
   so callers can attach diagnostic context after reading a file synchronously.
   The field holds context, not an invariant; no wrapper type or `with_path`
   helper is added.
+- **Q18 — Raising the MSRV.** Keep Rust 1.85 supported throughout 0.1.x.
+  Raising the MSRV is breaking and can happen only in a later 0.x minor version;
+  that minor release is not required to raise it. When raised, update the
+  `rust-version` metadata, CI, contributor documentation and migration notes.
+  After 1.0.0, follow SemVer.
 
 ## Open questions
 
