@@ -4,8 +4,8 @@ Date: 2026-11-17
 Status: Draft
 Author: Komix42 <komix[at]ignore.cz>
 Target release: 0.1.0-beta.1
-Amends: [RFC-0001](../devel-0.0.x/RFC-0001_baseline_architecture.md)
-Related: [AUDIT-001](../devel-0.0.x/AUDIT-001_quality_0.0.8.md), [RFC-0006](../devel-0.0.x/RFC-0006_strict_unknown_keys.md), [RFC-0007](../devel-0.0.x/RFC-0007_default_expressions.md)
+Amends: [RFC-0001](../devel-0.0.x/RFC-0001_baseline_architecture.md), [RFC-0006](../devel-0.0.x/RFC-0006_strict_unknown_keys.md), [RFC-0007](../devel-0.0.x/RFC-0007_default_expressions.md)
+Related: [AUDIT-001](../devel-0.0.x/AUDIT-001_quality_0.0.8.md)
 
 ## Document Scope
 
@@ -93,6 +93,11 @@ found several places where the public surface is inconvenient or surprising:
 All of these change observable behavior and some of them break existing code.
 They are cheapest to change now, before the first beta of the 0.1.x line.
 
+The beta also needs clear expectations for users who adopt it: a compatibility
+boundary for 0.x releases, a 0.1.x MSRV commitment, and checks that cover the
+public API of both crates. Making the error variants extensible now avoids
+unnecessary breaks as the error API evolves within that line.
+
 ## Goals and non-goals
 
 Goals:
@@ -104,6 +109,10 @@ Goals:
 - Make the derive's float handling symmetric.
 - Make the setters convenient without changing what they store.
 - Avoid printing configuration values through `ConfigStore`'s `Debug`.
+- Establish the 0.x compatibility policy, Rust 1.85 support throughout 0.1.x,
+  and the API-compatibility checks for both crates.
+- Make all error variants extensible without requiring downstream code to
+  change for future compatible field additions.
 
 Non-goals:
 
@@ -180,7 +189,7 @@ Non-goals:
   by `ConfigStore::from_file`, `load_file` and `save_file`. A `spawn_blocking`
   join failure is not itself a file-operation error and is returned as
   `Error::SaveFileTaskJoin`; it has no `IoOperation`. For `save_file`, `path`
-  continues to name the file directly involved in the failed system call: the
+  continues to name the file directly involved in the failed operation: the
   target for `InspectTarget` and `ReplaceTarget`, and the temporary file for the
   other operations.
 
@@ -237,6 +246,11 @@ Non-goals:
   the contract does not make those values byte-for-byte identical across
   platforms.
 
+  The `operation: None, target_path: Some(_)` row applies before the
+  `operation: None, path: Some(_)` row, even if both paths are present. This is
+  deterministic; library-generated `save_file` I/O errors always have an
+  operation, and the public I/O constructors leave `target_path` unset.
+
   The first matching row applies. `<op>` uses the operation names above without
   a path, for example `failed to write temporary file`. For `CreateTemporary`,
   `PrepareTemporary` and `WriteTemporary`, a `target_path` of `Some` appends
@@ -265,9 +279,10 @@ Non-goals:
   ```
 
   `ConfigStore::from_file` and `ConfigStore::load_file` set `path` to the path they
-  read. `ConfigStore::from_str`, `FromStr` and `From<toml::de::Error>` set it to
-  `None`. A caller that reads a file synchronously and then calls `from_str` can
-  attach the path to a parse error by changing the public `path` field:
+  read. `ConfigStore::from_str`, `ConfigStore::load_str`, `FromStr` and
+  `From<toml::de::Error>` set it to `None`. A caller that reads a file
+  synchronously and then calls `from_str` can attach the path to a parse error by
+  changing the public `path` field:
 
   ```rust,ignore
   let store = ConfigStore::from_str(&contents).map_err(|mut error| {
@@ -354,9 +369,8 @@ Non-goals:
 ## Tokio features
 
 - **T1 — Minimal features.** The `conferencier` crate's normal Tokio dependency
-  disables default features and enables only `sync`, `rt` and `fs`. `macros` and
-  `rt-multi-thread` move to the dev-dependencies, where tests and doctests use
-  them.
+  requests only `sync`, `rt` and `fs`. `macros` and `rt-multi-thread` move to the
+  dev-dependencies, where tests and doctests use them.
 - **T2 — Documented promise.** The crate documentation states that the library
   does not start a runtime and does not choose a runtime flavor; the application
   enables the Tokio features it needs, such as `macros` and `rt-multi-thread`. The
@@ -706,14 +720,18 @@ No existing variant is removed; changes to existing variants are listed above.
 - The `Io` display tests cover pathless operations with and without
   `target_path`, including `InspectTarget` and `ReplaceTarget` using the known
   target path, and temporary-file operations appending that target as context.
+  They also cover `operation: None` with both `path` and `target_path` present,
+  verifying the first-matching-row precedence in E3.
 - A test asserts that no wrapping variant's `Display` contains the message of its
   source.
 - A doctest for `display_error_chain` verifies that it includes the outer error
   and every source in order.
-- Tests in `store.rs` assert the operation, the directly affected path and
-  `target_path` for target inspection, temporary-file creation, preparation,
-  writing and replacement. Each file-operation `save_file` error has an explicit
-  operation and the target path. A separate join-failure test asserts
+- Tests in `store.rs` assert `operation: Some(Read)`, the read path and
+  `target_path: None` for file-read errors from `from_file` and `load_file`.
+  They also assert the operation, the directly affected path and `target_path`
+  for target inspection, temporary-file creation, preparation, writing and
+  replacement. Each file-operation `save_file` error has an explicit operation
+  and the target path. A separate join-failure test asserts
   `SaveFileTaskJoin`, its target path and `Display`, and that its source is the
   original `tokio::task::JoinError`.
 - A serialization failure from `save_file` yields
@@ -723,8 +741,8 @@ No existing variant is removed; changes to existing variants are listed above.
   `temporary_path`, the nested operation and the updated `Display` and source
   chain. It also verifies that the cleanup cause is not repeated by `source()`.
 - Tests of `from_file` and `load_file` with invalid TOML assert
-  `Error::Parse { path: Some(p), .. }` with the read path; a `from_str` test asserts
-  `path: None`.
+  `Error::Parse { path: Some(p), .. }` with the read path; tests of `from_str`
+  and `load_str` assert `path: None`.
 - A doctest for synchronous file loading verifies that a parse error from
   `from_str` can be given the source file path without losing its parser source.
 - Tests outside the library crate construct all nine error variants with the
@@ -775,14 +793,21 @@ No existing variant is removed; changes to existing variants are listed above.
 
 ## Documentation deliverables
 
-- Rustdoc of `Error` and `IoOperation` (variants, operations, constructors, the
-  I/O example and the diagnostic warning in E7), `ConfigStore` (`Debug`, setters
-  including borrowed slices and typed empty string arrays, `from_file`, `load_file`),
-  the crate-level note about Tokio features (T2), and `ConfigScope` and
-  `ConfigTable` (manual implementations remain supported; their required
-  signatures, bounds and documented behavior are stable throughout 0.1.x).
-  Replace `ConfigTable`'s current statement that its signatures may change while
-  the API is in alpha.
+- Rustdoc of `Error` and `IoOperation` (variants, operations, constructors, and
+  the diagnostic warning in E7). Clarify that `path` is a TOML table diagnostic
+  path only for key errors, but a filesystem path for `Io`, `Parse` and
+  `Serialize`; document `SaveFileCleanup`'s `target_path` and `temporary_path`
+  separately. Update examples to use public constructors rather than directly
+  constructing `Io` or `SaveFileCleanup`, and use `..` in patterns for every
+  non-exhaustive variant, including `MissingKey`. Document the synchronous
+  file-read example with `Error::io_error_with_operation` and
+  `IoOperation::Read`.
+- Rustdoc of `ConfigStore` (`Debug`, setters including borrowed slices and typed
+  empty string arrays, `from_file`, `load_file`), the crate-level note about
+  Tokio features (T2), and `ConfigScope` and `ConfigTable` (manual
+  implementations remain supported; their required signatures, bounds and
+  documented behavior are stable throughout 0.1.x). Replace `ConfigTable`'s
+  current statement that its signatures may change while the API is in alpha.
 - `README.md`: remove the 0.0.x early-development notice from the introduction.
   Add a short "Status and compatibility" section after "Project scope" and
   before "Learn more", describing the beta status and the 0.1.x compatibility
@@ -805,9 +830,16 @@ No existing variant is removed; changes to existing variants are listed above.
 - The example applications print errors with their source chain.
 - [Migration guide](../../conferencier/guide/migration.md): a 0.0.8 → 0.1.0-beta.1
   section covering every **Breaking** item of [Compatibility](#compatibility).
-- [Changelog](../../CHANGELOG.md): the **Breaking** entries and the `f32` change
-  under [Unreleased].
-- `Amended by: RFC-0011` in the header of RFC-0001, once this RFC is approved.
+- [Changelog](../../CHANGELOG.md): under **Unreleased**, record `IoOperation`,
+  `SaveFileTaskJoin` and new public constructors under `### Added`. Under
+  `### Changed`, record each compatibility break as a `**Breaking:**` entry,
+  including the `Io.operation`, `Io.target_path`, `Parse.path`, `Serialize.path`
+  and `SaveFileCleanup.target_path` fields, other error-shape changes, Tokio
+  features, setter signatures, `ConfigStore`'s `Debug` output and constructor
+  renames. Record acceptance of non-finite `f32` values as a non-breaking change
+  in the same section.
+- Add `Amended by: RFC-0011` to the headers of RFC-0001, RFC-0006 and RFC-0007
+  when this RFC is implemented.
 
 ## Resolved questions
 
@@ -867,12 +899,14 @@ No existing variant is removed; changes to existing variants are listed above.
 - **Q10 — Public API compatibility checks.** Before publishing beta.1, compare
   both published crates against 0.0.8 with `cargo-semver-checks` using the
   explicit release type `minor`, which detects breaking changes but permits
-  additive ones, and reconcile its findings with the migration documentation.
-  After beta.1 is tagged, compare each candidate with the immediately preceding
-  published 0.1.x release tag, including pre-releases, and advance the
-  configured baseline after each release. Manually review derive syntax,
-  generated-code behavior and the `#[doc(hidden)]` `__private` support, which
-  the tool does not check.
+  additive ones. Check `conferencier` with `--default-features` and
+  `--only-explicit-features` (default and no-default feature configurations),
+  and check `conferencier-derive` once; reconcile findings with the migration
+  documentation. After beta.1 is tagged, compare each candidate with the
+  immediately preceding published 0.1.x release tag, including pre-releases,
+  and advance the configured baseline after each release. Manually review
+  derive syntax, generated-code behavior and the `#[doc(hidden)]` `__private`
+  support, which the tool does not check.
 - **Q11 — Beta policy and stable exit criteria.** Treat beta.1 as the first
   release covered by the 0.1.x compatibility commitment: each subsequent
   pre-release and release must remain backward compatible with the immediately
