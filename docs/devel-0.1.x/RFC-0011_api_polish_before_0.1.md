@@ -264,8 +264,8 @@ Non-goals:
   | `SaveFileTaskJoin { .. }` | `failed to save "<target>"` |
   | `Parse { path: Some(_), .. }` | `failed to parse TOML file "<p>"` |
   | `Parse { path: None, .. }` | `failed to parse TOML` |
-  | `Serialize { path: Some(_), .. }` | `failed to serialize TOML for "<p>"` |
-  | `Serialize { path: None, .. }` | `failed to serialize TOML` |
+  | `Serialize { target_path: Some(_), .. }` | `failed to serialize TOML for "<target>"` |
+  | `Serialize { target_path: None, .. }` | `failed to serialize TOML` |
   | `SaveFileCleanup { .. }` | `failed to save "<target>"; removing temporary file "<t>" also failed (<cleanup_error>)` |
 
   The diagnostic context selected by each row and the path precedence below
@@ -346,7 +346,7 @@ Non-goals:
   - `Error::io_error(path: Option<PathBuf>, source: std::io::Error) -> Error`;
   - `Error::io_error_with_operation(path: Option<PathBuf>, operation: IoOperation, source: std::io::Error) -> Error`;
   - `Error::parse_error(path: Option<PathBuf>, source: toml::de::Error) -> Error`;
-  - `Error::serialize_error(path: Option<PathBuf>, source: toml::ser::Error) -> Error`;
+  - `Error::serialize_error(target_path: Option<PathBuf>, source: toml::ser::Error) -> Error`;
   - `Error::missing_key_error(table_path: impl Into<String>, key: impl Into<String>) -> Error`;
   - `Error::type_mismatch_error(table_path: impl Into<String>, key: impl Into<String>, expected: &'static str, found: &'static str) -> Error`;
   - `Error::value_parse_error(table_path: impl Into<String>, key: impl Into<String>, message: impl Into<String>) -> Error`;
@@ -363,7 +363,10 @@ Non-goals:
 
   `MissingKey`, `TypeMismatch`, `ValueParse` and `UnknownKey` use the field name
   `table_path` for the formatted path of the TOML table containing the key.
-  `Io.path`, `Parse.path` and `Serialize.path` remain filesystem paths.
+  `Io.path` and `Parse.path` remain filesystem paths of the file directly
+  involved in the operation. Every `target_path` field, on `Io`, `Serialize`,
+  `SaveFileTaskJoin` and `SaveFileCleanup`, is the destination passed to
+  `save_file`.
 
   The I/O constructors use the concrete `Option<PathBuf>` rather than
   `Option<impl Into<PathBuf>>`, so callers can pass `None` without a type
@@ -396,16 +399,18 @@ Non-goals:
     ```rust,ignore
     #[non_exhaustive]
     Serialize {
-        /// The file that was to be written, if any.
-        path: Option<PathBuf>,
+        /// The destination of the save, if any.
+        target_path: Option<PathBuf>,
         /// The serializer's error.
         source: toml::ser::Error,
     },
     ```
 
-    `save_file` sets `path` to its target; `ConfigStore::save_str` sets it to
-    `None`. Serialization still happens before any file operation, so the
-    target is left untouched.
+    `save_file` sets `target_path` to its target; `ConfigStore::save_str` sets
+    it to `None`. The field is named `target_path`, not `path`, because
+    serialization involves no file: like the other `target_path` fields, it
+    names the save destination. Serialization still happens before any file
+    operation, so the target is left untouched.
   - `Error::SaveFileCleanup` gains `target_path: PathBuf`, in addition to
     `save_error`, `temporary_path` and `cleanup_error`. The primary failure
     remains available in full through `save_error`, including an
@@ -728,7 +733,7 @@ variant or field added compatibly in 0.1.x must preserve these traits.
   `Error::Parse { source, .. }`. Replace direct construction with
   `Error::parse_error(None, source)` or the existing `Error::from(source)`.
 - **Breaking:** `Error::Serialize` is a non-exhaustive struct variant with an
-  optional `path` (E5–E6). Patterns `Error::Serialize(_)` become
+  optional `target_path` (E5–E6). Patterns `Error::Serialize(_)` become
   `Error::Serialize { .. }` or `Error::Serialize { source, .. }`. Replace direct
   construction with `Error::serialize_error(None, source)` or the existing
   `Error::from(source)`.
@@ -744,7 +749,7 @@ variant or field added compatibly in 0.1.x must preserve these traits.
 - **Breaking:** the key-error field `path` is renamed to `table_path` (E5).
   Update field access and patterns such as
   `Error::MissingKey { path, .. }` to use `table_path`; the filesystem `path`
-  fields on `Io`, `Parse` and `Serialize` are unchanged.
+  fields on `Io` and `Parse` are unchanged.
 - **Breaking:** the existing key-error constructors are renamed (E5), with
   unchanged argument types and positional order and no deprecated aliases. This
   mainly affects manual implementations of `ConfigScope` and `ConfigTable`:
@@ -824,10 +829,10 @@ No existing variant is removed; changes to existing variants are listed above.
      `save_file` failure. It names the target in one place, but callers would
      match nested errors for ordinary I/O failures, and it overlaps with
      `SaveFileCleanup`. Rejected in favor of `Io.target_path` and
-     `Serialize.path` (E2, E6).
+     `Serialize.target_path` (E2, E6).
 13. **Leave the target only in `SaveFileCleanup`.** Callers know the path they
      passed, but it is lost when the error is propagated with `?`, and a closed
-     `Serialize(toml::ser::Error)` could not gain a path after 0.1. Rejected.
+     `Serialize(toml::ser::Error)` could not gain a target after 0.1. Rejected.
 14. **Stabilize exact `Display` templates.** This would let callers depend on
     precise wording, but would also defer wording and punctuation improvements
     to the next breaking release. Rejected in favor of stable diagnostic context
@@ -836,6 +841,11 @@ No existing variant is removed; changes to existing variants are listed above.
     especially on Windows, but allows quotes or control characters in a path to
     distort the message. Rejected in favor of E2; other diagnostics still need
     application-level handling.
+16. **Name the save target `Serialize.path`.** It would match the field name of
+    `Io` and `Parse`, but there `path` is the file directly involved in the
+    operation, while serialization involves no file. Callers would read the save
+    target from `path` for one variant and from `target_path` for the others.
+    Rejected in favor of `Serialize.target_path` (E6).
 
 ## Out of scope
 
@@ -890,8 +900,8 @@ No existing variant is removed; changes to existing variants are listed above.
   the target in both path fields, an `InvalidInput` source and that the source
   chain exposes the rejection reason.
 - A serialization failure from `save_file` yields
-  `Error::Serialize { path: Some(target), .. }` and leaves the target untouched;
-  the same failure from `save_str` has `path: None`.
+  `Error::Serialize { target_path: Some(target), .. }` and leaves the target
+  untouched; the same failure from `save_str` has `target_path: None`.
 - A test of simultaneous save and cleanup failure asserts `target_path`,
   `temporary_path`, the nested operation and the updated `Display` and source
   chain. It also verifies that the cleanup cause is not repeated by `source()`.
@@ -983,8 +993,9 @@ No existing variant is removed; changes to existing variants are listed above.
   variants, fields and sources instead of parsing messages. Explain that escaped
   path text may be lossy and does not sanitize the rest of the diagnostics.
   Document `table_path` as the TOML table
-  diagnostic path for key errors, and `path` as a filesystem path for `Io`,
-  `Parse` and `Serialize`; document `SaveFileCleanup`'s `target_path` and
+  diagnostic path for key errors, `path` as the filesystem path of the file
+  directly involved for `Io` and `Parse`, and every `target_path` as the
+  destination passed to `save_file`; document `SaveFileCleanup`'s `target_path` and
   `temporary_path` separately. Use public constructors where provided; document
   `SaveFileTaskJoin` and `SaveFileCleanup` as library-created variants that
   callers can inspect but not construct, and state that a task-join error does
@@ -1044,7 +1055,7 @@ No existing variant is removed; changes to existing variants are listed above.
   `### Added`; the save-specific variants have no public constructors. Under
   `### Changed`, record each compatibility break as a `**Breaking:**` entry,
   including the key-error `table_path` rename, `Io.operation`, `Io.target_path`,
-  `Parse.path`, `Serialize.path` and `SaveFileCleanup.target_path` fields, other
+  `Parse.path`, `Serialize.target_path` and `SaveFileCleanup.target_path` fields, other
   error-shape changes, Tokio features, setter signatures, `ConfigStore`'s
   `Debug` output and constructor renames. Record acceptance of non-finite `f32`
   values, omission of the raw value in save-time `u64`/`usize` range messages
@@ -1063,8 +1074,9 @@ No existing variant is removed; changes to existing variants are listed above.
 - **Q2 — Operation in `Error::Io`.** The path alone is ambiguous for save failures
   involving a temporary file. E2 adds an optional, stable `IoOperation`; errors
   from callers can leave it as `None`. E6 makes every `save_file` error name its
-  target: `Io.target_path`, `Serialize.path`, `SaveFileCleanup.target_path` and
-  `SaveFileTaskJoin.target_path`.
+  target: `Io.target_path`, `Serialize.target_path`, `SaveFileCleanup.target_path`
+  and `SaveFileTaskJoin.target_path`. Every save target uses the field name
+  `target_path`; `path` names only a file directly involved in an operation.
 - **Q3 — Debug content.** Top-level keys are enough; their order and the exact
   text format are unspecified. D2 retains non-blocking lock acquisition and
   makes lock contention and a poisoned lock visible while still showing the
