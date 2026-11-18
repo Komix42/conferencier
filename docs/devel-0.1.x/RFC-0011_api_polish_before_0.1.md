@@ -29,9 +29,9 @@ public behavior beyond what the changelog records.
 - `Error::Io` names its file without debug formatting, and `Error::Parse` becomes
   a struct variant with an optional path, filled in by file methods or attached
   by callers that parse text themselves (E2, E4).
-- `Io` and `Parse` are non-exhaustive variants with public constructors (E5).
-  `Io` can also identify the operation, and `SaveFileCleanup` retains the target
-  path (E2–E6).
+- `Io`, `Parse`, `Serialize` and `SaveFileCleanup` are non-exhaustive variants
+  with public constructors (E5). `Io` can also identify the operation, and every
+  `save_file` error names the save target (E2–E6).
 - The library enables only the Tokio features `sync`, `rt` and `fs` (T1–T2).
 - `f32` fields accept infinity and NaN like `f64` fields (F1–F2).
 - `set_string` accepts `impl Into<String>`, the vector setters accept compatible
@@ -150,6 +150,12 @@ Non-goals:
   involved in the failed system call: the target for `InspectTarget` and
   `ReplaceTarget`, and the temporary file for the other operations.
 
+  `Error::Io` also gains `target_path: Option<PathBuf>`, the destination of the
+  save that failed. `save_file` sets it to the path passed to it on every `Io`
+  error it returns, including the join failure; all other operations and the
+  constructors in E5 leave it `None`. For `InspectTarget` and `ReplaceTarget`,
+  `path` and `target_path` name the same file.
+
 - **E3 — Messages.** `Display` produces exactly these messages (`<p>` is a
   rendered path, `<t>` a rendered temporary path and `<target>` the save
   destination):
@@ -163,20 +169,27 @@ Non-goals:
   | `Io { operation: Some(WriteTemporary), path: Some(_), .. }` | `failed to write temporary file "<p>"` |
   | `Io { operation: Some(ReplaceTarget), path: Some(_), .. }` | `failed to replace target file "<p>"` |
   | `Io { operation: Some(op), path: None, .. }` | `failed to <op>` |
+  | `Io { operation: None, target_path: Some(_), .. }` | `failed to save "<target>"` |
   | `Io { operation: None, path: Some(_), .. }` | `I/O error on "<p>"` |
   | `Io { operation: None, path: None, .. }` | `I/O error` |
   | `Parse { path: Some(_), .. }` | `failed to parse TOML file "<p>"` |
   | `Parse { path: None, .. }` | `failed to parse TOML` |
-  | `Serialize(_)` | `failed to serialize TOML` |
+  | `Serialize { path: Some(_), .. }` | `failed to serialize TOML for "<p>"` |
+  | `Serialize { path: None, .. }` | `failed to serialize TOML` |
   | `SaveFileCleanup { .. }` | `failed to save "<target>"; removing temporary file "<t>" also failed (<cleanup_error>)` |
 
-  `<op>` uses the operation names above without a path, for example
-  `failed to write temporary file`. `SaveFileCleanup` keeps `save_error` as its
+  The first matching row applies. `<op>` uses the operation names above without
+  a path, for example `failed to write temporary file`. For `CreateTemporary`,
+  `PrepareTemporary` and `WriteTemporary`, a `target_path` of `Some` appends
+  ` for "<target>"` to the message, with or without `<p>`, for example
+  `failed to write temporary file "<t>" for "<target>"`. `InspectTarget` and
+  `ReplaceTarget` do not repeat `target_path`, because `<p>` already names the
+  target. `SaveFileCleanup` keeps `save_error` as its
   source. `cleanup_error` is not part of the source chain, so its message stays
   in `Display`. A report such as `anyhow`'s `{:#}` then reads, for example:
 
   ```text
-  failed to save "config.toml"; removing temporary file ".conferencier.1a2b.tmp" also failed (Access is denied. (os error 5)): failed to write temporary file ".conferencier.1a2b.tmp": There is not enough space on the disk. (os error 112)
+  failed to save "config.toml"; removing temporary file ".conferencier.1a2b.tmp" also failed (Access is denied. (os error 5)): failed to write temporary file ".conferencier.1a2b.tmp" for "config.toml": There is not enough space on the disk. (os error 112)
   ```
 
 - **E4 — Path of parse errors.** `Error::Parse` becomes a struct variant:
@@ -207,34 +220,56 @@ Non-goals:
 
   This does not add a blocking file API or a general error-context helper.
 
-- **E5 — Extensible variants and constructors.** `Error::Io`, `Error::Parse` and
-  `Error::SaveFileCleanup` are individually marked `#[non_exhaustive]`, in
-  addition to the existing attribute on `Error` itself. Their public fields
-  remain public. Outside the crate, patterns must include `..` and callers cannot
-  construct these variants directly. Callers use these public constructors:
+- **E5 — Extensible variants and constructors.** `Error::Io`, `Error::Parse`,
+  `Error::Serialize` and `Error::SaveFileCleanup` are individually marked
+  `#[non_exhaustive]`, in addition to the existing attribute on `Error` itself.
+  Their public fields remain public. Outside the crate, patterns must include `..`
+  and callers cannot construct these variants directly. Callers use these public
+  constructors:
 
   - `Error::io_error(path: Option<PathBuf>, source: std::io::Error) -> Error`;
   - `Error::io_error_with_operation(path: Option<PathBuf>, operation: IoOperation, source: std::io::Error) -> Error`;
-  - `Error::parse_error(path: Option<PathBuf>, source: toml::de::Error) -> Error`.
+  - `Error::parse_error(path: Option<PathBuf>, source: toml::de::Error) -> Error`;
+  - `Error::serialize_error(path: Option<PathBuf>, source: toml::ser::Error) -> Error`.
 
   `io_error` stores `operation: None`; `io_error_with_operation` stores
-  `operation: Some(operation)`. The existing
-  `From<std::io::Error>` and `From<toml::de::Error>` conversions remain available
-  and set the path and operation to `None`. `SaveFileCleanup` is normally created
-  inside conferencier; because it is non-exhaustive, a public
+  `operation: Some(operation)`; both store `target_path: None`. A caller that
+  needs `target_path` sets the public field on the constructed error, as shown
+  for `Parse.path` in E4. The existing `From<std::io::Error>`,
+  `From<toml::de::Error>` and `From<toml::ser::Error>` conversions remain
+  available and set every path and the operation to `None`. `SaveFileCleanup` is
+  normally created inside conferencier; because it is non-exhaustive, a public
   `Error::save_file_cleanup_error(target_path, temporary_path, save_error,
   cleanup_error)` constructor is provided for tests and manual construction.
   Additional fields can later be added without breaking construction or
   patterns if the existing constructors can supply suitable defaults for them.
 
-- **E6 — Save target and temporary file.** `Error::SaveFileCleanup` gains
-  `target_path: PathBuf`, in addition to `save_error`, `temporary_path` and
-  `cleanup_error`. `target_path` is the path passed to `save_file`; it is not
-  inferred from the temporary sibling or the nested I/O error. The primary
-  failure remains available in full through `save_error`, including an
-  `Io.operation`, the directly affected `Io.path`, the I/O kind and the raw OS
-  code. The target path is therefore retained even when the primary failure
-  involved only the temporary file.
+- **E6 — Save target and temporary file.** Every error returned by `save_file`
+  identifies the path passed to it, without inferring it from the temporary
+  sibling:
+
+  - `Io` carries it in `target_path` (E2).
+  - `Error::Serialize` becomes a struct variant:
+
+    ```rust,ignore
+    #[non_exhaustive]
+    Serialize {
+        /// The file that was to be written, if any.
+        path: Option<PathBuf>,
+        /// The serializer's error.
+        source: toml::ser::Error,
+    },
+    ```
+
+    `save_file` sets `path` to its target; `ConfigStore::save_str` sets it to
+    `None`. Serialization still happens before any file operation, so the
+    target is left untouched.
+  - `Error::SaveFileCleanup` gains `target_path: PathBuf`, in addition to
+    `save_error`, `temporary_path` and `cleanup_error`. The primary failure
+    remains available in full through `save_error`, including an
+    `Io.operation`, the directly affected `Io.path`, `Io.target_path`, the I/O
+    kind and the raw OS code. The target path is therefore retained even when
+    the primary failure involved only the temporary file.
 
 - **E7 — Sensitive diagnostics.** Error messages, `Debug` output and source
   chains are not redacted. A TOML parse error's source can include the offending
@@ -368,8 +403,8 @@ This RFC changes behavior that users can observe. It is released in
   longer contains the cause (E1, E3). Code that prints an error with `{}` and relies
   on the cause must print the source chain, for example with `anyhow`'s `{:#}` or by
   walking `source()`. Code that compares message strings must be updated.
-- **Breaking:** `Error::Io` is non-exhaustive and has an optional `operation`
-  field (E2, E5). Replace direct construction with
+- **Breaking:** `Error::Io` is non-exhaustive and has optional `operation` and
+  `target_path` fields (E2, E5). Replace direct construction with
   `Error::io_error(path, source)` or
   `Error::io_error_with_operation(path, operation, source)`, and add `..` to
   patterns such as `Error::Io { path, operation, source, .. }`.
@@ -377,6 +412,11 @@ This RFC changes behavior that users can observe. It is released in
   Patterns `Error::Parse(_)` become `Error::Parse { .. }` or
   `Error::Parse { source, .. }`. Replace direct construction with
   `Error::parse_error(None, source)` or the existing `Error::from(source)`.
+- **Breaking:** `Error::Serialize` is a non-exhaustive struct variant with an
+  optional `path` (E5–E6). Patterns `Error::Serialize(_)` become
+  `Error::Serialize { .. }` or `Error::Serialize { source, .. }`. Replace direct
+  construction with `Error::serialize_error(None, source)` or the existing
+  `Error::from(source)`.
 - **Breaking:** `Error::SaveFileCleanup` is non-exhaustive and gains
   `target_path` (E3, E5–E6). Replace direct construction with
   `Error::save_file_cleanup_error(target_path, temporary_path, save_error,
@@ -434,6 +474,14 @@ This RFC changes behavior that users can observe. It is released in
      one field in `SaveFileCleanup`, but a primary failure may carry only a
      temporary path, and temporary paths are not a public naming contract from
      which the target can be recovered reliably. Rejected in favor of E6.
+12. **A wrapping variant `SaveFile { target_path, source: Box<Error> }`** for every
+     `save_file` failure. It names the target in one place, but callers would
+     match nested errors for ordinary I/O failures, and it overlaps with
+     `SaveFileCleanup`. Rejected in favor of `Io.target_path` and
+     `Serialize.path` (E2, E6).
+13. **Leave the target only in `SaveFileCleanup`.** Callers know the path they
+     passed, but it is lost when the error is propagated with `?`, and a closed
+     `Serialize(toml::ser::Error)` could not gain a path after 0.1. Rejected.
 
 ## Out of scope
 
@@ -451,9 +499,13 @@ This RFC changes behavior that users can observe. It is released in
   source.
 - A doctest for `display_error_chain` verifies that it includes the outer error
   and every source in order.
-- Tests in `store.rs` assert the operation and the directly affected path for
-  target inspection, temporary-file creation, preparation, writing and
-  replacement. Each public `save_file` I/O path has an explicit operation.
+- Tests in `store.rs` assert the operation, the directly affected path and
+  `target_path` for target inspection, temporary-file creation, preparation,
+  writing and replacement. Each public `save_file` I/O path has an explicit
+  operation and the target path.
+- A serialization failure from `save_file` yields
+  `Error::Serialize { path: Some(target), .. }` and leaves the target untouched;
+  the same failure from `save_str` has `path: None`.
 - A test of simultaneous save and cleanup failure asserts `target_path`,
   `temporary_path`, the nested operation and the updated `Display` and source
   chain. It also verifies that the cleanup cause is not repeated by `source()`.
@@ -462,10 +514,10 @@ This RFC changes behavior that users can observe. It is released in
   `path: None`.
 - A doctest for synchronous file loading verifies that a parse error from
   `from_str` can be given the source file path without losing its parser source.
-- Tests outside the library crate construct `Io`, `Parse` and
+- Tests outside the library crate construct `Io`, `Parse`, `Serialize` and
   `SaveFileCleanup` with the public constructors and inspect their fields using
   patterns with `..`. Compile-fail tests outside the crate verify that direct
-  construction and patterns without `..` are rejected for all three variants.
+  construction and patterns without `..` are rejected for all four variants.
 - `cargo test -p conferencier --no-default-features --locked` and the workspace tests
   pass with the reduced Tokio features; a test or doctest runs an async method on
   a current-thread runtime.
@@ -531,8 +583,8 @@ This RFC changes behavior that users can observe. It is released in
   that printing a full chain may disclose sensitive input.
 - **Q2 — Operation in `Error::Io`.** The path alone is ambiguous for save failures
   involving a temporary file. E2 adds an optional, stable `IoOperation`; errors
-  from callers can leave it as `None`. E6 separately retains the save target in
-  `SaveFileCleanup`.
+  from callers can leave it as `None`. E6 makes every `save_file` error name its
+  target: `Io.target_path`, `Serialize.path` and `SaveFileCleanup.target_path`.
 - **Q3 — Debug content.** Top-level keys are enough; their order is unspecified.
   D2 retains non-blocking lock acquisition and makes a poisoned lock visible
   while still showing the available keys.
@@ -542,9 +594,9 @@ This RFC changes behavior that users can observe. It is released in
   unclaimed keys without rejecting them remains in the backlog.
 - **Q5 — Extensibility of wrapping variants.** Review noted that the
   `#[non_exhaustive]` attribute on `Error` protects against new variants, not new
-  fields in existing variants. E5 makes `Io`, `Parse` and `SaveFileCleanup`
-  non-exhaustive and provides constructors, allowing fields to be added when
-  suitable defaults exist.
+  fields in existing variants. E5 makes `Io`, `Parse`, `Serialize` and
+  `SaveFileCleanup` non-exhaustive and provides constructors, allowing fields to
+  be added when suitable defaults exist.
 - **Q6 — Sensitive values in diagnostics.** Conferencier cannot determine which
   values an application considers sensitive. E7 documents the risk instead of
   adding redaction; the application can customize its scope's `Debug`, but that
