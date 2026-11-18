@@ -36,8 +36,8 @@ public behavior beyond what the changelog records.
 - `f32` fields accept infinity and NaN like `f64` fields (F1–F2).
 - `set_string` accepts `impl Into<String>`, the vector setters accept any
   `IntoIterator` (S1–S3).
-- `Debug` of `ConfigStore` lists the top-level keys, not the values (D1–D2).
-  Error diagnostics are not redacted and may contain sensitive input (E7).
+- `Debug` of `ConfigStore` lists the top-level keys when available, not the values
+  (D1–D2). Error diagnostics are not redacted and may contain sensitive input (E7).
 - Unknown keys stay accepted by default; strictness remains opt-in (K1).
 
 ## Table of Contents
@@ -292,14 +292,18 @@ What the setters store, their section validation and their errors are unchanged.
 
 ## `Debug` of `ConfigStore`
 
-- **D1 — Keys only.** `ConfigStore` implements `Debug` manually. The output lists
-  the top-level keys of the document, in document order, and no values, for example
-  `ConfigStore { keys: ["App", "Database"] }`. The alternate form `{:#?}` prints the
-  same information, pretty-printed.
-- **D2 — Locking.** `Debug` takes the read lock like any other read and follows the
-  store's locking rules, including the handling of a poisoned lock. The key names
-  are copied under the lock and formatted after it is released, so user code
-  behind the formatter never runs while the lock is held.
+- **D1 — Keys only.** `ConfigStore` implements `Debug` manually. When the lock is
+  available, the output lists all top-level keys of the document, including keys
+  whose values are not tables, in unspecified order and without any values.
+  For example, `ConfigStore { keys: ["App", "Database"], .. }`. The alternate
+  form `{:#?}` prints the same information, pretty-printed. Use
+  `finish_non_exhaustive()` to indicate that the content is omitted.
+- **D2 — Locking.** `Debug` uses `try_read` and does not wait for the lock. If
+  acquisition would block, it prints `<locked>` instead of the keys. If the lock
+  is poisoned but can be acquired, it recovers the data like other store reads,
+  lists the keys and reports `poisoned: true`. The key names are copied under the
+  lock and formatted after it is released, so user code behind the formatter
+  never runs while the lock is held.
 
 Applications that need the content use the existing read methods.
 Top-level key names may themselves be sensitive. The application controls the
@@ -478,8 +482,12 @@ This RFC changes behavior that users can observe. It is released in
   element index. A round trip of a non-finite `f32` default through save and load
   succeeds and checks the reloaded NaN with `is_nan()`.
 - Setter tests pass `&str`, `String`, arrays of `&str` and iterators.
-- A test asserts that the `Debug` output contains the top-level keys and no value
-  of the document.
+- Tests assert that ordinary and alternate `Debug` output contains all top-level
+  keys, including non-table keys, and no values, without relying on key order.
+  With the write lock held, `Debug` does not wait and reports `<locked>`; a
+  poisoned lock still yields the keys and reports `poisoned: true`. The contention
+  test uses a bounded wait and releases the lock even on timeout, so a regression
+  cannot leave the test blocked indefinitely.
 - The guide's custom scope `Debug` example is tested as a doctest.
 
 ## Documentation deliverables
@@ -514,6 +522,9 @@ This RFC changes behavior that users can observe. It is released in
   involving a temporary file. E2 adds an optional, stable `IoOperation`; errors
   from callers can leave it as `None`. E6 separately retains the save target in
   `SaveFileCleanup`.
+- **Q3 — Debug content.** Top-level keys are enough; their order is unspecified.
+  D2 retains non-blocking lock acquisition and makes a poisoned lock visible
+  while still showing the available keys.
 - **Q4 — Strict unknown keys by default.** Keep the lenient default and make
   `deny_unknown_keys` opt-in per type. This preserves compatibility with shared
   and forward-extended configuration files. A separate API for inspecting
@@ -535,8 +546,8 @@ This RFC changes behavior that users can observe. It is released in
 
 ## Open questions
 
-- **Q3 — Debug content.** Are top-level keys enough, or should `Debug` also list
-  nested table names, or print only the number of sections?
+None.
+
 ## References
 
 - [AUDIT-001: Quality audit of 0.0.8](../devel-0.0.x/AUDIT-001_quality_0.0.8.md), findings A1–A7.
