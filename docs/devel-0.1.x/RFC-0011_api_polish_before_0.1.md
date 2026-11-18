@@ -162,12 +162,15 @@ Non-goals:
   error-chain formatting helper.
 
 - **E2 — Path rendering and I/O operation.** Where a message names a file, the
-  rendered path escapes double quotes, backslashes, Unicode control characters
-  and Unicode line and paragraph separators. In particular, a path cannot
-  introduce a literal newline, carriage return or terminal escape character.
-  For example, a newline may be rendered as `\n` and a backslash as `\\`. The
-  initial beta.1 messages enclose paths in double quotes (E3), but the exact
-  escape syntax is not a 0.1.x compatibility guarantee.
+  rendered path escapes at least double quotes, backslashes, Unicode control
+  characters and Unicode line and paragraph separators. In particular, a path
+  cannot introduce a literal newline, carriage return or terminal escape
+  character. Implementations may also escape other characters, including
+  bidirectional formatting controls such as U+202E, but that additional
+  escaping is not a 0.1.x compatibility guarantee. For example, a newline may
+  be rendered as `\n` and a backslash as `\\`. The initial beta.1 messages
+  enclose paths in double quotes (E3), but the exact escape syntax is not a
+  0.1.x compatibility guarantee.
 
   Rendering may be lossy for non-Unicode paths. The original path remains in
   the corresponding variant field (`path`, `target_path` or `temporary_path`);
@@ -294,7 +297,10 @@ Non-goals:
   deterministic; library-generated `save_file` I/O errors always have an
   operation, and the public I/O constructors leave `target_path` unset.
 
-  The first matching row determines the displayed context. In beta.1, `<op>`
+  The first matching row determines the displayed context. For `Read`, the
+  message never displays `target_path`; it uses `path` when present and
+  otherwise displays only the generic operation message, even if
+  `target_path` is `Some`. In beta.1, `<op>`
   uses the operation names above without a path, for example
   `failed to write temporary file`. For `CreateTemporary`, `PrepareTemporary`
   and `WriteTemporary`, a `target_path` of `Some` is included as context, with
