@@ -11,22 +11,24 @@ Related: [AUDIT-001](../devel-0.0.x/AUDIT-001_quality_0.0.8.md), [RFC-0006](../d
 
 This RFC specifies the public behavior changes that resolve findings A1–A7 of the
 [quality audit of 0.0.8](../devel-0.0.x/AUDIT-001_quality_0.0.8.md), as planned in
-the [backlog](../BACKLOG.md#planned-for-010-beta1). It covers error messages and
-sources, file paths in parse errors, the Tokio features enabled by the library,
-non-finite `f32` values, the signatures of the typed setters and the `Debug`
-output of `ConfigStore`. It also records the decision about strict unknown-key
-handling by default, which [RFC-0006](../devel-0.0.x/RFC-0006_strict_unknown_keys.md)
-Q6 postponed until before 0.1.0.
+the [backlog](../BACKLOG.md#planned-for-010-beta1). It covers error messages,
+sources and extensibility, file paths in parse errors, the Tokio features enabled
+by the library, non-finite `f32` values, the signatures of the typed setters and
+the `Debug` output of `ConfigStore`. It also records the decision about strict
+unknown-key handling by default, which
+[RFC-0006](../devel-0.0.x/RFC-0006_strict_unknown_keys.md) Q6 postponed until
+before 0.1.0.
 
 Internal fixes from the audit (A8, B1–B5) are not specified here; they change no
 public behavior beyond what the changelog records.
 
 ## Synopsis
 
-- `Display` of an error shows only its own context; the underlying cause is
-  available only through `source()` (E1–E3).
+- `Display` of a wrapping error does not repeat the cause returned by `source()`
+  (E1–E3).
 - `Error::Io` names its file without debug formatting, and `Error::Parse` becomes
   a struct variant with an optional path, filled in by the file methods (E2, E4).
+- `Io` and `Parse` are non-exhaustive variants with public constructors (E5).
 - The library enables only the Tokio features `sync`, `rt` and `fs` (T1–T2).
 - `f32` fields accept infinity and NaN like `f64` fields (F1–F2).
 - `set_string` accepts `impl Into<String>`, the vector setters accept any
@@ -49,6 +51,7 @@ public behavior beyond what the changelog records.
 - [Out of scope](#out-of-scope)
 - [Testing](#testing)
 - [Documentation deliverables](#documentation-deliverables)
+- [Resolved questions](#resolved-questions)
 - [Open questions](#open-questions)
 - [References](#references)
 
@@ -123,6 +126,7 @@ Non-goals:
 - **E4 — Path of parse errors.** `Error::Parse` becomes a struct variant:
 
   ```rust,ignore
+  #[non_exhaustive]
   Parse {
       /// The file that was parsed, if known.
       path: Option<PathBuf>,
@@ -133,8 +137,23 @@ Non-goals:
 
   `ConfigStore::from_file` and `ConfigStore::load_file` set `path` to the path they
   read. `ConfigStore::from_str`, `FromStr` and `From<toml::de::Error>` set it to
-  `None`. Like `Io`, the variant can be constructed by callers that read files
-  themselves.
+  `None`.
+
+- **E5 — Extensible variants and constructors.** Both `Error::Io` and
+  `Error::Parse` are individually marked `#[non_exhaustive]`, in addition to the
+  existing attribute on `Error` itself. Their `path` and `source` fields remain
+  public. Outside the crate, patterns must include `..` and callers cannot
+  construct these variants directly. Callers use these public constructors:
+
+  - `Error::io_error(path: Option<PathBuf>, source: std::io::Error) -> Error`;
+  - `Error::parse_error(path: Option<PathBuf>, source: toml::de::Error) -> Error`.
+
+  Each constructor stores the supplied path and source in the corresponding
+  variant; `None` means that no file path is known. The existing
+  `From<std::io::Error>` and `From<toml::de::Error>` conversions remain available
+  and set the path to `None`. This rule does not change the other variants.
+  Additional fields can later be added without breaking construction or patterns
+  if the existing constructors can supply suitable defaults for them.
 
 ## Tokio features
 
@@ -205,8 +224,13 @@ This RFC changes behavior that users can observe. It is released in
   longer contains the cause (E1, E3). Code that prints an error with `{}` and relies
   on the cause must print the source chain, for example with `anyhow`'s `{:#}` or by
   walking `source()`. Code that compares message strings must be updated.
-- **Breaking:** `Error::Parse` is a struct variant (E4). Patterns `Error::Parse(_)`
-  become `Error::Parse { .. }`; the parser error is the `source` field.
+- **Breaking:** `Error::Io` is non-exhaustive (E5). Replace direct construction
+  with `Error::io_error(path, source)` and add `..` to patterns such as
+  `Error::Io { path, source, .. }`.
+- **Breaking:** `Error::Parse` is a non-exhaustive struct variant (E4–E5).
+  Patterns `Error::Parse(_)` become `Error::Parse { .. }` or
+  `Error::Parse { source, .. }`. Replace direct construction with
+  `Error::parse_error(None, source)` or the existing `Error::from(source)`.
 - **Breaking:** the library no longer enables Tokio's `macros` and `rt-multi-thread`
   features (T1). An application that used `#[tokio::main]`, `#[tokio::test]` or the
   multi-threaded runtime without enabling these features itself fails to compile
@@ -253,6 +277,9 @@ This RFC changes behavior that users can observe. It is released in
    application types that contain a store. Rejected.
 9. **Strict by default with an `allow_unknown_keys` opt-out** (K1). Catches typos
    earlier, but breaks shared and forward-compatible files by default. Rejected.
+10. **Leave `Io` and `Parse` directly constructible.** This avoids the migration
+    in E5, but adding a field would break construction and patterns that list all
+    fields. Rejected in favor of non-exhaustive variants and constructors.
 
 ## Out of scope
 
@@ -271,6 +298,10 @@ This RFC changes behavior that users can observe. It is released in
 - Tests of `from_file` and `load_file` with invalid TOML assert
   `Error::Parse { path: Some(p), .. }` with the read path; a `from_str` test asserts
   `path: None`.
+- Tests outside the library crate construct `Io` and `Parse` with the public
+  constructors, with and without paths, and inspect their fields using patterns
+  with `..`. Compile-fail tests outside the crate verify that direct construction
+  and patterns without `..` are rejected for both variants.
 - `cargo test -p conferencier --no-default-features --locked` and the workspace tests
   pass with the reduced Tokio features; a test or doctest runs an async method on
   a current-thread runtime.
@@ -283,11 +314,12 @@ This RFC changes behavior that users can observe. It is released in
 
 ## Documentation deliverables
 
-- Rustdoc of `Error` (variants and the I/O example), `ConfigStore` (`Debug`,
-  setters, `from_file`, `load_file`) and the crate-level note about Tokio
-  features (T2).
+- Rustdoc of `Error` (variants, constructors and the I/O example), `ConfigStore`
+  (`Debug`, setters, `from_file`, `load_file`) and the crate-level note about
+  Tokio features (T2).
 - Guide: printing errors with their source chain in
-  [troubleshooting](../../conferencier/guide/troubleshooting.md); the parse example in
+  [troubleshooting](../../conferencier/guide/troubleshooting.md); the I/O error
+  construction example in
   [concepts](../../conferencier/guide/concepts.md#reading-a-file-before-the-runtime-starts);
   the `f32` rules in [derive](../../conferencier/guide/derive.md#value-conversion) and
   the round-trip note in [files](../../conferencier/guide/files.md).
@@ -297,6 +329,14 @@ This RFC changes behavior that users can observe. It is released in
 - [Changelog](../../CHANGELOG.md): the **Breaking** entries and the `f32` change
   under [Unreleased].
 - `Amended by: RFC-0011` in the header of RFC-0001, once this RFC is approved.
+
+## Resolved questions
+
+- **Q5 — Extensibility of `Io` and `Parse`.** Review noted that the
+  `#[non_exhaustive]` attribute on `Error` protects against new variants, not new
+  fields in existing variants. E5 makes these two variants non-exhaustive and
+  provides constructors, allowing fields to be added when suitable defaults
+  exist. `SaveFileCleanup` is considered separately with save-file diagnostics.
 
 ## Open questions
 
