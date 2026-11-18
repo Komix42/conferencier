@@ -196,11 +196,19 @@ Non-goals:
   target for `InspectTarget` and `ReplaceTarget`, and the temporary file for the
   other operations.
 
+  Unsupported save targets, such as a final-component symlink, directory or
+  non-regular file, are `Io` errors with `operation: Some(InspectTarget)` and an
+  `InvalidInput` source whose message gives the reason. They do not have a
+  separate `Error` variant; the `Display` message remains the generic E3
+  inspection message, and callers that need the reason use the source chain.
+
   `Error::Io` also gains `target_path: Option<PathBuf>`, the destination of the
   save that failed. `save_file` sets it to the path passed to it on every `Io`
   error it returns; all other operations and the `Io` constructors in E5 leave
   it `None`. For `InspectTarget` and `ReplaceTarget`, `path` and `target_path`
-  name the same file.
+  name the same file. This overlap is intentional: `target_path` consistently
+  identifies the save destination, while `path` continues to identify the file
+  directly involved in the failed operation.
 
   A task join failure uses this separate variant:
 
@@ -781,10 +789,14 @@ No existing variant is removed; changes to existing variants are listed above.
   `target_path: None` for file-read errors from `from_file` and `load_file`.
   They also assert the operation, the directly affected path and `target_path`
   for target inspection, temporary-file creation, preparation, writing and
-  replacement. Each file-operation `save_file` error has an explicit operation
-  and the target path. A separate join-failure test asserts
-  `SaveFileTaskJoin`, its target path and `Display`, and that its source is the
-  original `tokio::task::JoinError`.
+  replacement. For target inspection and replacement, they assert that `path`
+  and `target_path` contain the same path. Each file-operation `save_file` error
+  has an explicit operation and the target path. A separate join-failure test
+  asserts `SaveFileTaskJoin`, its target path and `Display`, and that its source
+  is the original `tokio::task::JoinError`.
+- Tests for unsupported save targets assert `operation: Some(InspectTarget)`,
+  the target in both path fields, an `InvalidInput` source and that the source
+  chain exposes the rejection reason.
 - A serialization failure from `save_file` yields
   `Error::Serialize { path: Some(target), .. }` and leaves the target untouched;
   the same failure from `save_str` has `path: None`.
