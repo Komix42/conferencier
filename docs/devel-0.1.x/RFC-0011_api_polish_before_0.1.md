@@ -29,9 +29,9 @@ public behavior beyond what the changelog records.
 - `Error::Io` names its file without debug formatting, and `Error::Parse` becomes
   a struct variant with an optional path, filled in by file methods or attached
   by callers that parse text themselves (E2, E4).
-- All eight data-bearing `Error` variants are non-exhaustive and have public
-  constructors (E5). `Io` can also identify the operation, and every
-  `save_file` error names the save target (E2–E6).
+- All nine data-bearing `Error` variants are non-exhaustive and have public
+  constructors (E5). `Io` can identify the operation, task join failures have
+  their own variant, and every `save_file` error names the save target (E2–E6).
 - The library enables only the Tokio features `sync`, `rt` and `fs` (T1–T2).
 - `f32` fields accept infinity and NaN like `f64` fields (F1–F2).
 - `set_string` accepts `impl Into<String>`, the vector setters accept compatible
@@ -102,8 +102,9 @@ Non-goals:
 
 - **E1 — One place for each cause.** An error variant that wraps another error
   returns it from `std::error::Error::source` and does not include its message in
-  `Display`. This applies to `Io`, `Parse`, `Serialize` and `SaveFileCleanup`.
-  The wrapped errors remain public fields, so callers can still match on them.
+  `Display`. This applies to `Io`, `Parse`, `Serialize`, `SaveFileCleanup` and
+  `SaveFileTaskJoin`. The wrapped errors remain public fields, so callers can
+  still match on them.
 
   Applications that want the full chain can opt in to formatting it. The
   troubleshooting guide includes a small helper with no additional dependency:
@@ -163,17 +164,33 @@ Non-goals:
 
   `None` means that the caller or the library operation did not supply an
   operation. Conferencier fills the operation for every file operation performed
-  by `ConfigStore::from_file`, `load_file` and `save_file`. The exceptional
-  `spawn_blocking` join failure is not itself a file operation and keeps
-  `operation: None`. For `save_file`, `path` continues to name the file directly
-  involved in the failed system call: the target for `InspectTarget` and
-  `ReplaceTarget`, and the temporary file for the other operations.
+  by `ConfigStore::from_file`, `load_file` and `save_file`. A `spawn_blocking`
+  join failure is not itself a file-operation error and is returned as
+  `Error::SaveFileTaskJoin`; it has no `IoOperation`. For `save_file`, `path`
+  continues to name the file directly involved in the failed system call: the
+  target for `InspectTarget` and `ReplaceTarget`, and the temporary file for the
+  other operations.
 
   `Error::Io` also gains `target_path: Option<PathBuf>`, the destination of the
   save that failed. `save_file` sets it to the path passed to it on every `Io`
-  error it returns, including the join failure; all other operations and the
-  constructors in E5 leave it `None`. For `InspectTarget` and `ReplaceTarget`,
-  `path` and `target_path` name the same file.
+  error it returns; all other operations and the `Io` constructors in E5 leave
+  it `None`. For `InspectTarget` and `ReplaceTarget`, `path` and `target_path`
+  name the same file.
+
+  A task join failure uses this separate variant:
+
+  ```rust,ignore
+  #[non_exhaustive]
+  SaveFileTaskJoin {
+      /// The destination path of the save.
+      target_path: PathBuf,
+      /// The failure to join the Tokio blocking task.
+      source: tokio::task::JoinError,
+  }
+  ```
+
+  `Error::source()` returns the `JoinError` directly. This variant is not an
+  `Io` error and has no `IoOperation`.
 
 - **E3 — Messages.** `Display` produces exactly these messages (`<p>` is a
   rendered path, `<t>` a rendered temporary path and `<target>` the save
@@ -193,6 +210,7 @@ Non-goals:
   | `Io { operation: None, target_path: Some(_), .. }` | `failed to save "<target>"` |
   | `Io { operation: None, path: Some(_), .. }` | `I/O error on "<p>"` |
   | `Io { operation: None, path: None, .. }` | `I/O error` |
+  | `SaveFileTaskJoin { .. }` | `failed to save "<target>"` |
   | `Parse { path: Some(_), .. }` | `failed to parse TOML file "<p>"` |
   | `Parse { path: None, .. }` | `failed to parse TOML` |
   | `Serialize { path: Some(_), .. }` | `failed to serialize TOML for "<p>"` |
@@ -242,13 +260,13 @@ Non-goals:
 
   This does not add a blocking file API or a general error-context helper.
 
-- **E5 — Extensible variants and constructors.** All eight variants of `Error`
-  (`Io`, `SaveFileCleanup`, `Parse`, `Serialize`, `MissingKey`, `TypeMismatch`,
-  `ValueParse` and `UnknownKey`) are individually marked `#[non_exhaustive]`, in
-  addition to the existing attribute on `Error` itself. Their public fields
-  remain public. Outside the crate, patterns must include `..` and callers
-  cannot construct these variants directly. Callers use these public
-  constructors:
+- **E5 — Extensible variants and constructors.** All nine variants of `Error`
+  (`Io`, `SaveFileTaskJoin`, `SaveFileCleanup`, `Parse`, `Serialize`, `MissingKey`,
+  `TypeMismatch`, `ValueParse` and `UnknownKey`) are individually marked
+  `#[non_exhaustive]`, in addition to the existing attribute on `Error` itself.
+  Their public fields remain public. Outside the crate, patterns must include
+  `..` and callers cannot construct these variants directly. Callers use these
+  public constructors:
 
   - `Error::io_error(path: Option<PathBuf>, source: std::io::Error) -> Error`;
   - `Error::io_error_with_operation(path: Option<PathBuf>, operation: IoOperation, source: std::io::Error) -> Error`;
@@ -258,6 +276,7 @@ Non-goals:
   - `Error::type_mismatch(path: impl Into<String>, key: impl Into<String>, expected: &'static str, found: &'static str) -> Error`;
   - `Error::value_parse(path: impl Into<String>, key: impl Into<String>, message: impl Into<String>) -> Error`;
   - `Error::unknown_key(path: impl Into<String>, key: impl Into<String>) -> Error`;
+  - `Error::save_file_task_join_error(target_path: impl Into<PathBuf>, source: tokio::task::JoinError) -> Error`;
   - `Error::save_file_cleanup_error(target_path: impl Into<PathBuf>, temporary_path: impl Into<PathBuf>, save_error: Error, cleanup_error: std::io::Error) -> Error`.
 
   The I/O constructors use the concrete `Option<PathBuf>` rather than
@@ -266,8 +285,9 @@ Non-goals:
 
   `io_error` stores `operation: None`; `io_error_with_operation` stores
   `operation: Some(operation)`; both store `target_path: None`. A caller that
-  needs `target_path` sets the public field on the constructed error, as shown
-  for `Parse.path` in E4. The existing `From<std::io::Error>`,
+  needs an `Io.target_path` sets the public field on the constructed error, as
+  shown for `Parse.path` in E4. The task-join constructor takes its target path
+  and typed source directly. The existing `From<std::io::Error>`,
   `From<toml::de::Error>` and `From<toml::ser::Error>` conversions remain
   available and set every path and the operation to `None`. `SaveFileCleanup` is
   normally created inside conferencier. Its public constructor accepts the
@@ -279,7 +299,8 @@ Non-goals:
   identifies the path passed to it, without inferring it from the temporary
   sibling:
 
-  - `Io` carries it in `target_path` (E2).
+  - File-operation `Io` errors carry it in `target_path` (E2).
+  - `SaveFileTaskJoin` carries it in its own `target_path` field (E2).
   - `Error::Serialize` becomes a struct variant:
 
     ```rust,ignore
@@ -541,7 +562,9 @@ This RFC changes behavior that users can observe. It is released in
   application that relied on this rejection must check the value itself.
 - K1 changes nothing.
 
-`Error` is already `#[non_exhaustive]`; no variant is added or removed.
+`Error` is already `#[non_exhaustive]`; this RFC adds `SaveFileTaskJoin` without
+changing or removing any existing variant. The addition is backward-compatible
+for external matches, which already require a fallback arm.
 
 ## Alternatives considered
 
@@ -575,7 +598,7 @@ This RFC changes behavior that users can observe. It is released in
 10. **Leave error variants directly constructible.** This avoids the migration
     in E5, but adding a field would break construction and patterns that list all
     fields. Rejected in favor of non-exhaustive variants and constructors for
-    all eight variants.
+    all nine variants.
 11. **Infer the target path from `save_error` or `temporary_path`.** It would avoid
      one field in `SaveFileCleanup`, but a primary failure may carry only a
      temporary path, and temporary paths are not a public naming contract from
@@ -613,8 +636,10 @@ This RFC changes behavior that users can observe. It is released in
   and every source in order.
 - Tests in `store.rs` assert the operation, the directly affected path and
   `target_path` for target inspection, temporary-file creation, preparation,
-  writing and replacement. Each public `save_file` I/O path has an explicit
-  operation and the target path.
+  writing and replacement. Each file-operation `save_file` error has an explicit
+  operation and the target path. A separate join-failure test asserts
+  `SaveFileTaskJoin`, its target path and `Display`, and that its source is the
+  original `tokio::task::JoinError`.
 - A serialization failure from `save_file` yields
   `Error::Serialize { path: Some(target), .. }` and leaves the target untouched;
   the same failure from `save_str` has `path: None`.
@@ -626,10 +651,10 @@ This RFC changes behavior that users can observe. It is released in
   `path: None`.
 - A doctest for synchronous file loading verifies that a parse error from
   `from_str` can be given the source file path without losing its parser source.
-- Tests outside the library crate construct all eight error variants with the
+- Tests outside the library crate construct all nine error variants with the
   public constructors and inspect their fields using patterns with `..`.
   Compile-fail tests outside the crate verify that direct construction and
-  patterns without `..` are rejected for all eight variants.
+  patterns without `..` are rejected for all nine variants.
 - `cargo test -p conferencier --no-default-features --locked` and the workspace tests
   pass with the reduced Tokio features; a test or doctest runs an async method on
   a current-thread runtime.
@@ -712,7 +737,7 @@ This RFC changes behavior that users can observe. It is released in
   unclaimed keys without rejecting them remains in the backlog.
 - **Q5 — Extensibility of error variants.** Review noted that the
   `#[non_exhaustive]` attribute on `Error` protects against new variants, not new
-  fields in existing variants. E5 makes all eight variants non-exhaustive and
+  fields in existing variants. E5 makes all nine variants non-exhaustive and
   provides constructors, allowing fields to be added when suitable defaults
   exist.
 - **Q6 — Sensitive values in diagnostics.** Conferencier cannot determine which
@@ -764,10 +789,12 @@ This RFC changes behavior that users can observe. It is released in
   affected `path` is absent, keep the operation-specific message. If
   `target_path` is available, `InspectTarget` and `ReplaceTarget` use it as the
   displayed path; temporary-file operations include it as save-target context.
-- **Q14 — `spawn_blocking` join failure.** Keep `operation: None`: a Tokio task
-  join failure does not identify a failed file-operation phase. Preserve the
-  save's `target_path`, so the error still displays `failed to save "<target>"`;
-  the underlying join failure remains available through the source chain.
+- **Q14 — `spawn_blocking` join failure.** Return the new
+  `Error::SaveFileTaskJoin { target_path, source }` variant rather than wrapping
+  the join failure in `std::io::Error`. A Tokio task join failure does not
+  identify a failed file-operation phase, so it has no `IoOperation`. Preserve
+  the save's `target_path` and display `failed to save "<target>"`; return the
+  typed `tokio::task::JoinError` directly through `source()`.
 - **Q15 — Generic error conversions.** Keep all existing `From` conversions
   from I/O and TOML errors for ergonomic `?` propagation. They set no path,
   operation or save target; callers with contextual information use the public
