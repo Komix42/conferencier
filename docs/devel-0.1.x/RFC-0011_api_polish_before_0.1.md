@@ -1032,7 +1032,12 @@ No existing variant is removed; changes to existing variants are listed above.
 - [Migration guide](../../conferencier/guide/migration.md): a 0.0.8 → 0.1.0-beta.1
   section covering every **Breaking** item of [Compatibility](#compatibility).
   Advise callers not to parse error messages or rely on their exact wording,
-  and point them to the structured fields and sources.
+  and point them to the structured fields and sources. Separately from the
+  breaking-change list, warn that lenient loading followed by saving a scope
+  removes keys not mapped by that scope. This is existing behavior, not a change
+  in beta.1: an older application can therefore erase keys written by a newer
+  version when it saves the same section. Link to the
+  [file guide](../../conferencier/guide/files.md) for the detailed behavior.
 - [Changelog](../../CHANGELOG.md): under **Unreleased**, record `IoOperation`,
   `SaveFileTaskJoin` and new public constructors for caller-created errors under
   `### Added`; the save-specific variants have no public constructors. Under
