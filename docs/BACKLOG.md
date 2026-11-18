@@ -15,7 +15,29 @@ Resolve the findings of the [quality audit of 0.0.8](./devel-0.0.x/AUDIT-001_qua
 3. **Internal fixes (audit A8, B1–B5).** Pin `conferencier-derive` with an exact `=` requirement, make the generated code hygienic and cover it with a trybuild test, remove the unused `once_cell` dev-dependency and the dead branch in `annotate_with_index`, configure or remove `doc_cfg`, and improve the derive's diagnostics and documentation for field types it recognizes by name. No RFC is written; changes users notice go to the changelog.
 4. **Beta release.** Update the README's development-status note and the migration guide for the beta, verify the packages with the exact derive requirement, and close the audit by linking each finding to the RFC or release that resolved it.
 
-Breaking changes between betas are avoided where possible, because a requirement such as `"0.1.0-beta.1"` also accepts later betas and the final 0.1.0. The stable 0.1.0 follows once the example applications use the beta and no further breaking changes are pending. The section-name migration guard stays until 0.2.0.
+`0.1.0-beta.1` establishes the compatibility baseline for the 0.1.x line. Under
+the compatibility policy in RFC-0011, subsequent 0.1.x pre-releases and releases
+must remain backward compatible; a necessary breaking change is deferred to
+0.2.0. The exact `=` requirement on `conferencier-derive` makes beta
+dependencies resolve to that precise derive release rather than a later beta.
+
+### Stable 0.1.0 exit criteria
+
+Publish stable `0.1.0` only when all of the following hold:
+
+- All four planned steps above are complete, including the exact derive
+  requirement, implementation and documentation of RFC-0011, and closure of the
+  0.0.8 audit.
+- The example applications have been built and tested against the beta API.
+- All CI jobs pass on the release candidate, including cross-platform tests,
+  MSRV checks, packaged doctests and publish dry-runs for both crates.
+- The `cargo-semver-checks` comparison with 0.0.8 has been reviewed and every
+  reported break is accounted for in the compatibility and migration
+  documentation; the CI check against the beta.1 baseline also passes.
+- The README development status, changelog and migration guide describe the
+  stable release accurately, and no known breaking change remains for 0.1.x.
+
+The section-name migration guard stays until 0.2.0.
 
 ## Technical debt
 

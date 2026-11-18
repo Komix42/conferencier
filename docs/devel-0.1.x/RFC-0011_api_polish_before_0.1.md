@@ -696,6 +696,14 @@ This RFC changes behavior that users can observe. It is released in
   tagged, use that tag as the fixed baseline for a CI compatibility gate on
   subsequent 0.1.x changes. Keep manual review for behavior and derive attribute
   syntax, which the tool does not check.
+- **Q11 — Beta policy and stable exit criteria.** Treat beta.1 as the 0.1.x
+  compatibility baseline: subsequent 0.1.x pre-releases and releases cannot
+  introduce breaking changes; defer any necessary break to 0.2.0. Publish stable
+  0.1.0 only after the release gates in the
+  [backlog](../BACKLOG.md#stable-010-exit-criteria) are met, including
+  completion of the planned work, successful CI and package checks, reviewed
+  API-compatibility results, example-app validation, complete migration
+  documentation and no known pending breaking changes.
 
 ## Open questions
 
