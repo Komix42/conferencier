@@ -31,10 +31,11 @@ public behavior beyond what the changelog records.
 - `Error::Io` names its file without debug formatting, and `Error::Parse` becomes
   a struct variant with an optional path, filled in by file methods or attached
   by callers that parse text themselves (E2, E4).
-- All nine data-bearing `Error` variants are non-exhaustive and have public
-  constructors with a uniform `_error` suffix (E5). `Io` can identify the
-  operation, task join failures have
-  their own variant, and every `save_file` error names the save target (E2–E6).
+- All nine data-bearing `Error` variants are non-exhaustive (E5). Public
+  constructors use a uniform `_error` suffix; the `save_file`-specific variants
+  are created internally. `Io` can identify the operation, task join failures
+  have their own variant, and every `save_file` error names the save target
+  (E2–E6).
 - The library enables only the Tokio features `sync`, `rt` and `fs` (T1–T2).
 - `0.1.x` compatibility starts with `0.1.0-beta.1`; breaking changes defer to
   `0.2.0`.
@@ -311,8 +312,8 @@ Non-goals:
   `TypeMismatch`, `ValueParse` and `UnknownKey`) are individually marked
   `#[non_exhaustive]`, in addition to the existing attribute on `Error` itself.
   Their public fields remain public. Outside the crate, patterns must include
-  `..` and callers cannot construct these variants directly. Callers use these
-  public constructors:
+  `..` and callers cannot construct these variants directly. Callers use the
+  following public constructors for caller-created error variants:
 
   - `Error::io_error(path: Option<PathBuf>, source: std::io::Error) -> Error`;
   - `Error::io_error_with_operation(path: Option<PathBuf>, operation: IoOperation, source: std::io::Error) -> Error`;
@@ -322,8 +323,6 @@ Non-goals:
   - `Error::type_mismatch_error(table_path: impl Into<String>, key: impl Into<String>, expected: &'static str, found: &'static str) -> Error`;
   - `Error::value_parse_error(table_path: impl Into<String>, key: impl Into<String>, message: impl Into<String>) -> Error`;
   - `Error::unknown_key_error(table_path: impl Into<String>, key: impl Into<String>) -> Error`;
-  - `Error::save_file_task_join_error(target_path: impl Into<PathBuf>, source: tokio::task::JoinError) -> Error`;
-  - `Error::save_file_cleanup_error(target_path: impl Into<PathBuf>, temporary_path: impl Into<PathBuf>, save_error: Error, cleanup_error: std::io::Error) -> Error`.
 
   The four key-error constructors already exist as `missing_key`,
   `type_mismatch`, `value_parse` and `unknown_key`. They are renamed with the
@@ -345,14 +344,16 @@ Non-goals:
   `io_error` stores `operation: None`; `io_error_with_operation` stores
   `operation: Some(operation)`; both store `target_path: None`. A caller that
   needs an `Io.target_path` sets the public field on the constructed error, as
-  shown for `Parse.path` in E4. The task-join constructor takes its target path
-  and typed source directly. The existing `From<std::io::Error>`,
+  shown for `Parse.path` in E4. The existing `From<std::io::Error>`,
   `From<toml::de::Error>` and `From<toml::ser::Error>` conversions remain
-  available and set every path and the operation to `None`. `SaveFileCleanup` is
-  normally created inside conferencier. Its public constructor accepts the
-  unboxed `save_error` and boxes it internally. Additional fields can later be
-  added without breaking construction or patterns if the existing constructors
-  can supply suitable defaults for them.
+  available and set every path and the operation to `None`. `SaveFileTaskJoin`
+  and `SaveFileCleanup` have no public constructors; `save_file` creates them
+  internally. Callers can still inspect and match these non-exhaustive variants,
+  but cannot create them.
+  Internal construction of `SaveFileCleanup` accepts its target and temporary
+  paths, the unboxed `save_error` and the cleanup error, and boxes
+  `save_error`. Public constructors for caller-created variants allow new fields
+  to be added compatibly when they can supply suitable defaults.
 
 - **E6 — Save target and temporary file.** Every error returned by `save_file`
   identifies the path passed to it, without inferring it from the temporary
@@ -669,9 +670,9 @@ stable text format, and must not be parsed by callers.
   construction with `Error::serialize_error(None, source)` or the existing
   `Error::from(source)`.
 - **Breaking:** `Error::SaveFileCleanup` is non-exhaustive and gains
-  `target_path` (E3, E5–E6). Replace direct construction with
-  `Error::save_file_cleanup_error(target_path, temporary_path, save_error,
-  cleanup_error)` and add `..` to field patterns.
+  `target_path` (E3, E5–E6). It has no public constructor because only
+  `save_file` creates this variant. Stop constructing it directly and add `..`
+  to field patterns.
 - **Breaking:** `MissingKey`, `TypeMismatch`, `ValueParse` and `UnknownKey`
   become non-exhaustive (E5). Replace direct construction with the
   `Error::missing_key_error`, `Error::type_mismatch_error`,
@@ -743,8 +744,9 @@ No existing variant is removed; changes to existing variants are listed above.
    earlier, but breaks shared and forward-compatible files by default. Rejected.
 10. **Leave error variants directly constructible.** This avoids the migration
     in E5, but adding a field would break construction and patterns that list all
-    fields. Rejected in favor of non-exhaustive variants and constructors for
-    all nine variants.
+    fields. Rejected in favor of non-exhaustive variants, public constructors
+    where downstream code needs to create errors, and internal creation of the
+    `save_file`-specific variants.
 11. **Infer the target path from `save_error` or `temporary_path`.** It would avoid
      one field in `SaveFileCleanup`, but a primary failure may carry only a
      temporary path, and temporary paths are not a public naming contract from
@@ -808,11 +810,11 @@ No existing variant is removed; changes to existing variants are listed above.
   and `load_str` assert `path: None`.
 - A doctest for synchronous file loading verifies that a parse error from
   `from_str` can be given the source file path without losing its parser source.
-- Tests outside the library crate construct all nine error variants with the
-  public constructors and inspect their fields using patterns with `..`,
-  including `table_path` on key errors.
-  Compile-fail tests outside the crate verify that direct construction and
-  patterns without `..` are rejected for all nine variants.
+- Tests outside the library crate use public constructors for caller-created
+  variants and inspect fields using patterns with `..`, including `table_path`
+  on key errors. Internal tests construct and inspect `SaveFileTaskJoin` and
+  `SaveFileCleanup`. Compile-fail tests outside the crate verify that direct
+  construction and patterns without `..` are rejected for all nine variants.
 - `cargo test -p conferencier --no-default-features --locked` and the workspace tests
   pass with the reduced Tokio features; a test or doctest runs an async method on
   a current-thread runtime.
@@ -870,11 +872,12 @@ No existing variant is removed; changes to existing variants are listed above.
   the diagnostic warning in E7). Document `table_path` as the TOML table
   diagnostic path for key errors, and `path` as a filesystem path for `Io`,
   `Parse` and `Serialize`; document `SaveFileCleanup`'s `target_path` and
-  `temporary_path` separately. Update examples to use public constructors rather
-  than directly constructing `Io` or `SaveFileCleanup`, and use `..` in patterns
-  for every non-exhaustive variant, including `MissingKey`. Use `table_path` in
-  key-error patterns and the renamed key-error constructors in all examples,
-  including the manual `ConfigTable` implementation. Document the synchronous
+  `temporary_path` separately. Use public constructors where provided; document
+  `SaveFileTaskJoin` and `SaveFileCleanup` as library-created variants that
+  callers can inspect but not construct. Use `..` in patterns for every
+  non-exhaustive variant, including `MissingKey`. Use `table_path` in key-error
+  patterns and the renamed key-error constructors in all examples, including
+  the manual `ConfigTable` implementation. Document the synchronous
   file-read example with `Error::io_error_with_operation` and
   `IoOperation::Read`.
 - Rustdoc of `ConfigStore` (`Debug`, setters including borrowed slices and typed
@@ -908,7 +911,8 @@ No existing variant is removed; changes to existing variants are listed above.
 - [Migration guide](../../conferencier/guide/migration.md): a 0.0.8 → 0.1.0-beta.1
   section covering every **Breaking** item of [Compatibility](#compatibility).
 - [Changelog](../../CHANGELOG.md): under **Unreleased**, record `IoOperation`,
-  `SaveFileTaskJoin` and new public constructors under `### Added`. Under
+  `SaveFileTaskJoin` and new public constructors for caller-created errors under
+  `### Added`; the save-specific variants have no public constructors. Under
   `### Changed`, record each compatibility break as a `**Breaking:**` entry,
   including the key-error `table_path` rename, `Io.operation`, `Io.target_path`,
   `Parse.path`, `Serialize.path` and `SaveFileCleanup.target_path` fields, other
@@ -1038,9 +1042,10 @@ No existing variant is removed; changes to existing variants are listed above.
   suffix, preserve manual error creation; downstream direct construction and
   exhaustive field patterns must migrate. New fields may be added compatibly
   in 0.1.x only when the existing constructors can supply suitable defaults.
-- **Q20 — `SaveFileCleanup` constructor signature.** Accept target and temporary
-  paths as `impl Into<PathBuf>`, accept the original failure as `Error` and box
-  it internally, and accept the cleanup failure as `std::io::Error`.
+- **Q20 — Internal `SaveFileCleanup` construction.** The internal constructor
+  accepts target and temporary paths as `impl Into<PathBuf>`, accepts the
+  original failure as `Error` and boxes it internally, and accepts the cleanup
+  failure as `std::io::Error`. No public constructor is provided.
 - **Q21 — `IoOperation` trait implementations.** Derive `Debug`, `Clone`, `Copy`,
   `PartialEq` and `Eq`. `Debug` supports the derived `Error` formatter; the
   remaining traits support ordinary copying and comparisons. Do not derive
