@@ -19,7 +19,9 @@ unknown-key handling by default, which
 [RFC-0006](../devel-0.0.x/RFC-0006_strict_unknown_keys.md) Q6 postponed until
 before 0.1.0. It also establishes the 0.x compatibility policy, the Rust 1.85
 MSRV commitment for 0.1.x, and the API-compatibility check process for beta.1
-and later 0.1.x releases.
+and later 0.1.x releases. Finally, it documents when the library can panic or
+end the process, based on a review of panics and process termination made after
+the audit.
 
 Internal fixes from the audit (A8, B1–B5) are not specified here; they change no
 public behavior beyond what the changelog records. For A8, this RFC specifies
@@ -42,6 +44,10 @@ introduced by this RFC.
   have their own variant, and every `save_file` error names the save target
   (E2–E6).
 - The library enables only the Tokio features `sync`, `rt` and `fs` (T1–T2).
+  The async file methods document that they panic outside a Tokio runtime (T3).
+- Invalid input returns an error and does not panic. The documented exceptions
+  are caller-supplied code, a missing Tokio runtime and deep nesting when
+  `toml`'s `unbounded` feature is enabled or values are built in code (P1–P2).
 - `0.1.x` compatibility starts with `0.1.0-beta.1`; breaking changes defer to
   `0.2.0`.
   Rust 1.85 remains supported throughout 0.1.x, and the post-1.0 MSRV policy
@@ -66,6 +72,7 @@ introduced by this RFC.
 - [Goals and non-goals](#goals-and-non-goals)
 - [Error messages and sources](#error-messages-and-sources)
 - [Tokio features](#tokio-features)
+- [Panics and nesting depth](#panics-and-nesting-depth)
 - [Non-finite `f32` values](#non-finite-f32-values)
 - [Setter signatures](#setter-signatures)
 - [`Debug` of `ConfigStore`](#debug-of-configstore)
@@ -113,6 +120,8 @@ Goals:
   `anyhow`, `eyre`, `tracing` and similar reporters produce clean messages.
 - Let a caller identify the file behind every file-related error.
 - Keep the Tokio feature set of the library minimal and documented.
+- Document when the library can panic or end the process; invalid input must
+  return an error.
 - Make the derive's float handling symmetric.
 - Make the setters convenient without changing what they store.
 - Avoid printing configuration values through `ConfigStore`'s `Debug`.
@@ -476,6 +485,38 @@ Non-goals:
   Adding a Tokio feature to the library later needs a changelog entry. Removing
   one is a breaking change and is recorded as such in the changelog: applications
   may depend on the feature being enabled transitively.
+- **T3 — Runtime required for file methods.** `from_file`, `load_file` and
+  `save_file` must be polled within a Tokio runtime. Outside one, Tokio panics
+  with its own message; the library does not detect a missing runtime or turn it
+  into an `Error`. Each of the three methods documents this in a `# Panics`
+  section. The in-memory methods of `ConfigStore` and `ConfigScope::from_store`
+  still need no runtime.
+
+## Panics and nesting depth
+
+- **P1 — Invalid input returns an error.** Library code does not panic on
+  invalid TOML syntax, wrong value types, out-of-range numbers, invalid datetime
+  strings or missing keys. Parsing, loading and converting values return an
+  `Error`; a panic caused by such input is a bug. The exceptions are panics in
+  code supplied by the caller: `default` expressions, which run only for a
+  missing key ([RFC-0007](../devel-0.0.x/RFC-0007_default_expressions.md) D7),
+  `ignore` expressions, conversions and iterators passed to setters, and manual
+  `ConfigScope` or `ConfigTable` implementations. A missing Tokio runtime is covered by T3 and
+  nesting depth by P2. Running out of memory is not considered.
+- **P2 — Nesting depth.** Conferencier sets no nesting limit of its own. Parsing
+  relies on the recursion limit of `toml`'s default configuration (80 levels in
+  `toml` 1.2; the number is not part of conferencier's API). Deeper inline
+  tables, arrays, dotted keys and table headers return `Error::Parse`.
+  Conferencier does not enable `toml`'s `unbounded` feature, but Cargo features
+  are additive: if another crate in the application enables it, the limit is
+  removed and deeply nested input can overflow the stack. A stack overflow
+  aborts the process and cannot be caught with `catch_unwind`. Values built in
+  code and inserted with `set_value` or `set_section` are never limited. A
+  sufficiently deep value can overflow the stack when it is serialized, cloned
+  or dropped; in a debug build with a 1 MiB main-thread stack, serialization
+  failed at several hundred levels. Applications that load untrusted files
+  should check that `toml/unbounded` is not enabled, for example with
+  `cargo tree -e features -i toml`.
 
 ## Non-finite `f32` values
 
@@ -877,6 +918,16 @@ No existing variant is removed; changes to existing variants are listed above.
     operation, while serialization involves no file. Callers would read the save
     target from `path` for one variant and from `target_path` for the others.
     Rejected in favor of `Serialize.target_path` (E6).
+17. **A nesting limit of conferencier's own** (P2). Checking the depth before
+    parsing would keep the limit even with `toml/unbounded`, but it needs a
+    separate pass over the input that repeats TOML's rules for strings and
+    comments, and it cannot cover values built in code. Rejected in favor of
+    documenting the limit and the feature.
+18. **Return an error when no Tokio runtime is running** (T3). The file methods
+    could detect a missing runtime with `tokio::runtime::Handle::try_current`.
+    A missing runtime is a programming error, not a condition to handle at run
+    time; Tokio's own APIs panic in the same situation, and every file method
+    would gain another error case. Rejected in favor of a documented panic.
 
 ## Out of scope
 
@@ -886,6 +937,8 @@ No existing variant is removed; changes to existing variants are listed above.
   dependency requirement is not.
 - A library-level redaction mechanism for values, fields or error diagnostics.
 - A blocking variant of `from_file`.
+- A nesting limit of conferencier's own and an error for a missing Tokio
+  runtime (alternatives 17 and 18).
 - Changes in beta.1 to the `MissingKey`, `TypeMismatch`, `ValueParse` and
   `UnknownKey` messages, other than the save-time integer range message in E7
   and the removal of the `non-finite float` message in F1.
@@ -960,6 +1013,11 @@ No existing variant is removed; changes to existing variants are listed above.
 - `cargo test -p conferencier --no-default-features --locked` and the workspace tests
   pass with the reduced Tokio features; a test or doctest runs an async method on
   a current-thread runtime.
+- A test passes input nested far beyond `toml`'s default limit to `from_str`
+  and `load_str`: inline tables, arrays, dotted keys and a table header. It
+  asserts `Error::Parse` without a panic, and that `load_str` leaves the store
+  unchanged (P1–P2). The workspace does not enable `toml/unbounded`, so the test
+  detects a change of the default limit in `toml`.
 - CI checks the library without dev targets, both with the default `derive`
   feature and without default features, using
   `cargo check -p conferencier --lib --locked` and
@@ -1080,6 +1138,10 @@ No existing variant is removed; changes to existing variants are listed above.
   change while the API is in alpha. Use the `table_path` parameter name in
   `ConfigTable` and its examples, and describe it as the table path passed to
   the key errors' `table_path`, not as a section.
+- Rustdoc of `ConfigStore`: a `# Panics` section on `from_file`, `load_file`
+  and `save_file` (T3); in the type-level documentation, the promise that
+  invalid input returns an error, with its exceptions (P1), and the nesting
+  depth note including `toml/unbounded` and values built in code (P2).
 - Every remaining mention of the key errors' `path` field, or of a table path
   under that name, in rustdoc and the guide uses `table_path`, including the
   [nested tables guide](../../conferencier/guide/tables.md) and the
@@ -1108,6 +1170,12 @@ No existing variant is removed; changes to existing variants are listed above.
   on Rust 1.85.
   State that major upgrades of public `toml` or `tokio` types are breaking
   changes under the 0.x policy.
+- [`SECURITY.md`](../../SECURITY.md): in "Scope", state that the documented
+  exceptions of P1, T3 and P2 are not vulnerabilities in conferencier: panics in
+  caller-supplied code, file methods polled outside a Tokio runtime, and stack
+  overflows from deep nesting when `toml/unbounded` is enabled or values are
+  built in code. A panic or stack overflow from untrusted TOML with the default
+  `toml` features remains in scope.
 - [`docs/BACKLOG.md`](../BACKLOG.md): point the beta release step and stable
   0.1.0 exit criteria to the packaged-consumer gate; keep its procedure in
   `CONTRIBUTING.md` rather than duplicating the instructions.
@@ -1116,7 +1184,9 @@ No existing variant is removed; changes to existing variants are listed above.
   line-oriented opt-in helper from E1 and the warning in E7 that diagnostics
   are not generally redacted; the custom scope `Debug` example and synchronous
   file-loading example with path context in
-  [concepts](../../conferencier/guide/concepts.md); the I/O error construction
+  [concepts](../../conferencier/guide/concepts.md), whose section on reading a
+  file before the runtime starts also states that the async file methods panic
+  outside a Tokio runtime (T3); the I/O error construction
   example in
   [concepts](../../conferencier/guide/concepts.md#reading-a-file-before-the-runtime-starts);
   the `f32` rules in [derive](../../conferencier/guide/derive.md#value-conversion),
