@@ -1041,12 +1041,12 @@ No existing variant is removed; changes to existing variants are listed above.
 - Rustdoc of `ConfigStore` (`Debug`, setters including borrowed slices, typed
   empty string arrays, and the guarantee that caller-provided conversions and
   iteration complete before the write lock is acquired; `from_file`,
-  `load_file` and the `# Errors` section of `save_file`, which describes each
-  error with its `IoOperation`, `path` and `target_path`, `SaveFileTaskJoin`
-  and `Serialize.target_path`), the crate-level note about Tokio features (T2)
-  in both crate-level documentation variants, the guide overview used with the
-  default `derive` feature and the inline text in `lib.rs` used without it,
-  and `ConfigScope`
+  `load_file` and the `# Errors` section of `save_file`, which describes errors
+  with their `IoOperation`, `path` and `target_path`, including
+  `SaveFileTaskJoin`, `Serialize.target_path` and `SaveFileCleanup.target_path`),
+  the crate-level note about Tokio features (T2) in both crate-level
+  documentation variants, the guide overview used with the default `derive`
+  feature and the inline text in `lib.rs` used without it, and `ConfigScope`
   and `ConfigTable` (manual
   implementations remain supported; their required signatures, bounds and
   documented behavior are stable, and neither trait gains methods, throughout
@@ -1095,7 +1095,8 @@ No existing variant is removed; changes to existing variants are listed above.
 - [Migration guide](../../conferencier/guide/migration.md): a 0.0.8 → 0.1.0-beta.1
   section covering every **Breaking** item of [Compatibility](#compatibility).
   Also list its non-breaking behavior changes: non-finite `f32` values now load,
-  save-time `u64`/`usize` range messages omit the value, and `Display` wording
+  so applications that relied on their rejection must validate them explicitly;
+  save-time `u64`/`usize` range messages omit the value; and `Display` wording
   is no longer stable.
   Advise callers not to parse error messages or rely on their exact wording,
   and point them to the structured fields and sources. Separately from the
