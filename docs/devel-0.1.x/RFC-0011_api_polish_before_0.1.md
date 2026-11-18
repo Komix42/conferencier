@@ -136,14 +136,28 @@ Non-goals:
 
   ```rust,ignore
   pub enum IoOperation {
+      /// Read a configuration file.
       Read,
+      /// Inspect and validate the save destination before writing.
       InspectTarget,
+      /// Create a new temporary file for the save.
       CreateTemporary,
+      /// Prepare the temporary file before writing, if the platform requires it.
       PrepareTemporary,
+      /// Write the serialized configuration to the temporary file.
       WriteTemporary,
+      /// Replace the save destination with the completed temporary file.
       ReplaceTarget,
   }
   ```
+
+  These names and their high-level meanings are part of the stable public API.
+  They identify phases of a file operation, not individual system calls or
+  guarantees that a phase performs a system call on every platform. For example,
+  `PrepareTemporary` includes establishing the temporary file's permissions
+  before writing where required; it may do nothing on another platform. The
+  non-exhaustive enum may gain variants, but existing variants will not be
+  renamed or repurposed in 0.1.x.
 
   `None` means that the caller or the library operation did not supply an
   operation. Conferencier fills the operation for every file operation performed
@@ -704,6 +718,11 @@ This RFC changes behavior that users can observe. It is released in
   completion of the planned work, successful CI and package checks, reviewed
   API-compatibility results, example-app validation, complete migration
   documentation and no known pending breaking changes.
+- **Q12 — `IoOperation` names and meanings.** Keep the six proposed variants
+  and define them as stable high-level operation phases, not as specific system
+  calls; they do not promise a particular platform-specific implementation.
+  The non-exhaustive enum can gain new variants, but existing names and meanings
+  are not changed in 0.1.x.
 
 ## Open questions
 
