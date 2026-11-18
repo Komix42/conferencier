@@ -102,6 +102,26 @@ Non-goals:
   `Display`. This applies to `Io`, `Parse`, `Serialize` and `SaveFileCleanup`.
   The wrapped errors remain public fields, so callers can still match on them.
 
+  Applications that want the full chain can opt in to formatting it. The
+  troubleshooting guide includes a small helper with no additional dependency:
+
+  ```rust,ignore
+  fn display_error_chain(error: &dyn std::error::Error) -> String {
+      let mut messages = vec![error.to_string()];
+      let mut source = error.source();
+      while let Some(cause) = source {
+          messages.push(cause.to_string());
+          source = cause.source();
+      }
+      messages.join(": ")
+  }
+  ```
+
+  Example applications use the helper where the underlying cause is useful.
+  Formatting a complete chain is an explicit application choice: as noted in E7,
+  a source may contain sensitive input. Conferencier does not add a library-level
+  error-chain formatting helper.
+
 - **E2 — Path rendering and I/O operation.** Where a message names a file, the
   path is rendered with `Path::display` and enclosed in double quotes, without
   escaping. The exact path is available in the variant's `path` field; the
@@ -367,8 +387,8 @@ This RFC changes behavior that users can observe. It is released in
    with `{}` would stay informative, which helps applications that print errors
    without a reporter, such as the example applications. It hides the cause from
    reporters, `tracing` and `anyhow::Error::chain`, and it is the less common
-   convention for wrapping errors. Rejected in favor of E1, but see
-   [Q1](#open-questions).
+   convention for wrapping errors. Rejected in favor of E1; see
+   [resolved Q1](#resolved-questions).
 2. **Keep only the path on `Error::Io`** (A2). The path and `io::ErrorKind`
    identify the file and low-level error, but the path of a temporary file alone
    does not tell the caller whether creation, preparation or writing failed.
@@ -412,6 +432,8 @@ This RFC changes behavior that users can observe. It is released in
   and assert that `source()` returns the wrapped error for each wrapping variant.
 - A test asserts that no wrapping variant's `Display` contains the message of its
   source.
+- A doctest for `display_error_chain` verifies that it includes the outer error
+  and every source in order.
 - Tests in `store.rs` assert the operation and the directly affected path for
   target inspection, temporary-file creation, preparation, writing and
   replacement. Each public `save_file` I/O path has an explicit operation.
@@ -448,9 +470,9 @@ This RFC changes behavior that users can observe. It is released in
   I/O example and the diagnostic warning in E7), `ConfigStore` (`Debug`, setters,
   `from_file`, `load_file`) and the crate-level note about Tokio features (T2).
 - Guide: printing errors with their source chain in
-  [troubleshooting](../../conferencier/guide/troubleshooting.md), alongside the
-  warning in E7; the custom scope `Debug` example and synchronous file-loading
-  example with path context in
+  [troubleshooting](../../conferencier/guide/troubleshooting.md), including the
+  opt-in helper from E1 and the warning in E7; the custom scope `Debug` example
+  and synchronous file-loading example with path context in
   [concepts](../../conferencier/guide/concepts.md); the I/O error construction
   example in
   [concepts](../../conferencier/guide/concepts.md#reading-a-file-before-the-runtime-starts);
@@ -465,6 +487,11 @@ This RFC changes behavior that users can observe. It is released in
 
 ## Resolved questions
 
+- **Q1 — Cause in `Display` or in `source()`?** Keep E1: wrapped errors expose
+  their cause through `source()` without duplicating it in `Display`. The
+  troubleshooting guide documents a small opt-in helper for formatting the full
+  chain, and the example applications use it where the cause is useful. E7 warns
+  that printing a full chain may disclose sensitive input.
 - **Q2 — Operation in `Error::Io`.** The path alone is ambiguous for save failures
   involving a temporary file. E2 adds an optional, stable `IoOperation`; errors
   from callers can leave it as `None`. E6 separately retains the save target in
@@ -486,10 +513,6 @@ This RFC changes behavior that users can observe. It is released in
 
 ## Open questions
 
-- **Q1 — Cause in `Display` or in `source()`?** E1 follows the convention of the
-  Rust error-handling project group and works best with reporters, but an application printing
-  `{}` sees only `failed to read file "config.toml"` without the reason.
-  Alternative 1 is the opposite trade-off. Which side should conferencier take?
 - **Q3 — Debug content.** Are top-level keys enough, or should `Debug` also list
   nested table names, or print only the number of sections?
 - **Q4 — Strict by default.** Is the decision of K1 (keep lenient) acceptable for
