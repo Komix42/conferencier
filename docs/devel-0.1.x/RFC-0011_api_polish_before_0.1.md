@@ -952,7 +952,8 @@ No existing variant is removed; changes to existing variants are listed above.
 - **Q11 — Beta policy and stable exit criteria.** Treat beta.1 as the first
   release covered by the 0.1.x compatibility commitment: each subsequent
   pre-release and release must remain backward compatible with the immediately
-  preceding published 0.1.x version; defer any necessary break to 0.2.0.
+  preceding published 0.1.x version. The beta label does not suspend this
+  guarantee: a breaking change discovered during beta is deferred to 0.2.0.
   Publish stable 0.1.0 only after the release gates in the
   [backlog](../BACKLOG.md#stable-010-exit-criteria) are met, including
   completion of the planned work, successful CI and package checks, reviewed
