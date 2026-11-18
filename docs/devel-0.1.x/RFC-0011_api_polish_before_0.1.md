@@ -50,6 +50,7 @@ public behavior beyond what the changelog records.
 - [Setter signatures](#setter-signatures)
 - [`Debug` of `ConfigStore`](#debug-of-configstore)
 - [Unknown keys by default](#unknown-keys-by-default)
+- [Trait evolution](#trait-evolution)
 - [Compatibility](#compatibility)
 - [Alternatives considered](#alternatives-considered)
 - [Out of scope](#out-of-scope)
@@ -394,6 +395,20 @@ their sources, including parse errors produced before the scope is created.
   across scopes remains a separate
   [backlog idea](../BACKLOG.md#store-and-errors).
 
+## Trait evolution
+
+`ConfigScope` and `ConfigTable` remain public, implementable traits. Manual
+implementations are supported; neither trait is sealed.
+
+The required method signatures, bounds and documented behavior of both traits
+are part of the stable 0.1 API. A 0.1.x release must not add a new required
+trait method or otherwise require existing manual implementations to change.
+Future additive methods may be added only with a default implementation that
+provides meaningful behavior for existing implementations. If no such default
+fits the contract, expose the capability through an extension trait or a
+standalone function instead. A new required method or a change to an existing
+required method is reserved for a breaking release.
+
 ## Compatibility
 
 This RFC changes behavior that users can observe. It is released in
@@ -606,6 +621,13 @@ This RFC changes behavior that users can observe. It is released in
   public `path` field, or by rebuilding it with `Error::parse_error`. This is
   sufficient for the documented use case, so no additional `with_path` helper
   is added.
+- **Q8 — Evolution of `ConfigScope` and `ConfigTable`.** Keep both traits open
+  for manual implementations. Their existing required method signatures, bounds
+  and documented behavior are stable in 0.1.x; do not add a required method in
+  that line. Additive methods need a meaningful default implementation, or the
+  capability must be exposed through an extension trait or standalone function.
+  Changes that require manual implementors to update are reserved for a breaking
+  release.
 
 ## Open questions
 
