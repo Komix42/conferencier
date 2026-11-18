@@ -107,6 +107,13 @@ found several places where the public surface is inconvenient or surprising:
 All of these change observable behavior and some of them break existing code.
 They are cheapest to change now, before the first beta of the 0.1.x line.
 
+The post-audit review of panics and process termination found that malformed
+configuration input is handled as an error with the default TOML features, but
+also identified important boundaries: the async file methods require a Tokio
+runtime, caller-supplied code can panic, and deeply nested input can overflow
+the stack if another dependency enables `toml/unbounded`. These boundaries
+need an explicit contract before the beta.
+
 The beta also needs clear expectations for users who adopt it: a compatibility
 boundary for 0.x releases, a 0.1.x MSRV commitment, and checks that cover the
 public API of both crates. Making the error variants extensible now avoids
@@ -489,8 +496,9 @@ Non-goals:
   `save_file` must be polled within a Tokio runtime. Outside one, Tokio panics
   with its own message; the library does not detect a missing runtime or turn it
   into an `Error`. Each of the three methods documents this in a `# Panics`
-  section. The in-memory methods of `ConfigStore` and `ConfigScope::from_store`
-  still need no runtime.
+  section. These are the only APIs that require a runtime: the other
+  asynchronous in-memory APIs, including `ConfigScope::load` and
+  `ConfigScope::save`, and `ConfigScope::from_store` need no runtime.
 
 ## Panics and nesting depth
 
@@ -501,8 +509,9 @@ Non-goals:
   code supplied by the caller: `default` expressions, which run only for a
   missing key ([RFC-0007](../devel-0.0.x/RFC-0007_default_expressions.md) D7),
   `ignore` expressions, conversions and iterators passed to setters, and manual
-  `ConfigScope` or `ConfigTable` implementations. A missing Tokio runtime is covered by T3 and
-  nesting depth by P2. Running out of memory is not considered.
+  `ConfigScope` or `ConfigTable` implementations. A missing Tokio runtime is
+  covered by T3 and nesting depth by P2. Running out of memory is not
+  considered.
 - **P2 — Nesting depth.** Conferencier sets no nesting limit of its own. Parsing
   relies on the recursion limit of `toml`'s default configuration (80 levels in
   `toml` 1.2; the number is not part of conferencier's API). Deeper inline
@@ -774,6 +783,16 @@ trait is reserved for the next breaking release as defined above.
 This RFC changes behavior that users can observe. It is released in
 0.1.0-beta.1, the first release of the 0.1.x line.
 
+The panic contract in P1 is part of the 0.1.x compatibility commitment:
+library-handled invalid input must return an error rather than panic.
+Exceptions are caller-supplied code and the cases documented in T3 and P2.
+The three file methods' Tokio runtime requirement and their panic outside a
+runtime are intentional documented behavior throughout 0.1.x. P2 does not
+guarantee a particular recursion-limit value; it documents the behavior of
+`toml`'s default features and the risk when `toml/unbounded` or deeply nested
+programmatically constructed values are used. No source migration is required
+for T3, P1 or P2; the migration guide records these operational caveats.
+
 `Error`'s `Display` retains the diagnostic context and path escaping specified
 in E2–E3 for library-generated errors and errors built with the public
 constructors, but its exact wording and formatting, including the key-error
@@ -958,6 +977,9 @@ No existing variant is removed; changes to existing variants are listed above.
 - Tests for `Error::io_error` and `Error::io_error_with_operation` assert the
   supplied path and I/O source, that the former stores `operation: None`, that
   the latter stores `Some(operation)`, and that both leave `target_path: None`.
+- Tests for `Error::parse_error` and `Error::serialize_error` assert that the
+  supplied path is stored in `Parse.path` and `Serialize.target_path`,
+  respectively, and that each constructor preserves its source.
 - The `Io` display tests cover pathless operations with and without
   `target_path`, including `InspectTarget` and `ReplaceTarget` using the known
   target path, temporary-file operations including that target as context, and
@@ -999,7 +1021,8 @@ No existing variant is removed; changes to existing variants are listed above.
   repeated by `source()`.
 - Tests of `from_file` and `load_file` with invalid TOML assert
   `Error::Parse { path: Some(p), .. }` with the read path; tests of `from_str`
-  and `load_str` assert `path: None`.
+  and `load_str` assert `path: None`. A test of `str::parse::<ConfigStore>()`
+  also asserts `path: None`.
 - A doctest for synchronous file loading verifies that a parse error from
   `from_str` can be given the source file path without losing its parser source.
 - Tests outside the library crate use public constructors for caller-created
@@ -1016,8 +1039,9 @@ No existing variant is removed; changes to existing variants are listed above.
 - A test passes input nested far beyond `toml`'s default limit to `from_str`
   and `load_str`: inline tables, arrays, dotted keys and a table header. It
   asserts `Error::Parse` without a panic, and that `load_str` leaves the store
-  unchanged (P1–P2). The workspace does not enable `toml/unbounded`, so the test
-  detects a change of the default limit in `toml`.
+  unchanged (P1–P2). The test does not pin the exact recursion-limit value; it
+  detects if these inputs become accepted with the workspace's default TOML
+  features. The workspace does not enable `toml/unbounded`.
 - CI checks the library without dev targets, both with the default `derive`
   feature and without default features, using
   `cargo check -p conferencier --lib --locked` and
@@ -1124,9 +1148,12 @@ No existing variant is removed; changes to existing variants are listed above.
   `load_file` and the `# Errors` section of `save_file`, which describes errors
   with their `IoOperation`, `path` and `target_path`, including
   `SaveFileTaskJoin`, `Serialize.target_path` and `SaveFileCleanup.target_path`),
-  the crate-level note about Tokio features (T2) in both crate-level
-  documentation variants, the guide overview used with the default `derive`
-  feature and the inline text in `lib.rs` used without it. Keep the
+  and `# Panics` sections for all three async file methods (T3). Add the P2
+  nesting-depth note to the `ConfigStore` type-level documentation. Add the P1
+  invalid-input guarantee and its exceptions to both crate-level documentation
+  variants: the guide overview with the default `derive` feature and the inline
+  text in `lib.rs` without it. The same crate-level documentation states the
+  Tokio feature promise (T2). Keep the
   `crate::guide::migration` intra-doc link in `overview.md` with `derive`, and
   link from `lib.rs` without `derive` to the versioned beta guide at
   `https://docs.rs/conferencier/0.1.0-beta.1/conferencier/guide/migration/index.html`.
@@ -1138,10 +1165,6 @@ No existing variant is removed; changes to existing variants are listed above.
   change while the API is in alpha. Use the `table_path` parameter name in
   `ConfigTable` and its examples, and describe it as the table path passed to
   the key errors' `table_path`, not as a section.
-- Rustdoc of `ConfigStore`: a `# Panics` section on `from_file`, `load_file`
-  and `save_file` (T3); in the type-level documentation, the promise that
-  invalid input returns an error, with its exceptions (P1), and the nesting
-  depth note including `toml/unbounded` and values built in code (P2).
 - Every remaining mention of the key errors' `path` field, or of a table path
   under that name, in rustdoc and the guide uses `table_path`, including the
   [nested tables guide](../../conferencier/guide/tables.md) and the
@@ -1175,7 +1198,8 @@ No existing variant is removed; changes to existing variants are listed above.
   caller-supplied code, file methods polled outside a Tokio runtime, and stack
   overflows from deep nesting when `toml/unbounded` is enabled or values are
   built in code. A panic or stack overflow from untrusted TOML with the default
-  `toml` features remains in scope.
+  `toml` features remains in scope. Update the supported-version table from
+  `latest 0.0.x release` to the latest `0.1.x` version, including pre-releases.
 - [`docs/BACKLOG.md`](../BACKLOG.md): point the beta release step and stable
   0.1.0 exit criteria to the packaged-consumer gate; keep its procedure in
   `CONTRIBUTING.md` rather than duplicating the instructions.
@@ -1203,6 +1227,10 @@ No existing variant is removed; changes to existing variants are listed above.
   source, or return the error from `main`.
 - [Migration guide](../../conferencier/guide/migration.md): a 0.0.8 → 0.1.0-beta.1
   section covering every **Breaking** item of [Compatibility](#compatibility).
+  In a separate note, explain that the runtime requirement and the P1/P2 input
+  limits are existing documented behavior, not source migrations; mention that
+  only the three file methods require a Tokio runtime and that enabling
+  `toml/unbounded` can make deeply nested untrusted input terminate the process.
   Explicitly highlight the key-error constructor renames to the `_error`
   suffix and the `path` to `table_path` naming of key-error fields and
   constructor arguments. Include a before-and-after manual `ConfigTable`
