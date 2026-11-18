@@ -281,10 +281,10 @@ Non-goals:
   - `Error::io_error_with_operation(path: Option<PathBuf>, operation: IoOperation, source: std::io::Error) -> Error`;
   - `Error::parse_error(path: Option<PathBuf>, source: toml::de::Error) -> Error`;
   - `Error::serialize_error(path: Option<PathBuf>, source: toml::ser::Error) -> Error`;
-  - `Error::missing_key(path: impl Into<String>, key: impl Into<String>) -> Error`;
-  - `Error::type_mismatch(path: impl Into<String>, key: impl Into<String>, expected: &'static str, found: &'static str) -> Error`;
-  - `Error::value_parse(path: impl Into<String>, key: impl Into<String>, message: impl Into<String>) -> Error`;
-  - `Error::unknown_key(path: impl Into<String>, key: impl Into<String>) -> Error`;
+  - `Error::missing_key_error(path: impl Into<String>, key: impl Into<String>) -> Error`;
+  - `Error::type_mismatch_error(path: impl Into<String>, key: impl Into<String>, expected: &'static str, found: &'static str) -> Error`;
+  - `Error::value_parse_error(path: impl Into<String>, key: impl Into<String>, message: impl Into<String>) -> Error`;
+  - `Error::unknown_key_error(path: impl Into<String>, key: impl Into<String>) -> Error`;
   - `Error::save_file_task_join_error(target_path: impl Into<PathBuf>, source: tokio::task::JoinError) -> Error`;
   - `Error::save_file_cleanup_error(target_path: impl Into<PathBuf>, temporary_path: impl Into<PathBuf>, save_error: Error, cleanup_error: std::io::Error) -> Error`.
 
@@ -576,8 +576,9 @@ This RFC changes behavior that users can observe. It is released in
   cleanup_error)` and add `..` to field patterns.
 - **Breaking:** `MissingKey`, `TypeMismatch`, `ValueParse` and `UnknownKey`
   become non-exhaustive (E5). Replace direct construction with their existing
-  `Error::missing_key`, `Error::type_mismatch`, `Error::value_parse` and
-  `Error::unknown_key` constructors. Add `..` to field patterns.
+  `Error::missing_key_error`, `Error::type_mismatch_error`,
+  `Error::value_parse_error` and `Error::unknown_key_error` constructors. Add
+  `..` to field patterns.
 - **Breaking:** the library no longer enables Tokio's `macros` and `rt-multi-thread`
   features (T1). An application that used `#[tokio::main]`, `#[tokio::test]` or the
   multi-threaded runtime without enabling these features itself fails to compile
