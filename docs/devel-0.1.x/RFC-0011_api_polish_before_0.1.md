@@ -51,6 +51,7 @@ public behavior beyond what the changelog records.
 - [`Debug` of `ConfigStore`](#debug-of-configstore)
 - [Unknown keys by default](#unknown-keys-by-default)
 - [Versioning and public dependencies](#versioning-and-public-dependencies)
+- [Public API checks](#public-api-checks)
 - [Trait evolution](#trait-evolution)
 - [Compatibility](#compatibility)
 - [Alternatives considered](#alternatives-considered)
@@ -417,6 +418,32 @@ migration note. Compatible upgrades within the same dependency major version
 remain possible. This policy does not promise simultaneous support for multiple
 major versions of either dependency.
 
+## Public API checks
+
+After implementing this RFC and before publishing `0.1.0-beta.1`, run
+`cargo-semver-checks` against the published `0.0.8` baseline for both
+`conferencier` and `conferencier-derive`, treating the candidate as a compatible
+patch release for the purpose of this comparison:
+
+```sh
+cargo semver-checks --package conferencier --baseline-version 0.0.8 --release-type patch
+cargo semver-checks --package conferencier-derive --baseline-version 0.0.8 --release-type patch
+```
+
+This comparison is an audit, not a passing CI gate: the transition to 0.1
+intentionally contains breaking changes. Review every reported break against
+the [Compatibility](#compatibility) section and the migration guide; investigate
+and document any break not already accounted for. The checker analyzes Rust
+item APIs, not behavioral compatibility or changes to the derive attribute
+language, so those still need manual review.
+
+After the `0.1.0-beta.1` release tag exists, add a CI check for both published
+crates using `cargo-semver-checks`. Pin the baseline to that tag rather than
+relying on the default crates.io baseline, which excludes pre-releases. Set the
+release type to `patch`, so any later 0.1.x candidate is checked against the
+backward-compatibility policy even while the current version is a pre-release.
+Keep this check as a release gate for subsequent 0.1.x versions.
+
 ## Trait evolution
 
 `ConfigScope` and `ConfigTable` remain public, implementable traits. Manual
@@ -588,6 +615,11 @@ This RFC changes behavior that users can observe. It is released in
   test uses a bounded wait and releases the lock even on timeout, so a regression
   cannot leave the test blocked indefinitely.
 - The guide's custom scope `Debug` example is tested as a doctest.
+- Before publishing `0.1.0-beta.1`, compare both public crates with 0.0.8 using
+  the commands in [Public API checks](#public-api-checks), and reconcile all
+  reported breaks with the compatibility and migration documentation. Once the
+  beta.1 release tag exists, CI checks both crates against that tag as the
+  baseline for subsequent 0.1.x changes.
 
 ## Documentation deliverables
 
@@ -658,6 +690,12 @@ This RFC changes behavior that users can observe. It is released in
   `tokio` change types exposed by the public API, upgrading either is a breaking
   change under this policy; compatible upgrades within a dependency major remain
   allowed.
+- **Q10 — Public API compatibility checks.** Before publishing beta.1, compare
+  both published crates against 0.0.8 with `cargo-semver-checks` in patch mode
+  and reconcile its findings with the migration documentation. After beta.1 is
+  tagged, use that tag as the fixed baseline for a CI compatibility gate on
+  subsequent 0.1.x changes. Keep manual review for behavior and derive attribute
+  syntax, which the tool does not check.
 
 ## Open questions
 
