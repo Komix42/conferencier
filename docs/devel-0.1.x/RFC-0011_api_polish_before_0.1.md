@@ -50,6 +50,7 @@ public behavior beyond what the changelog records.
 - [Setter signatures](#setter-signatures)
 - [`Debug` of `ConfigStore`](#debug-of-configstore)
 - [Unknown keys by default](#unknown-keys-by-default)
+- [Versioning and public dependencies](#versioning-and-public-dependencies)
 - [Trait evolution](#trait-evolution)
 - [Compatibility](#compatibility)
 - [Alternatives considered](#alternatives-considered)
@@ -395,6 +396,27 @@ their sources, including parse errors produced before the scope is created.
   across scopes remains a separate
   [backlog idea](../BACKLOG.md#store-and-errors).
 
+## Versioning and public dependencies
+
+For `0.x.y` releases, conferencier adopts a stricter compatibility policy than
+the flexibility SemVer permits during initial development: treat the minor
+version as the compatibility boundary. A patch release within `0.x` may contain
+bug fixes and additive changes that preserve backward compatibility. A breaking
+change requires the next minor release, for example `0.2.0` after `0.1.x`. This
+policy also applies between pre-releases of the same minor version; for example,
+`0.1.0-beta.2` must remain backward compatible with `0.1.0-beta.1`. Starting
+with `1.0.0`, the project follows SemVer.
+
+The public API exposes types from both `toml` and `tokio`: `toml` is re-exported
+from the crate root, its values and errors appear in public interfaces, and
+[`SharedScope`](crate::SharedScope) is an alias for
+`Arc<tokio::sync::RwLock<T>>`. Changing the major version of either dependency
+can change these public types and is therefore a breaking change for
+conferencier. Such an upgrade requires the next `0.x` minor release and a
+migration note. Compatible upgrades within the same dependency major version
+remain possible. This policy does not promise simultaneous support for multiple
+major versions of either dependency.
+
 ## Trait evolution
 
 `ConfigScope` and `ConfigTable` remain public, implementable traits. Manual
@@ -407,7 +429,7 @@ Future additive methods may be added only with a default implementation that
 provides meaningful behavior for existing implementations. If no such default
 fits the contract, expose the capability through an extension trait or a
 standalone function instead. A new required method or a change to an existing
-required method is reserved for a breaking release.
+required method is reserved for the next breaking release as defined above.
 
 ## Compatibility
 
@@ -628,6 +650,14 @@ This RFC changes behavior that users can observe. It is released in
   capability must be exposed through an extension trait or standalone function.
   Changes that require manual implementors to update are reserved for a breaking
   release.
+- **Q9 — Compatibility policy for `0.x` and public dependency majors.** Treat
+  the minor version as the compatibility boundary throughout `0.x`: patch
+  releases and pre-releases within the same minor preserve backward
+  compatibility, and a breaking change requires the next minor (for example
+  `0.2.0`). After `1.0.0`, follow SemVer. Since major versions of `toml` and
+  `tokio` change types exposed by the public API, upgrading either is a breaking
+  change under this policy; compatible upgrades within a dependency major remain
+  allowed.
 
 ## Open questions
 
