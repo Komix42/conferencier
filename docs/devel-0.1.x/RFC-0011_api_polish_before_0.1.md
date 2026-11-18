@@ -891,11 +891,15 @@ No existing variant is removed; changes to existing variants are listed above.
 - Tests preserve `From<std::io::Error>`, `From<toml::de::Error>` and
   `From<toml::ser::Error>` and assert that each conversion leaves the available
   path, operation and save target unset.
+- Tests for `Error::io_error` and `Error::io_error_with_operation` assert the
+  supplied path and I/O source, that the former stores `operation: None`, that
+  the latter stores `Some(operation)`, and that both leave `target_path: None`.
 - The `Io` display tests cover pathless operations with and without
   `target_path`, including `InspectTarget` and `ReplaceTarget` using the known
-  target path, and temporary-file operations including that target as context.
-  They also cover `operation: None` with both `path` and `target_path` present,
-  verifying the first-matching-row precedence in E3.
+  target path, temporary-file operations including that target as context, and
+  `Read` never displaying `target_path`. They also cover `operation: None` with
+  both `path` and `target_path` present, verifying the first-matching-row
+  precedence in E3.
 - Display tests use synthetic paths containing quotes, backslashes, newline,
   carriage return, a terminal escape character and Unicode line and paragraph
   separators. They verify E2's escaping for `Io`, `Parse`, `Serialize`,
@@ -935,8 +939,11 @@ No existing variant is removed; changes to existing variants are listed above.
 - Tests outside the library crate use public constructors for caller-created
   variants and inspect fields using patterns with `..`, including `table_path`
   on key errors. Internal tests construct and inspect `SaveFileTaskJoin` and
-  `SaveFileCleanup`. Compile-fail tests outside the crate verify that direct
-  construction and patterns without `..` are rejected for all nine variants.
+  `SaveFileCleanup`. Compile-fail doctests in `error.rs` verify that external
+  callers cannot directly construct or exhaustively pattern-match any of the
+  nine non-exhaustive variants. Keep each variant and each restriction in a
+  separate doctest so one compile error cannot mask missing coverage. These
+  doctests run with the core crate's tests, including the MSRV job.
 - `cargo test -p conferencier --no-default-features --locked` and the workspace tests
   pass with the reduced Tokio features; a test or doctest runs an async method on
   a current-thread runtime.
