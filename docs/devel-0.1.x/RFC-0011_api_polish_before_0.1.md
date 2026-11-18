@@ -1090,7 +1090,8 @@ No existing variant is removed; changes to existing variants are listed above.
   to a finite `f32`. Vector range errors include the element index. A round trip
   of non-finite scalar and vector `f32` values through save and load succeeds.
   It checks infinities with equality and reloaded NaN values with `is_nan()`.
-- Save tests for out-of-range `u64` and `usize` values assert the exact generic
+- Save tests for out-of-range `u64` values and, on targets where `usize` can
+  exceed `i64::MAX`, out-of-range `usize` values assert the exact generic
   `ValueParse` message and that it does not contain the numeric value; vector
   errors still identify the element index.
 - Setter tests pass `&str`, `String`, arrays of `&str` and iterators, including
@@ -1126,8 +1127,9 @@ No existing variant is removed; changes to existing variants are listed above.
   all three consumers with Rust 1.85. The first enables default features and
   derives a `ConfigScope` or `ConfigTable` using the crate-root re-export. The
   second depends on `conferencier` with default features disabled and compiles
-  a manual `ConfigScope` or `ConfigTable` implementation. The third disables
-  the core crate's default features, pins both dependencies to the same exact
+  both a manual `ConfigScope` implementation and a manual `ConfigTable`
+  implementation. The third disables the core crate's default features, pins
+  both dependencies to the same exact
   candidate version, imports both macros directly from `conferencier-derive`,
   and derives a `ConfigScope` and `ConfigTable`. All three builds must succeed.
   This is a release gate for every 0.1.x publication, not a recurring CI job
@@ -1437,13 +1439,13 @@ No existing variant is removed; changes to existing variants are listed above.
 - **Q25 — External package-consumer check.** Before publishing each 0.1.x
   pre-release or release, compile three separate downstream consumers against
   the candidate packaged crate archives on Rust 1.85:
-  one using the re-exported derive with default features, one using manual trait
-  implementations with default features disabled, and one using direct imports
-  of both macros with the core crate's default features disabled and both
-  dependencies pinned to the same exact candidate version. Resolve the
-  candidate archives from an isolated local source, not workspace package
-  paths. Treat this as a release gate, not a recurring CI job for every pull
-  request.
+  one using the re-exported derive with default features, one using manual
+  implementations of both `ConfigScope` and `ConfigTable` with default features
+  disabled, and one using direct imports of both macros with the core crate's
+  default features disabled and both dependencies pinned to the same exact
+  candidate version. Resolve the candidate archives from an isolated local
+  source, not workspace package paths. Treat this as a release gate, not a
+  recurring CI job for every pull request.
 
 ## Open questions
 
