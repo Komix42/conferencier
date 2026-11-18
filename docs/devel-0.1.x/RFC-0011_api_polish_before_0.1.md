@@ -751,6 +751,10 @@ This RFC changes behavior that users can observe. It is released in
 - **Q16 — I/O constructor path type.** Keep `Option<PathBuf>` for the optional
   path arguments. It lets callers use an unambiguous `None`; a generic inner
   `impl Into<PathBuf>` would require type annotation for pathless calls.
+- **Q17 — Mutability of `Parse.path`.** Keep the public, mutable `path` field
+  so callers can attach diagnostic context after reading a file synchronously.
+  The field holds context, not an invariant; no wrapper type or `with_path`
+  helper is added.
 
 ## Open questions
 
