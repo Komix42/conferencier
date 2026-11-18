@@ -41,7 +41,10 @@ public behavior beyond what the changelog records.
   will be set before `1.0.0` (Versioning, Q9, Q18).
 - API compatibility is audited for both crates against `0.0.8` before beta.1,
   then against the preceding published 0.1.x release; `conferencier` is checked
-  with and without default features (Q10).
+  with and without default features (Q10). The crates are released in lockstep
+  with an exact matching dependency; derive syntax and generated behavior are
+  covered by the compatibility policy, while `__private` is not a stable API
+  (Versioning, Q9–Q10).
 - `f32` fields accept infinity and NaN like `f64` fields (F1–F2).
 - `set_string` accepts `impl Into<String>`, the vector setters accept compatible
   iterators (S1–S3).
@@ -485,6 +488,27 @@ migration note. Compatible upgrades within the same dependency major version
 remain possible. This policy does not promise simultaneous support for multiple
 major versions of either dependency.
 
+`conferencier` and `conferencier-derive` are released in lockstep with the same
+version, including the same pre-release identifier. The `conferencier` crate
+depends on the matching `conferencier-derive` version through an exact version
+requirement, not a compatible range. This keeps the derive macro paired with
+the library support code for which it generates calls.
+
+The derive compatibility contract includes the accepted `#[derive(...)]` and
+`#[confer(...)]` syntax and the behavior of the generated code. Removing or
+changing the meaning of an input that worked in an earlier 0.1.x release, or
+changing generated behavior in a way that requires downstream changes, is a
+breaking change under this policy. New syntax and behavior may be added when
+they preserve existing inputs and behavior.
+
+The `#[doc(hidden)]` `conferencier::__private` module is implementation support
+for generated code, not an independently stable public API. Its contents may
+change within 0.1.x when coordinated with the matching derive release; every
+published derive macro must generate code compatible with the matching
+`conferencier` release. The project does not guarantee compatibility for
+downstream code that directly uses `__private` or pairs a derive macro with a
+different library version.
+
 ## Public API checks
 
 After implementing this RFC and before publishing `0.1.0-beta.1`, run
@@ -517,8 +541,10 @@ This comparison is an audit, not a passing CI gate: the transition to 0.1
 intentionally contains breaking changes. Review every reported break against
 the [Compatibility](#compatibility) section and the migration guide; investigate
 and document any break not already accounted for. The checker analyzes Rust
-item APIs, not behavioral compatibility or changes to the derive attribute
-language, so those still need manual review.
+item APIs, not behavioral compatibility, changes to the derive attribute
+language, generated-code behavior or the `#[doc(hidden)]` support in
+`conferencier::__private`. Review those areas manually and keep the derive
+inputs and generated code compatible with the matching library release.
 
 After the `0.1.0-beta.1` release tag exists, add a CI check for both published
 crates using `cargo-semver-checks`. Check `conferencier` with both feature
@@ -811,15 +837,21 @@ No existing variant is removed; changes to existing variants are listed above.
   `0.2.0`). After `1.0.0`, follow SemVer for public API compatibility. Since
   major versions of `toml` and `tokio` change types exposed by the public API,
   upgrading either is a breaking change under this policy; compatible upgrades
-  within a dependency major remain allowed.
+  within a dependency major remain allowed. Release `conferencier` and
+  `conferencier-derive` in lockstep at the same version and make the former
+  depend on the exact matching version of the latter. The accepted derive
+  syntax and generated-code behavior are part of the compatibility contract;
+  `#[doc(hidden)]` support in `conferencier::__private` is an implementation
+  detail that may change in coordination with its matching derive release.
 - **Q10 — Public API compatibility checks.** Before publishing beta.1, compare
   both published crates against 0.0.8 with `cargo-semver-checks` using the
   explicit release type `minor`, which detects breaking changes but permits
   additive ones, and reconcile its findings with the migration documentation.
   After beta.1 is tagged, compare each candidate with the immediately preceding
   published 0.1.x release tag, including pre-releases, and advance the
-  configured baseline after each release. Keep manual review for behavior and
-  derive attribute syntax, which the tool does not check.
+  configured baseline after each release. Manually review derive syntax,
+  generated-code behavior and the `#[doc(hidden)]` `__private` support, which
+  the tool does not check.
 - **Q11 — Beta policy and stable exit criteria.** Treat beta.1 as the first
   release covered by the 0.1.x compatibility commitment: each subsequent
   pre-release and release must remain backward compatible with the immediately
