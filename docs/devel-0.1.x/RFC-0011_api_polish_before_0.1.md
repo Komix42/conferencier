@@ -494,6 +494,13 @@ their sources, including parse errors produced before the scope is created.
   across scopes remains a separate
   [backlog idea](../BACKLOG.md#store-and-errors).
 
+  Lenient loading does not preserve unknown keys when a scope is saved. Saving
+  a scope replaces its owned section, removing keys and sub-tables that are not
+  mapped to its fields. Data owned by another scope must remain in a separate
+  section; preserving unknown keys within a scope is a separate feature outside
+  this RFC. See the [file guide](../../conferencier/guide/files.md) for the
+  save behavior.
+
 ## Versioning and public dependencies
 
 For `0.x.y` releases, conferencier adopts a stricter compatibility policy than
