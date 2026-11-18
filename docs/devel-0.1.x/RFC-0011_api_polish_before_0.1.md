@@ -648,6 +648,9 @@ compatibility contract; changing them is breaking and deferred to 0.2.0.
 `ConfigStore`'s `Debug` output has only the content guarantees in D1–D2, not a
 stable text format, and must not be parsed by callers.
 
+`Error` implements `Send + Sync + 'static` throughout the 0.1.x line. Any new
+variant or field added compatibly in 0.1.x must preserve these traits.
+
 - **Breaking:** `Display` of `Io`, `Parse`, `Serialize` and `SaveFileCleanup` no
   longer contains the cause (E1, E3). Code that prints an error with `{}` and relies
   on the cause must print the source chain, for example with `anyhow`'s `{:#}` or by
@@ -772,6 +775,8 @@ No existing variant is removed; changes to existing variants are listed above.
 
 ## Testing
 
+- A compile-time assertion in `error.rs` verifies that `Error` implements
+  `Send + Sync + 'static`, without adding a test dependency.
 - Unit tests in `error.rs` assert every message of E3, with and without a path,
   and assert that `source()` returns the wrapped error for each wrapping variant.
 - Tests preserve `From<std::io::Error>`, `From<toml::de::Error>` and
@@ -868,8 +873,9 @@ No existing variant is removed; changes to existing variants are listed above.
 
 ## Documentation deliverables
 
-- Rustdoc of `Error` and `IoOperation` (variants, operations, constructors, and
-  the diagnostic warning in E7). Document `table_path` as the TOML table
+- Rustdoc of `Error` and `IoOperation` (variants, operations, constructors,
+  `Error`'s `Send + Sync + 'static` guarantee, and the diagnostic warning in E7).
+  Document `table_path` as the TOML table
   diagnostic path for key errors, and `path` as a filesystem path for `Io`,
   `Parse` and `Serialize`; document `SaveFileCleanup`'s `target_path` and
   `temporary_path` separately. Use public constructors where provided; document
@@ -1050,6 +1056,9 @@ No existing variant is removed; changes to existing variants are listed above.
   `PartialEq` and `Eq`. `Debug` supports the derived `Error` formatter; the
   remaining traits support ordinary copying and comparisons. Do not derive
   `Hash` without a concrete use case.
+- **Q22 — `Error` auto-traits.** Guarantee `Send + Sync + 'static` throughout
+  0.1.x and verify the bound with a compile-time assertion; adding a variant or
+  field must preserve it.
 
 ## Open questions
 
