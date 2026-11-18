@@ -383,6 +383,14 @@ Non-goals:
     kind and the raw OS code. The target path is therefore retained even when
     the primary failure involved only the temporary file.
 
+  `SaveFileTaskJoin` does not guarantee that the target is unchanged or that a
+  temporary file was removed. Its source indicates cancellation or panic, but
+  not which file-operation phase completed. Cancellation before the task starts
+  may leave the filesystem untouched; a panic after temporary-file creation
+  may leave that file behind, and a panic after replacement may mean the new
+  target is already installed. Callers that need to recover must inspect the
+  filesystem state.
+
 - **E7 — Sensitive diagnostics.** Error messages, `Debug` output and source
   chains are not redacted. A TOML parse error's source can include the offending
   line of input; other diagnostics can include values, key names or file paths.
@@ -800,7 +808,8 @@ No existing variant is removed; changes to existing variants are listed above.
   and `target_path` contain the same path. Each file-operation `save_file` error
   has an explicit operation and the target path. A separate join-failure test
   asserts `SaveFileTaskJoin`, its target path and `Display`, and that its source
-  is the original `tokio::task::JoinError`.
+  is the original `tokio::task::JoinError`. It does not assert that the target
+  is unchanged or that a temporary file was removed.
 - Tests for unsupported save targets assert `operation: Some(InspectTarget)`,
   the target in both path fields, an `InvalidInput` source and that the source
   chain exposes the rejection reason.
@@ -880,11 +889,12 @@ No existing variant is removed; changes to existing variants are listed above.
   `Parse` and `Serialize`; document `SaveFileCleanup`'s `target_path` and
   `temporary_path` separately. Use public constructors where provided; document
   `SaveFileTaskJoin` and `SaveFileCleanup` as library-created variants that
-  callers can inspect but not construct. Use `..` in patterns for every
-  non-exhaustive variant, including `MissingKey`. Use `table_path` in key-error
-  patterns and the renamed key-error constructors in all examples, including
-  the manual `ConfigTable` implementation. Document the synchronous
-  file-read example with `Error::io_error_with_operation` and
+  callers can inspect but not construct, and state that a task-join error does
+  not guarantee the target is unchanged or the temporary file removed. Use `..`
+  in patterns for every non-exhaustive variant, including `MissingKey`. Use
+  `table_path` in key-error patterns and the renamed key-error constructors in
+  all examples, including the manual `ConfigTable` implementation. Document
+  the synchronous file-read example with `Error::io_error_with_operation` and
   `IoOperation::Read`.
 - Rustdoc of `ConfigStore` (`Debug`, setters including borrowed slices and typed
   empty string arrays, `from_file`, `load_file`), the crate-level note about
@@ -911,8 +921,9 @@ No existing variant is removed; changes to existing variants are listed above.
   [concepts](../../conferencier/guide/concepts.md); the I/O error construction
   example in
   [concepts](../../conferencier/guide/concepts.md#reading-a-file-before-the-runtime-starts);
-  the `f32` rules in [derive](../../conferencier/guide/derive.md#value-conversion) and
-  the round-trip note in [files](../../conferencier/guide/files.md).
+  the `f32` rules in [derive](../../conferencier/guide/derive.md#value-conversion)
+  and the round-trip and task-join state notes in
+  [files](../../conferencier/guide/files.md).
 - The example applications print errors with their source chain.
 - [Migration guide](../../conferencier/guide/migration.md): a 0.0.8 → 0.1.0-beta.1
   section covering every **Breaking** item of [Compatibility](#compatibility).
@@ -1019,7 +1030,9 @@ No existing variant is removed; changes to existing variants are listed above.
   the join failure in `std::io::Error`. A Tokio task join failure does not
   identify a failed file-operation phase, so it has no `IoOperation`. Preserve
   the save's `target_path` and display `failed to save "<target>"`; return the
-  typed `tokio::task::JoinError` directly through `source()`.
+  typed `tokio::task::JoinError` directly through `source()`. Do not guarantee
+  that the target is unchanged or the temporary file removed; the caller must
+  inspect filesystem state if recovery matters.
 - **Q15 — Generic error conversions.** Keep all existing `From` conversions
   from I/O and TOML errors for ergonomic `?` propagation. They set no path,
   operation or save target; callers with contextual information use the public
