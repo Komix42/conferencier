@@ -733,6 +733,10 @@ This RFC changes behavior that users can observe. It is released in
   affected `path` is absent, keep the operation-specific message. If
   `target_path` is available, `InspectTarget` and `ReplaceTarget` use it as the
   displayed path; temporary-file operations include it as save-target context.
+- **Q14 — `spawn_blocking` join failure.** Keep `operation: None`: a Tokio task
+  join failure does not identify a failed file-operation phase. Preserve the
+  save's `target_path`, so the error still displays `failed to save "<target>"`;
+  the underlying join failure remains available through the source chain.
 
 ## Open questions
 
