@@ -710,8 +710,22 @@ for external matches, which already require a fallback arm.
 
 - Rustdoc of `Error` and `IoOperation` (variants, operations, constructors, the
   I/O example and the diagnostic warning in E7), `ConfigStore` (`Debug`, setters
-  including borrowed slices and typed empty string arrays, `from_file`, `load_file`)
-  and the crate-level note about Tokio features (T2).
+  including borrowed slices and typed empty string arrays, `from_file`, `load_file`),
+  the crate-level note about Tokio features (T2), and `ConfigScope` and
+  `ConfigTable` (manual implementations remain supported; their required
+  signatures, bounds and documented behavior are stable throughout 0.1.x).
+  Replace `ConfigTable`'s current statement that its signatures may change while
+  the API is in alpha.
+- `README.md`: remove the 0.0.x early-development notice from the introduction.
+  Add a short "Status and compatibility" section after "Project scope" and
+  before "Learn more", describing the beta status and the 0.1.x compatibility
+  promise, including pre-releases and the deferral of breaking changes to
+  0.2.0. State that Rust 1.85 is supported throughout 0.1.x, retain the MSRV
+  badge, and link the migration guide with an absolute URL.
+- `CONTRIBUTING.md`: document the 0.1.x MSRV commitment and the public API
+  compatibility-check process, including the feature configurations and rolling
+  baseline. State that major upgrades of public `toml` or `tokio` types are
+  breaking changes under the 0.x policy.
 - Guide: printing errors with their source chain in
   [troubleshooting](../../conferencier/guide/troubleshooting.md), including the
   opt-in helper from E1 and the warning in E7; the custom scope `Debug` example
