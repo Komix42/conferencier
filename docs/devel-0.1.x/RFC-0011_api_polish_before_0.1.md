@@ -466,11 +466,13 @@ item APIs, not behavioral compatibility or changes to the derive attribute
 language, so those still need manual review.
 
 After the `0.1.0-beta.1` release tag exists, add a CI check for both published
-crates using `cargo-semver-checks`. Pin the baseline to that tag rather than
-relying on the default crates.io baseline, which excludes pre-releases. Set the
-release type to `patch`, so any later 0.1.x candidate is checked against the
-backward-compatibility policy even while the current version is a pre-release.
-Keep this check as a release gate for subsequent 0.1.x versions.
+crates using `cargo-semver-checks`. Compare each candidate against the
+immediately preceding published 0.1.x release tag, including pre-releases.
+Set `baseline-rev` explicitly because the default crates.io baseline excludes
+pre-releases. After each 0.1.x release, advance the configured baseline to its
+tag so the next candidate is checked against the latest published API. Set the
+release type to `patch` to enforce the backward-compatibility policy for every
+candidate.
 
 ## Trait evolution
 
@@ -652,8 +654,9 @@ This RFC changes behavior that users can observe. It is released in
 - Before publishing `0.1.0-beta.1`, compare both public crates with 0.0.8 using
   the commands in [Public API checks](#public-api-checks), and reconcile all
   reported breaks with the compatibility and migration documentation. Once the
-  beta.1 release tag exists, CI checks both crates against that tag as the
-  baseline for subsequent 0.1.x changes.
+  beta.1 release tag exists, CI compares both crates with the immediately
+  preceding published 0.1.x tag, including pre-releases; advance the configured
+  baseline after each release.
 
 ## Documentation deliverables
 
@@ -727,13 +730,15 @@ This RFC changes behavior that users can observe. It is released in
 - **Q10 — Public API compatibility checks.** Before publishing beta.1, compare
   both published crates against 0.0.8 with `cargo-semver-checks` in patch mode
   and reconcile its findings with the migration documentation. After beta.1 is
-  tagged, use that tag as the fixed baseline for a CI compatibility gate on
-  subsequent 0.1.x changes. Keep manual review for behavior and derive attribute
-  syntax, which the tool does not check.
-- **Q11 — Beta policy and stable exit criteria.** Treat beta.1 as the 0.1.x
-  compatibility baseline: subsequent 0.1.x pre-releases and releases cannot
-  introduce breaking changes; defer any necessary break to 0.2.0. Publish stable
-  0.1.0 only after the release gates in the
+  tagged, compare each candidate with the immediately preceding published 0.1.x
+  release tag, including pre-releases, and advance the configured baseline after
+  each release. Keep manual review for behavior and derive attribute syntax,
+  which the tool does not check.
+- **Q11 — Beta policy and stable exit criteria.** Treat beta.1 as the first
+  release covered by the 0.1.x compatibility commitment: each subsequent
+  pre-release and release must remain backward compatible with the immediately
+  preceding published 0.1.x version; defer any necessary break to 0.2.0.
+  Publish stable 0.1.0 only after the release gates in the
   [backlog](../BACKLOG.md#stable-010-exit-criteria) are met, including
   completion of the planned work, successful CI and package checks, reviewed
   API-compatibility results, example-app validation, complete migration
