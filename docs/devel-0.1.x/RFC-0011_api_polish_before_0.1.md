@@ -185,6 +185,8 @@ Non-goals:
   | `Io { operation: Some(PrepareTemporary), path: Some(_), .. }` | `failed to prepare temporary file "<p>"` |
   | `Io { operation: Some(WriteTemporary), path: Some(_), .. }` | `failed to write temporary file "<p>"` |
   | `Io { operation: Some(ReplaceTarget), path: Some(_), .. }` | `failed to replace target file "<p>"` |
+  | `Io { operation: Some(InspectTarget), path: None, target_path: Some(_), .. }` | `failed to inspect save target "<target>"` |
+  | `Io { operation: Some(ReplaceTarget), path: None, target_path: Some(_), .. }` | `failed to replace target file "<target>"` |
   | `Io { operation: Some(op), path: None, .. }` | `failed to <op>` |
   | `Io { operation: None, target_path: Some(_), .. }` | `failed to save "<target>"` |
   | `Io { operation: None, path: Some(_), .. }` | `I/O error on "<p>"` |
@@ -200,10 +202,11 @@ Non-goals:
   `PrepareTemporary` and `WriteTemporary`, a `target_path` of `Some` appends
   ` for "<target>"` to the message, with or without `<p>`, for example
   `failed to write temporary file "<t>" for "<target>"`. `InspectTarget` and
-  `ReplaceTarget` do not repeat `target_path`, because `<p>` already names the
-  target. `SaveFileCleanup` keeps `save_error` as its
-  source. `cleanup_error` is not part of the source chain, so its message stays
-  in `Display`. A report such as `anyhow`'s `{:#}` then reads, for example:
+  `ReplaceTarget` do not repeat `target_path` when `<p>` is present, because
+  `<p>` already names the target. When `<p>` is absent, they use `target_path`
+  as the displayed path. `SaveFileCleanup` keeps `save_error` as its source.
+  `cleanup_error` is not part of the source chain, so its message stays in
+  `Display`. A report such as `anyhow`'s `{:#}` then reads, for example:
 
   ```text
   failed to save "config.toml"; removing temporary file ".conferencier.1a2b.tmp" also failed (Access is denied. (os error 5)): failed to write temporary file ".conferencier.1a2b.tmp" for "config.toml": There is not enough space on the disk. (os error 112)
@@ -573,6 +576,9 @@ This RFC changes behavior that users can observe. It is released in
 
 - Unit tests in `error.rs` assert every message of E3, with and without a path,
   and assert that `source()` returns the wrapped error for each wrapping variant.
+- The `Io` display tests cover pathless operations with and without
+  `target_path`, including `InspectTarget` and `ReplaceTarget` using the known
+  target path, and temporary-file operations appending that target as context.
 - A test asserts that no wrapping variant's `Display` contains the message of its
   source.
 - A doctest for `display_error_chain` verifies that it includes the outer error
@@ -723,6 +729,10 @@ This RFC changes behavior that users can observe. It is released in
   calls; they do not promise a particular platform-specific implementation.
   The non-exhaustive enum can gain new variants, but existing names and meanings
   are not changed in 0.1.x.
+- **Q13 — Pathless I/O display.** When `operation` is known but the directly
+  affected `path` is absent, keep the operation-specific message. If
+  `target_path` is available, `InspectTarget` and `ReplaceTarget` use it as the
+  displayed path; temporary-file operations include it as save-target context.
 
 ## Open questions
 
