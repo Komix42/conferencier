@@ -27,7 +27,8 @@ public behavior beyond what the changelog records.
 - `Display` of a wrapping error does not repeat the cause returned by `source()`
   (E1–E3).
 - `Error::Io` names its file without debug formatting, and `Error::Parse` becomes
-  a struct variant with an optional path, filled in by the file methods (E2, E4).
+  a struct variant with an optional path, filled in by file methods or attached
+  by callers that parse text themselves (E2, E4).
 - `Io` and `Parse` are non-exhaustive variants with public constructors (E5).
   `Io` can also identify the operation, and `SaveFileCleanup` retains the target
   path (E2–E6).
@@ -172,7 +173,19 @@ Non-goals:
 
   `ConfigStore::from_file` and `ConfigStore::load_file` set `path` to the path they
   read. `ConfigStore::from_str`, `FromStr` and `From<toml::de::Error>` set it to
-  `None`.
+  `None`. A caller that reads a file synchronously and then calls `from_str` can
+  attach the path to a parse error by changing the public `path` field:
+
+  ```rust,ignore
+  let store = ConfigStore::from_str(&contents).map_err(|mut error| {
+      if let Error::Parse { path: error_path, .. } = &mut error {
+          *error_path = Some(path.to_path_buf());
+      }
+      error
+  })?;
+  ```
+
+  This does not add a blocking file API or a general error-context helper.
 
 - **E5 — Extensible variants and constructors.** `Error::Io`, `Error::Parse` and
   `Error::SaveFileCleanup` are individually marked `#[non_exhaustive]`, in
@@ -401,6 +414,8 @@ This RFC changes behavior that users can observe. It is released in
 - Tests of `from_file` and `load_file` with invalid TOML assert
   `Error::Parse { path: Some(p), .. }` with the read path; a `from_str` test asserts
   `path: None`.
+- A doctest for synchronous file loading verifies that a parse error from
+  `from_str` can be given the source file path without losing its parser source.
 - Tests outside the library crate construct `Io`, `Parse` and
   `SaveFileCleanup` with the public constructors and inspect their fields using
   patterns with `..`. Compile-fail tests outside the crate verify that direct
@@ -423,7 +438,8 @@ This RFC changes behavior that users can observe. It is released in
   `from_file`, `load_file`) and the crate-level note about Tokio features (T2).
 - Guide: printing errors with their source chain in
   [troubleshooting](../../conferencier/guide/troubleshooting.md), alongside the
-  warning in E7; the custom scope `Debug` example in
+  warning in E7; the custom scope `Debug` example and synchronous file-loading
+  example with path context in
   [concepts](../../conferencier/guide/concepts.md); the I/O error construction
   example in
   [concepts](../../conferencier/guide/concepts.md#reading-a-file-before-the-runtime-starts);
@@ -451,6 +467,11 @@ This RFC changes behavior that users can observe. It is released in
   values an application considers sensitive. E7 documents the risk instead of
   adding redaction; the application can customize its scope's `Debug`, but that
   does not sanitize errors or their sources.
+- **Q7 — Parse path before the runtime starts.** A caller that reads text
+  synchronously can attach the known path to `Error::Parse` by updating its
+  public `path` field, or by rebuilding it with `Error::parse_error`. This is
+  sufficient for the documented use case, so no additional `with_path` helper
+  is added.
 
 ## Open questions
 
