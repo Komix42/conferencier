@@ -44,7 +44,8 @@ introduced by this RFC.
   have their own variant, and every `save_file` error names the save target
   (E2–E6).
 - The library enables only the Tokio features `sync`, `rt` and `fs` (T1–T2).
-  The async file methods document that they panic outside a Tokio runtime (T3).
+  The async file methods document that they panic if they reach a Tokio
+  operation outside a runtime (T3).
 - Invalid input returns an error and does not panic. The documented exceptions
   are caller-supplied code, a missing Tokio runtime and deep nesting when
   `toml`'s `unbounded` feature is enabled or values are built in code (P1–P2).
@@ -493,8 +494,10 @@ Non-goals:
   dev-dependencies, where tests and doctests use them.
 - **T2 — Documented promise.** The crate documentation states that the library
   does not start a runtime and does not choose a runtime flavor; the application
-  enables the Tokio features it needs, such as `macros` and `rt-multi-thread`. The
-  async methods work on any Tokio runtime, including a current-thread runtime.
+  enables the Tokio features it needs, such as `macros` and `rt-multi-thread`.
+  The library's async operations work on any Tokio runtime, including a
+  current-thread runtime; caller-supplied code can impose its own requirements
+  (T3).
   Adding a Tokio feature to the library later needs a changelog entry. Removing
   one is a breaking change and is recorded as such in the changelog: applications
   may depend on the feature being enabled transitively.
@@ -507,10 +510,11 @@ Non-goals:
   runtime; conferencier does not detect that condition or turn it into an
   `Error`. Each method's `# Panics` section describes its runtime requirement,
   including the serialization-before-I/O behavior of `save_file`. These are the
-  only `ConfigStore` methods that require a runtime. The derive-generated
-  `ConfigScope::from_store`, `ConfigScope::load` and `ConfigScope::save`
-  implementations need no runtime. A manual trait implementation may impose
-  its own runtime requirements.
+  only `ConfigStore` methods that require a runtime. The code generated for
+  `ConfigScope::from_store`, `ConfigScope::load` and `ConfigScope::save` does
+  not itself require a runtime. Caller-supplied code, including default or
+  ignore expressions, `Default` implementations and manual `ConfigScope` or
+  `ConfigTable` implementations used by a derived scope, may require one.
 
 ## Panics and nesting depth
 
@@ -798,8 +802,9 @@ This RFC changes behavior that users can observe. It is released in
 The panic contract in P1 is part of the 0.1.x compatibility commitment:
 library-handled invalid input must return an error rather than panic.
 Exceptions are caller-supplied code and the cases documented in T3 and P2.
-The three file methods' Tokio runtime requirement and their panic outside a
-runtime are intentional documented behavior throughout 0.1.x. P2 does not
+The three file methods' Tokio runtime requirement and their panic when reaching
+a Tokio operation outside a runtime are intentional documented behavior
+throughout 0.1.x. P2 does not
 guarantee a particular recursion-limit value; it documents the behavior of
 `toml`'s default features and the risk when `toml/unbounded` or deeply nested
 programmatically constructed values are used. No source migration is required
@@ -1061,6 +1066,8 @@ No existing variant is removed; changes to existing variants are listed above.
   `spawn_blocking`. A separate case verifies that a serialization failure from
   `save_file` is returned before any runtime is needed and leaves the target
   untouched.
+- A test constructs, loads and saves a derived scope without a Tokio runtime,
+  using fields and defaults that do not themselves require one.
 - `cargo test -p conferencier --no-default-features --locked` and the workspace
   tests pass with the reduced Tokio features.
 - A test passes input nested far beyond `toml`'s default limit to `from_str`
@@ -1242,8 +1249,8 @@ No existing variant is removed; changes to existing variants are listed above.
   are not generally redacted; the custom scope `Debug` example and synchronous
   file-loading example with path context in
   [concepts](../../conferencier/guide/concepts.md), whose section on reading a
-  file before the runtime starts also explains that file methods panic only
-  when they reach a Tokio operation without a runtime, and that `save_file`
+  file before the runtime starts also explains that file methods panic due to a
+  missing runtime when they reach a Tokio operation, and that `save_file`
   serializes first (T3); the I/O error construction
   example in
   [concepts](../../conferencier/guide/concepts.md#reading-a-file-before-the-runtime-starts);
@@ -1263,8 +1270,10 @@ No existing variant is removed; changes to existing variants are listed above.
   section covering every **Breaking** item of [Compatibility](#compatibility).
   In a separate note, explain that the runtime requirement and the P1/P2 input
   limits are existing documented behavior, not source migrations; mention that
-  only the three file methods require a Tokio runtime and that enabling
-  `toml/unbounded` can make deeply nested untrusted input terminate the process.
+  the three file methods require a runtime for their Tokio operations, while
+  caller-supplied code may impose additional runtime requirements, and that
+  enabling `toml/unbounded` can make deeply nested untrusted input terminate
+  the process.
   Explicitly highlight the key-error constructor renames to the `_error`
   suffix and the `path` to `table_path` naming of key-error fields and
   constructor arguments. Include a before-and-after manual `ConfigTable`
