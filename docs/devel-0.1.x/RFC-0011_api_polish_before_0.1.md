@@ -492,13 +492,19 @@ Non-goals:
   Adding a Tokio feature to the library later needs a changelog entry. Removing
   one is a breaking change and is recorded as such in the changelog: applications
   may depend on the feature being enabled transitively.
-- **T3 — Runtime required for file methods.** `from_file`, `load_file` and
-  `save_file` must be polled within a Tokio runtime. Outside one, Tokio panics
-  with its own message; the library does not detect a missing runtime or turn it
-  into an `Error`. Each of the three methods documents this in a `# Panics`
-  section. These are the only APIs that require a runtime: the other
-  asynchronous in-memory APIs, including `ConfigScope::load` and
-  `ConfigScope::save`, and `ConfigScope::from_store` need no runtime.
+- **T3 — Runtime required for file methods.** `from_file` and `load_file`
+  require a Tokio runtime when execution reaches the Tokio file read.
+  `save_file` serializes the store before starting file I/O: if serialization
+  fails, it returns `Error::Serialize` without requiring a runtime; if
+  serialization succeeds, it requires a runtime when execution reaches
+  `spawn_blocking`. Tokio panics when these operations are polled without a
+  runtime; conferencier does not detect that condition or turn it into an
+  `Error`. Each method's `# Panics` section describes its runtime requirement,
+  including the serialization-before-I/O behavior of `save_file`. These are the
+  only `ConfigStore` methods that require a runtime. The derive-generated
+  `ConfigScope::from_store`, `ConfigScope::load` and `ConfigScope::save`
+  implementations need no runtime. A manual trait implementation may impose
+  its own runtime requirements.
 
 ## Panics and nesting depth
 
@@ -1033,9 +1039,15 @@ No existing variant is removed; changes to existing variants are listed above.
   nine non-exhaustive variants. Keep each variant and each restriction in a
   separate doctest so one compile error cannot mask missing coverage. These
   doctests run with the core crate's tests, including the MSRV job.
-- `cargo test -p conferencier --no-default-features --locked` and the workspace tests
-  pass with the reduced Tokio features; a test or doctest runs an async method on
-  a current-thread runtime.
+- Tests run `from_file`, `load_file` and `save_file` on a current-thread runtime.
+  Tests also poll the file methods without a Tokio runtime inside
+  `catch_unwind`: `from_file` and `load_file` panic when they reach the file
+  read, and `save_file` panics when a successful serialization reaches
+  `spawn_blocking`. A separate case verifies that a serialization failure from
+  `save_file` is returned before any runtime is needed and leaves the target
+  untouched.
+- `cargo test -p conferencier --no-default-features --locked` and the workspace
+  tests pass with the reduced Tokio features.
 - A test passes input nested far beyond `toml`'s default limit to `from_str`
   and `load_str`: inline tables, arrays, dotted keys and a table header. It
   asserts `Error::Parse` without a panic, and that `load_str` leaves the store
@@ -1148,7 +1160,8 @@ No existing variant is removed; changes to existing variants are listed above.
   `load_file` and the `# Errors` section of `save_file`, which describes errors
   with their `IoOperation`, `path` and `target_path`, including
   `SaveFileTaskJoin`, `Serialize.target_path` and `SaveFileCleanup.target_path`),
-  and `# Panics` sections for all three async file methods (T3). Add the P2
+  and `# Panics` sections for all three async file methods (T3), including that
+  `save_file` returns a serialization error before it needs a runtime. Add the P2
   nesting-depth note to the `ConfigStore` type-level documentation. Add the P1
   invalid-input guarantee and its exceptions to both crate-level documentation
   variants: the guide overview with the default `derive` feature and the inline
@@ -1209,8 +1222,9 @@ No existing variant is removed; changes to existing variants are listed above.
   are not generally redacted; the custom scope `Debug` example and synchronous
   file-loading example with path context in
   [concepts](../../conferencier/guide/concepts.md), whose section on reading a
-  file before the runtime starts also states that the async file methods panic
-  outside a Tokio runtime (T3); the I/O error construction
+  file before the runtime starts also explains that file methods panic only
+  when they reach a Tokio operation without a runtime, and that `save_file`
+  serializes first (T3); the I/O error construction
   example in
   [concepts](../../conferencier/guide/concepts.md#reading-a-file-before-the-runtime-starts);
   the `f32` rules in [derive](../../conferencier/guide/derive.md#value-conversion),
