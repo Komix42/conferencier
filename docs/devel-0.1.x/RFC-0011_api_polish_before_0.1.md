@@ -484,9 +484,16 @@ After implementing this RFC and before publishing `0.1.0-beta.1`, run
 patch release for the purpose of this comparison:
 
 ```sh
-cargo semver-checks --package conferencier --baseline-version 0.0.8 --release-type patch
+cargo semver-checks --package conferencier --baseline-version 0.0.8 --release-type patch --default-features
+cargo semver-checks --package conferencier --baseline-version 0.0.8 --release-type patch --only-explicit-features
 cargo semver-checks --package conferencier-derive --baseline-version 0.0.8 --release-type patch
 ```
+
+For `conferencier`, the first command checks the default `derive` feature and
+the second checks with no features enabled, matching its supported
+`--no-default-features` configuration. These are `cargo-semver-checks` feature
+selectors, not Cargo's `--no-default-features` flag. `conferencier-derive` has
+no crate features and needs only one check.
 
 This comparison is an audit, not a passing CI gate: the transition to 0.1
 intentionally contains breaking changes. Review every reported break against
@@ -496,13 +503,14 @@ item APIs, not behavioral compatibility or changes to the derive attribute
 language, so those still need manual review.
 
 After the `0.1.0-beta.1` release tag exists, add a CI check for both published
-crates using `cargo-semver-checks`. Compare each candidate against the
-immediately preceding published 0.1.x release tag, including pre-releases.
-Set `baseline-rev` explicitly because the default crates.io baseline excludes
-pre-releases. After each 0.1.x release, advance the configured baseline to its
-tag so the next candidate is checked against the latest published API. Set the
-release type to `patch` to enforce the backward-compatibility policy for every
-candidate.
+crates using `cargo-semver-checks`. Check `conferencier` with both feature
+selectors shown above and `conferencier-derive` once. Compare each candidate
+against the immediately preceding published 0.1.x release tag, including
+pre-releases. Set `baseline-rev` explicitly because the default crates.io
+baseline excludes pre-releases. After each 0.1.x release, advance the configured
+baseline to its tag so the next candidate is checked against the latest
+published API. Set the release type to `patch` to enforce the
+backward-compatibility policy for every candidate.
 
 ## Trait evolution
 
@@ -691,11 +699,12 @@ for external matches, which already require a fallback arm.
   cannot leave the test blocked indefinitely.
 - The guide's custom scope `Debug` example is tested as a doctest.
 - Before publishing `0.1.0-beta.1`, compare both public crates with 0.0.8 using
-  the commands in [Public API checks](#public-api-checks), and reconcile all
-  reported breaks with the compatibility and migration documentation. Once the
-  beta.1 release tag exists, CI compares both crates with the immediately
-  preceding published 0.1.x tag, including pre-releases; advance the configured
-  baseline after each release.
+  the commands in [Public API checks](#public-api-checks), including both
+  `conferencier` feature configurations, and reconcile all reported breaks with
+  the compatibility and migration documentation. Once the beta.1 release tag
+  exists, CI compares both crates with the immediately preceding published
+  0.1.x tag, including pre-releases; advance the configured baseline after each
+  release.
 
 ## Documentation deliverables
 
