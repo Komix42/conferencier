@@ -368,6 +368,15 @@ Non-goals:
   `SaveFileTaskJoin` and `SaveFileCleanup`, is the destination passed to
   `save_file`.
 
+  For the same reason, the `path` parameter of `ConfigTable::from_table` and
+  `ConfigTable::to_table` is renamed to `table_path`, the value that a manual
+  implementation passes to the key-error constructors. Parameter names are not
+  part of a trait's API: the types and order are unchanged, existing
+  implementations keep compiling with any parameter names, and no migration is
+  needed. The general path-building helpers in `table_path`, such as
+  `child_path(parent, key)` and `element_path(path, index)`, keep their
+  parameter names.
+
   The I/O constructors use the concrete `Option<PathBuf>` rather than
   `Option<impl Into<PathBuf>>`, so callers can pass `None` without a type
   annotation. When a path is known, callers can pass it as `Some(path.into())`.
@@ -1017,7 +1026,16 @@ No existing variant is removed; changes to existing variants are listed above.
   implementations remain supported; their required signatures, bounds and
   documented behavior are stable, and neither trait gains methods, throughout
   0.1.x). Replace `ConfigTable`'s current statement that its signatures may
-  change while the API is in alpha.
+  change while the API is in alpha. Use the `table_path` parameter name in
+  `ConfigTable` and its examples, and describe it as the table path passed to
+  the key errors' `table_path`, not as a section.
+- Every remaining mention of the key errors' `path` field, or of a table path
+  under that name, in rustdoc and the guide uses `table_path`, including the
+  [nested tables guide](../../conferencier/guide/tables.md) and the
+  [`table_path`](../../conferencier/src/table_path.rs) module documentation
+  where it refers to the path received by `ConfigTable`.
+  Filesystem `path` fields and the parameter names of the `table_path` helpers
+  are unchanged.
 - `README.md`: remove the 0.0.x early-development notice from the introduction.
   Add a short "Status and compatibility" section after "Project scope" and
   before "Learn more", describing the beta status and the 0.1.x compatibility
