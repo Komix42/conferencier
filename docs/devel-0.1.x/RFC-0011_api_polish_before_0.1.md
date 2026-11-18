@@ -36,6 +36,7 @@ public behavior beyond what the changelog records.
 - `set_string` accepts `impl Into<String>`, the vector setters accept any
   `IntoIterator` (S1–S3).
 - `Debug` of `ConfigStore` lists the top-level keys, not the values (D1–D2).
+  Error diagnostics are not redacted and may contain sensitive input (E7).
 - Unknown keys stay accepted by default; strictness remains opt-in (K1).
 
 ## Table of Contents
@@ -85,7 +86,7 @@ Goals:
 - Keep the Tokio feature set of the library minimal and documented.
 - Make the derive's float handling symmetric.
 - Make the setters convenient without changing what they store.
-- Avoid leaking configuration values through `Debug`.
+- Avoid printing configuration values through `ConfigStore`'s `Debug`.
 
 Non-goals:
 
@@ -202,6 +203,14 @@ Non-goals:
   code. The target path is therefore retained even when the primary failure
   involved only the temporary file.
 
+- **E7 — Sensitive diagnostics.** Error messages, `Debug` output and source
+  chains are not redacted. A TOML parse error's source can include the offending
+  line of input; other diagnostics can include values, key names or file paths.
+  For example, an out-of-range `u64` saved by a derive currently appears in the
+  `ValueParse` message. Applications should decide how to handle these diagnostics
+  before displaying or logging them. The `ConfigStore` `Debug` policy (D1) does
+  not sanitize errors or their sources.
+
 ## Tokio features
 
 - **T1 — Minimal features.** The `conferencier` crate enables only the Tokio
@@ -250,6 +259,39 @@ What the setters store, their section validation and their errors are unchanged.
   behind the formatter never runs while the lock is held.
 
 Applications that need the content use the existing read methods.
+Top-level key names may themselves be sensitive. The application controls the
+`Debug` implementation of its own scope types and can redact selected fields,
+for example:
+
+```rust
+use conferencier::ConfigScope;
+use std::fmt;
+
+#[derive(ConfigScope)]
+#[confer(section = "Database")]
+struct DatabaseConfig {
+    host: String,
+    password: String,
+}
+
+impl fmt::Debug for DatabaseConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DatabaseConfig")
+            .field("host", &self.host)
+            .field("password", &"[REDACTED]")
+            .finish()
+    }
+}
+
+let config = DatabaseConfig {
+    host: "localhost".into(),
+    password: "example-secret".into(),
+};
+assert!(!format!("{config:?}").contains("example-secret"));
+```
+
+This affects only formatting that scope. It does not redact raw TOML, errors or
+their sources, including parse errors produced before the scope is created.
 
 ## Unknown keys by default
 
@@ -340,7 +382,7 @@ This RFC changes behavior that users can observe. It is released in
 
 - The internal findings A8 and B1–B5 of the audit; they follow the plan in the
   [backlog](../BACKLOG.md#planned-for-010-beta1).
-- A redaction mechanism for individual values or fields.
+- A library-level redaction mechanism for values, fields or error diagnostics.
 - A blocking variant of `from_file`.
 - Changes to the key-related error messages.
 
@@ -372,15 +414,18 @@ This RFC changes behavior that users can observe. It is released in
 - Setter tests pass `&str`, `String`, arrays of `&str` and iterators.
 - A test asserts that the `Debug` output contains the top-level keys and no value
   of the document.
+- The guide's custom scope `Debug` example is tested as a doctest.
 
 ## Documentation deliverables
 
-- Rustdoc of `Error` and `IoOperation` (variants, operations, constructors and
-  the I/O example), `ConfigStore` (`Debug`, setters, `from_file`, `load_file`)
-  and the crate-level note about Tokio features (T2).
+- Rustdoc of `Error` and `IoOperation` (variants, operations, constructors, the
+  I/O example and the diagnostic warning in E7), `ConfigStore` (`Debug`, setters,
+  `from_file`, `load_file`) and the crate-level note about Tokio features (T2).
 - Guide: printing errors with their source chain in
-  [troubleshooting](../../conferencier/guide/troubleshooting.md); the I/O error
-  construction example in
+  [troubleshooting](../../conferencier/guide/troubleshooting.md), alongside the
+  warning in E7; the custom scope `Debug` example in
+  [concepts](../../conferencier/guide/concepts.md); the I/O error construction
+  example in
   [concepts](../../conferencier/guide/concepts.md#reading-a-file-before-the-runtime-starts);
   the `f32` rules in [derive](../../conferencier/guide/derive.md#value-conversion) and
   the round-trip note in [files](../../conferencier/guide/files.md).
@@ -402,6 +447,10 @@ This RFC changes behavior that users can observe. It is released in
   fields in existing variants. E5 makes `Io`, `Parse` and `SaveFileCleanup`
   non-exhaustive and provides constructors, allowing fields to be added when
   suitable defaults exist.
+- **Q6 — Sensitive values in diagnostics.** Conferencier cannot determine which
+  values an application considers sensitive. E7 documents the risk instead of
+  adding redaction; the application can customize its scope's `Debug`, but that
+  does not sanitize errors or their sources.
 
 ## Open questions
 
