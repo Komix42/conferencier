@@ -4,7 +4,7 @@ Date: 2026-11-17
 Status: Draft
 Author: Komix42 <komix[at]ignore.cz>
 Target release: 0.1.0-beta.1
-Amends: [RFC-0001](../devel-0.0.x/RFC-0001_baseline_architecture.md), [RFC-0005](../devel-0.0.x/RFC-0005_api_redesign.md), [RFC-0006](../devel-0.0.x/RFC-0006_strict_unknown_keys.md), [RFC-0007](../devel-0.0.x/RFC-0007_default_expressions.md), [RFC-0009](../devel-0.0.x/RFC-0009_save_file_replacement.md)
+Amends: [RFC-0001](../devel-0.0.x/RFC-0001_baseline_architecture.md), [RFC-0004](../devel-0.0.x/RFC-0004_nested_tables.md), [RFC-0005](../devel-0.0.x/RFC-0005_api_redesign.md), [RFC-0006](../devel-0.0.x/RFC-0006_strict_unknown_keys.md), [RFC-0007](../devel-0.0.x/RFC-0007_default_expressions.md), [RFC-0009](../devel-0.0.x/RFC-0009_save_file_replacement.md)
 Related: [AUDIT-001](../devel-0.0.x/AUDIT-001_quality_0.0.8.md)
 
 ## Document Scope
@@ -22,7 +22,11 @@ MSRV commitment for 0.1.x, and the API-compatibility check process for beta.1
 and later 0.1.x releases.
 
 Internal fixes from the audit (A8, B1–B5) are not specified here; they change no
-public behavior beyond what the changelog records.
+public behavior beyond what the changelog records. For A8, this RFC specifies
+only the release invariant it motivates: `conferencier` and
+`conferencier-derive` are released in lockstep. The exact dependency requirement
+used to enforce that invariant is an implementation fix, not a requirement
+introduced by this RFC.
 
 ## Synopsis
 
@@ -623,11 +627,11 @@ major versions of either dependency.
 
 `conferencier` and `conferencier-derive` are released in lockstep with the same
 version, including the same pre-release identifier. The `conferencier` crate
-depends on the matching `conferencier-derive` version through an exact version
-requirement, not a compatible range. The workspace dependency declaration
-currently uses a caret requirement and changes to `=` with the matching
-version, for example `=0.1.0-beta.1`. This keeps the derive macro paired with
-the library support code for which it generates calls.
+must use the matching `conferencier-derive` version so the derive macro remains
+paired with the library support code for which it generates calls. Pinning the
+workspace dependency to that exact version is the implementation fix for audit
+finding A8; this RFC specifies the lockstep invariant, not the manifest
+mechanism used to enforce it.
 
 The derive compatibility contract includes the accepted `#[derive(...)]` and
 `#[confer(...)]` syntax and the behavior of the generated code. Removing or
@@ -859,8 +863,10 @@ No existing variant is removed; changes to existing variants are listed above.
 
 ## Out of scope
 
-- The internal findings A8 and B1–B5 of the audit; they follow the plan in the
-  [backlog](../BACKLOG.md#planned-for-010-beta1).
+- The implementation fixes for audit findings A8 and B1–B5; they follow the
+  plan in the [backlog](../BACKLOG.md#planned-for-010-beta1). The lockstep
+  release invariant motivated by A8 is specified above, but the exact
+  dependency requirement is not.
 - A library-level redaction mechanism for values, fields or error diagnostics.
 - A blocking variant of `from_file`.
 - Changes in beta.1 to the `MissingKey`, `TypeMismatch`, `ValueParse` and
@@ -1093,11 +1099,10 @@ No existing variant is removed; changes to existing variants are listed above.
   `Parse.path`, `Serialize.target_path` and `SaveFileCleanup.target_path` fields, other
   error-shape changes, Tokio features, setter signatures, `ConfigStore`'s
   `Debug` output and constructor renames. Record acceptance of non-finite `f32`
-  values, omission of the raw value in save-time `u64`/`usize` range messages
-  and the exact `conferencier-derive` version requirement as non-breaking
-  changes in the same section.
-- Add `Amended by: RFC-0011` to the headers of RFC-0001, RFC-0005, RFC-0006,
-  RFC-0007 and RFC-0009 when this RFC is implemented.
+  values and omission of the raw value in save-time `u64`/`usize` range messages
+  as non-breaking changes in the same section.
+- Add `Amended by: RFC-0011` to the headers of RFC-0001, RFC-0004, RFC-0005,
+  RFC-0006, RFC-0007 and RFC-0009 when this RFC is implemented.
 
 ## Resolved questions
 
