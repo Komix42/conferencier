@@ -239,12 +239,19 @@ Non-goals:
 
 - **F1 — Accepted like `f64`.** Loading an `f32` or `Vec<f32>` field accepts the
   TOML values `inf`, `+inf`, `-inf` and `nan` and stores the corresponding `f32`
-  value. The `non-finite float` error is removed.
-- **F2 — Range unchanged.** A finite value outside the `f32` range remains a
-  `ValueParse` error with the message `value out of range for f32`, followed by
-  ` (at index N)` for vector elements. Finite values inside the range are rounded
-  to the nearest `f32` as before. With F1, every `f32` value saved by
-  conferencier loads back to the same value.
+  value. The `non-finite float` error is removed. NaN remains NaN when saved and
+  loaded again, but its sign and payload are not preserved as part of this
+  contract.
+- **F2 — Range unchanged.** A finite `f64` value is rejected if it is less than
+  `f32::MIN as f64` or greater than `f32::MAX as f64`. Both endpoints are
+  accepted. This deliberately rejects any finite value outside the mathematical
+  `f32` range, even when Rust's `as f32` conversion would round a value just
+  beyond an endpoint back to a finite endpoint. The error is `ValueParse` with
+  the message `value out of range for f32`, followed by ` (at index N)` for
+  vector elements. Finite values inside the range are rounded to the nearest
+  `f32` as before. Finite `f32` values and infinities saved by conferencier load
+  back to the same value; NaN loads as NaN and is checked with `is_nan()`, not
+  equality.
 
 ## Setter signatures
 
@@ -423,9 +430,13 @@ This RFC changes behavior that users can observe. It is released in
 - `cargo test -p conferencier --no-default-features --locked` and the workspace tests
   pass with the reduced Tokio features; a test or doctest runs an async method on
   a current-thread runtime.
-- Derive tests load `inf`, `-inf` and `nan` into `f32` and `Vec<f32>` fields and
-  keep the out-of-range tests, including the vector index in the message. A round
-  trip of a non-finite `f32` default through save and load succeeds.
+- Derive tests load `inf`, `+inf`, `-inf` and `nan` into `f32` and `Vec<f32>`
+  fields and verify infinities with equality and NaN with `is_nan()`, without
+  asserting its sign or payload. Tests accept both finite endpoints and reject
+  finite values just outside `f32::MIN` and `f32::MAX`, including a value above
+  `f32::MAX` that would cast to a finite `f32`. Vector range errors include the
+  element index. A round trip of a non-finite `f32` default through save and load
+  succeeds and checks the reloaded NaN with `is_nan()`.
 - Setter tests pass `&str`, `String`, arrays of `&str` and iterators.
 - A test asserts that the `Debug` output contains the top-level keys and no value
   of the document.
