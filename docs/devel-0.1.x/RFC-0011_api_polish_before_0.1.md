@@ -380,8 +380,9 @@ Non-goals:
 
   `MissingKey`, `TypeMismatch`, `ValueParse` and `UnknownKey` use the field name
   `table_path` for the formatted path of the TOML table containing the key.
-  `Io.path` and `Parse.path` remain filesystem paths of the file directly
-  involved in the operation. Every `target_path` field, on `Io`, `Serialize`,
+  `Io.path` remains a filesystem path of the file directly involved in the
+  operation; `Parse.path` is a newly added optional filesystem path of the file
+  directly involved in parsing. Every `target_path` field, on `Io`, `Serialize`,
   `SaveFileTaskJoin` and `SaveFileCleanup`, is the destination passed to
   `save_file`.
 
@@ -1057,7 +1058,8 @@ No existing variant is removed; changes to existing variants are listed above.
   constructs the variant directly, with an example that only inspects it, for
   example a function taking `&Error` that matches `SaveFileCleanup` and reads
   the nested `Io` kind and optional raw OS code from `save_error`, as required
-  by RFC-0009 R3.
+  by RFC-0009 R3. State that `Display` includes the secondary `cleanup_error`,
+  while `source()` exposes the primary `save_error`.
 - Rustdoc of `ConfigStore` (`Debug`, setters including borrowed slices, typed
   empty string arrays, and the guarantee that caller-provided conversions and
   iteration complete before the write lock is acquired; `from_file`,
@@ -1066,7 +1068,11 @@ No existing variant is removed; changes to existing variants are listed above.
   `SaveFileTaskJoin`, `Serialize.target_path` and `SaveFileCleanup.target_path`),
   the crate-level note about Tokio features (T2) in both crate-level
   documentation variants, the guide overview used with the default `derive`
-  feature and the inline text in `lib.rs` used without it, and `ConfigScope`
+  feature and the inline text in `lib.rs` used without it. Keep the
+  `crate::guide::migration` intra-doc link in `overview.md` with `derive`, and
+  link from `lib.rs` without `derive` to the versioned beta guide at
+  `https://docs.rs/conferencier/0.1.0-beta.1/conferencier/guide/migration/index.html`.
+  Also document `ConfigScope`
   and `ConfigTable` (manual
   implementations remain supported; their required signatures, bounds and
   documented behavior are stable, and neither trait gains methods, throughout
@@ -1127,6 +1133,12 @@ No existing variant is removed; changes to existing variants are listed above.
   source, or return the error from `main`.
 - [Migration guide](../../conferencier/guide/migration.md): a 0.0.8 → 0.1.0-beta.1
   section covering every **Breaking** item of [Compatibility](#compatibility).
+  Explicitly highlight the key-error constructor renames to the `_error`
+  suffix and the `path` to `table_path` naming of key-error fields and
+  constructor arguments. Include a before-and-after manual `ConfigTable`
+  example using the renamed constructor and `table_path`; clarify that the
+  method parameter itself may keep any name because parameter names are not
+  part of the API.
   Also list its non-breaking behavior changes: non-finite `f32` values now load,
   so applications that relied on their rejection must validate them explicitly;
   save-time `u64`/`usize` range messages omit the value; and `Display` wording
