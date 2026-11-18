@@ -576,6 +576,9 @@ This RFC changes behavior that users can observe. It is released in
 
 - Unit tests in `error.rs` assert every message of E3, with and without a path,
   and assert that `source()` returns the wrapped error for each wrapping variant.
+- Tests preserve `From<std::io::Error>`, `From<toml::de::Error>` and
+  `From<toml::ser::Error>` and assert that each conversion leaves the available
+  path, operation and save target unset.
 - The `Io` display tests cover pathless operations with and without
   `target_path`, including `InspectTarget` and `ReplaceTarget` using the known
   target path, and temporary-file operations appending that target as context.
@@ -737,6 +740,10 @@ This RFC changes behavior that users can observe. It is released in
   join failure does not identify a failed file-operation phase. Preserve the
   save's `target_path`, so the error still displays `failed to save "<target>"`;
   the underlying join failure remains available through the source chain.
+- **Q15 — Generic error conversions.** Keep all existing `From` conversions
+  from I/O and TOML errors for ergonomic `?` propagation. They set no path,
+  operation or save target; callers with contextual information use the public
+  constructors instead.
 
 ## Open questions
 
