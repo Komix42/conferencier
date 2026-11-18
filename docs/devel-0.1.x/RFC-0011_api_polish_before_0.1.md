@@ -338,11 +338,15 @@ their sources, including parse errors produced before the scope is created.
 - **K1 — Lenient by default.** RFC-0006 Q6 left "strict by default" as a decision
   before 0.1.0. This RFC keeps the current default: derived types accept unknown
   keys unless they opt in with `deny_unknown_keys`. No `allow_unknown_keys`
-  attribute is added. Reasons: a configuration file shared by several scopes or
-  written by a newer application version must keep loading; strictness is a
-  per-type choice that the derive already supports; and making strictness the
-  default after 0.1.0 would be a breaking change, so the decision has to be made
-  now rather than deferred again.
+  attribute is added. Strictness applies per type to the table that type loads;
+  it does not detect an unclaimed top-level section such as a misspelled
+  `[Ap]` in place of `[App]`. Reasons: a configuration file shared by several
+  scopes or written by a newer application version must keep loading; strictness
+  is a per-type choice that the derive already supports; and making strictness
+  the default after 0.1.0 would be a breaking change, so the decision has to be
+  made now rather than deferred again. A future non-rejecting inspection API
+  across scopes remains a separate
+  [backlog idea](../BACKLOG.md#store-and-errors).
 
 ## Compatibility
 
@@ -496,6 +500,10 @@ This RFC changes behavior that users can observe. It is released in
   involving a temporary file. E2 adds an optional, stable `IoOperation`; errors
   from callers can leave it as `None`. E6 separately retains the save target in
   `SaveFileCleanup`.
+- **Q4 — Strict unknown keys by default.** Keep the lenient default and make
+  `deny_unknown_keys` opt-in per type. This preserves compatibility with shared
+  and forward-extended configuration files. A separate API for inspecting
+  unclaimed keys without rejecting them remains in the backlog.
 - **Q5 — Extensibility of wrapping variants.** Review noted that the
   `#[non_exhaustive]` attribute on `Error` protects against new variants, not new
   fields in existing variants. E5 makes `Io`, `Parse` and `SaveFileCleanup`
@@ -515,9 +523,6 @@ This RFC changes behavior that users can observe. It is released in
 
 - **Q3 — Debug content.** Are top-level keys enough, or should `Debug` also list
   nested table names, or print only the number of sections?
-- **Q4 — Strict by default.** Is the decision of K1 (keep lenient) acceptable for
-  0.1.0, or should it be reconsidered before the stable release?
-
 ## References
 
 - [AUDIT-001: Quality audit of 0.0.8](../devel-0.0.x/AUDIT-001_quality_0.0.8.md), findings A1–A7.
