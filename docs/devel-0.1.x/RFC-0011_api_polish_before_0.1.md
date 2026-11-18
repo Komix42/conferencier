@@ -151,7 +151,8 @@ Non-goals:
   }
   ```
 
-  Example applications use the helper where the underlying cause is useful.
+  The example applications in `examples/` use the helper where the underlying
+  cause is useful.
   Formatting a complete chain is an explicit application choice: as noted in E7,
   a source may contain sensitive input. Conferencier does not add a library-level
   error-chain formatting helper.
@@ -1021,7 +1022,12 @@ No existing variant is removed; changes to existing variants are listed above.
 - Rustdoc of `ConfigStore` (`Debug`, setters including borrowed slices, typed
   empty string arrays, and the guarantee that caller-provided conversions and
   iteration complete before the write lock is acquired; `from_file`,
-  `load_file`), the crate-level note about Tokio features (T2), and `ConfigScope`
+  `load_file` and the `# Errors` section of `save_file`, which describes each
+  error with its `IoOperation`, `path` and `target_path`, `SaveFileTaskJoin`
+  and `Serialize.target_path`), the crate-level note about Tokio features (T2)
+  in both crate-level documentation variants, the guide overview used with the
+  default `derive` feature and the inline text in `lib.rs` used without it,
+  and `ConfigScope`
   and `ConfigTable` (manual
   implementations remain supported; their required signatures, bounds and
   documented behavior are stable, and neither trait gains methods, throughout
@@ -1055,12 +1061,23 @@ No existing variant is removed; changes to existing variants are listed above.
   [concepts](../../conferencier/guide/concepts.md); the I/O error construction
   example in
   [concepts](../../conferencier/guide/concepts.md#reading-a-file-before-the-runtime-starts);
-  the `f32` rules in [derive](../../conferencier/guide/derive.md#value-conversion)
-  and the round-trip and task-join state notes in
-  [files](../../conferencier/guide/files.md).
-- The example applications print errors with their source chain.
+  the `f32` rules in [derive](../../conferencier/guide/derive.md#value-conversion),
+  and in [files](../../conferencier/guide/files.md) the round-trip and
+  task-join state notes, and update the existing descriptions of save errors to
+  E2 and E6: a failed cleanup (`SaveFileCleanup` with its `target_path`),
+  temporary-name exhaustion (`Io` with `CreateTemporary` and `AlreadyExists`)
+  and a rejected target (`Io` with `InspectTarget` and `InvalidInput`).
+- The three example applications in `examples/` (`uptime-monitor`,
+  `folder-indexer` and `modular-agent`) print conferencier errors with their
+  source chain where a file operation can fail. Each keeps its own copy of the
+  helper from E1 and adds no dependency. The small examples in
+  `conferencier/examples/` stay unchanged: they print key errors, which have no
+  source, or return the error from `main`.
 - [Migration guide](../../conferencier/guide/migration.md): a 0.0.8 → 0.1.0-beta.1
   section covering every **Breaking** item of [Compatibility](#compatibility).
+  Also list its non-breaking behavior changes: non-finite `f32` values now load,
+  save-time `u64`/`usize` range messages omit the value, and `Display` wording
+  is no longer stable.
   Advise callers not to parse error messages or rely on their exact wording,
   and point them to the structured fields and sources. Separately from the
   breaking-change list, warn that lenient loading followed by saving a scope
