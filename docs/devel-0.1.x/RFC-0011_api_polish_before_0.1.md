@@ -29,6 +29,8 @@ public behavior beyond what the changelog records.
 - `Error::Io` names its file without debug formatting, and `Error::Parse` becomes
   a struct variant with an optional path, filled in by the file methods (E2, E4).
 - `Io` and `Parse` are non-exhaustive variants with public constructors (E5).
+  `Io` can also identify the operation, and `SaveFileCleanup` retains the target
+  path (E2–E6).
 - The library enables only the Tokio features `sync`, `rt` and `fs` (T1–T2).
 - `f32` fields accept infinity and NaN like `f64` fields (F1–F2).
 - `set_string` accepts `impl Into<String>`, the vector setters accept any
@@ -88,7 +90,6 @@ Goals:
 Non-goals:
 
 - New configuration features, new field types or new derive attributes.
-- A structured operation kind on `Error::Io` (see [Q2](#open-questions)).
 - Changing the messages of the key-related errors (`MissingKey`, `TypeMismatch`,
   `ValueParse`, `UnknownKey`); they wrap no source and stay as specified by RFC-0006.
 
@@ -99,28 +100,61 @@ Non-goals:
   `Display`. This applies to `Io`, `Parse`, `Serialize` and `SaveFileCleanup`.
   The wrapped errors remain public fields, so callers can still match on them.
 
-- **E2 — Path rendering.** Where a message names a file, the path is rendered with
-  `Path::display` and enclosed in double quotes, without escaping. The exact path is
-  available in the variant's `path` field; the message is for humans only.
+- **E2 — Path rendering and I/O operation.** Where a message names a file, the
+  path is rendered with `Path::display` and enclosed in double quotes, without
+  escaping. The exact path is available in the variant's `path` field; the
+  message is for humans only.
 
-- **E3 — Messages.** `Display` produces exactly these messages (`<p>` is the rendered
-  path, `<t>` the rendered temporary path):
+  `Error::Io` gains `operation: Option<IoOperation>`. `IoOperation` is a public,
+  `#[non_exhaustive]` enum re-exported from the crate root, with stable,
+  user-facing operations:
+
+  ```rust,ignore
+  pub enum IoOperation {
+      Read,
+      InspectTarget,
+      CreateTemporary,
+      PrepareTemporary,
+      WriteTemporary,
+      ReplaceTarget,
+  }
+  ```
+
+  `None` means that the caller or the library operation did not supply an
+  operation. Conferencier fills the operation for every file operation performed
+  by `ConfigStore::from_file`, `load_file` and `save_file`. The exceptional
+  `spawn_blocking` join failure is not itself a file operation and keeps
+  `operation: None`. For `save_file`, `path` continues to name the file directly
+  involved in the failed system call: the target for `InspectTarget` and
+  `ReplaceTarget`, and the temporary file for the other operations.
+
+- **E3 — Messages.** `Display` produces exactly these messages (`<p>` is a
+  rendered path, `<t>` a rendered temporary path and `<target>` the save
+  destination):
 
   | Variant | Message |
   | --- | --- |
-  | `Io { path: Some(_), .. }` | `I/O error on "<p>"` |
-  | `Io { path: None, .. }` | `I/O error` |
+  | `Io { operation: Some(Read), path: Some(_), .. }` | `failed to read file "<p>"` |
+  | `Io { operation: Some(InspectTarget), path: Some(_), .. }` | `failed to inspect save target "<p>"` |
+  | `Io { operation: Some(CreateTemporary), path: Some(_), .. }` | `failed to create temporary file "<p>"` |
+  | `Io { operation: Some(PrepareTemporary), path: Some(_), .. }` | `failed to prepare temporary file "<p>"` |
+  | `Io { operation: Some(WriteTemporary), path: Some(_), .. }` | `failed to write temporary file "<p>"` |
+  | `Io { operation: Some(ReplaceTarget), path: Some(_), .. }` | `failed to replace target file "<p>"` |
+  | `Io { operation: Some(op), path: None, .. }` | `failed to <op>` |
+  | `Io { operation: None, path: Some(_), .. }` | `I/O error on "<p>"` |
+  | `Io { operation: None, path: None, .. }` | `I/O error` |
   | `Parse { path: Some(_), .. }` | `failed to parse TOML file "<p>"` |
   | `Parse { path: None, .. }` | `failed to parse TOML` |
   | `Serialize(_)` | `failed to serialize TOML` |
-  | `SaveFileCleanup { .. }` | `failed to save file and to remove its temporary file "<t>" (<cleanup_error>)` |
+  | `SaveFileCleanup { .. }` | `failed to save "<target>"; removing temporary file "<t>" also failed (<cleanup_error>)` |
 
-  `SaveFileCleanup` keeps `save_error` as its source. `cleanup_error` is not part of
-  the source chain, so its message stays in `Display`. A report such as
-  `anyhow`'s `{:#}` then reads, for example:
+  `<op>` uses the operation names above without a path, for example
+  `failed to write temporary file`. `SaveFileCleanup` keeps `save_error` as its
+  source. `cleanup_error` is not part of the source chain, so its message stays
+  in `Display`. A report such as `anyhow`'s `{:#}` then reads, for example:
 
   ```text
-  failed to save file and to remove its temporary file ".conferencier.1a2b.tmp" (Access is denied. (os error 5)): I/O error on ".conferencier.1a2b.tmp": There is not enough space on the disk. (os error 112)
+  failed to save "config.toml"; removing temporary file ".conferencier.1a2b.tmp" also failed (Access is denied. (os error 5)): failed to write temporary file ".conferencier.1a2b.tmp": There is not enough space on the disk. (os error 112)
   ```
 
 - **E4 — Path of parse errors.** `Error::Parse` becomes a struct variant:
@@ -139,21 +173,34 @@ Non-goals:
   read. `ConfigStore::from_str`, `FromStr` and `From<toml::de::Error>` set it to
   `None`.
 
-- **E5 — Extensible variants and constructors.** Both `Error::Io` and
-  `Error::Parse` are individually marked `#[non_exhaustive]`, in addition to the
-  existing attribute on `Error` itself. Their `path` and `source` fields remain
-  public. Outside the crate, patterns must include `..` and callers cannot
+- **E5 — Extensible variants and constructors.** `Error::Io`, `Error::Parse` and
+  `Error::SaveFileCleanup` are individually marked `#[non_exhaustive]`, in
+  addition to the existing attribute on `Error` itself. Their public fields
+  remain public. Outside the crate, patterns must include `..` and callers cannot
   construct these variants directly. Callers use these public constructors:
 
   - `Error::io_error(path: Option<PathBuf>, source: std::io::Error) -> Error`;
+  - `Error::io_error_with_operation(path: Option<PathBuf>, operation: IoOperation, source: std::io::Error) -> Error`;
   - `Error::parse_error(path: Option<PathBuf>, source: toml::de::Error) -> Error`.
 
-  Each constructor stores the supplied path and source in the corresponding
-  variant; `None` means that no file path is known. The existing
+  `io_error` stores `operation: None`; `io_error_with_operation` stores
+  `operation: Some(operation)`. The existing
   `From<std::io::Error>` and `From<toml::de::Error>` conversions remain available
-  and set the path to `None`. This rule does not change the other variants.
-  Additional fields can later be added without breaking construction or patterns
-  if the existing constructors can supply suitable defaults for them.
+  and set the path and operation to `None`. `SaveFileCleanup` is normally created
+  inside conferencier; because it is non-exhaustive, a public
+  `Error::save_file_cleanup_error(target_path, temporary_path, save_error,
+  cleanup_error)` constructor is provided for tests and manual construction.
+  Additional fields can later be added without breaking construction or
+  patterns if the existing constructors can supply suitable defaults for them.
+
+- **E6 — Save target and temporary file.** `Error::SaveFileCleanup` gains
+  `target_path: PathBuf`, in addition to `save_error`, `temporary_path` and
+  `cleanup_error`. `target_path` is the path passed to `save_file`; it is not
+  inferred from the temporary sibling or the nested I/O error. The primary
+  failure remains available in full through `save_error`, including an
+  `Io.operation`, the directly affected `Io.path`, the I/O kind and the raw OS
+  code. The target path is therefore retained even when the primary failure
+  involved only the temporary file.
 
 ## Tokio features
 
@@ -224,13 +271,19 @@ This RFC changes behavior that users can observe. It is released in
   longer contains the cause (E1, E3). Code that prints an error with `{}` and relies
   on the cause must print the source chain, for example with `anyhow`'s `{:#}` or by
   walking `source()`. Code that compares message strings must be updated.
-- **Breaking:** `Error::Io` is non-exhaustive (E5). Replace direct construction
-  with `Error::io_error(path, source)` and add `..` to patterns such as
-  `Error::Io { path, source, .. }`.
+- **Breaking:** `Error::Io` is non-exhaustive and has an optional `operation`
+  field (E2, E5). Replace direct construction with
+  `Error::io_error(path, source)` or
+  `Error::io_error_with_operation(path, operation, source)`, and add `..` to
+  patterns such as `Error::Io { path, operation, source, .. }`.
 - **Breaking:** `Error::Parse` is a non-exhaustive struct variant (E4–E5).
   Patterns `Error::Parse(_)` become `Error::Parse { .. }` or
   `Error::Parse { source, .. }`. Replace direct construction with
   `Error::parse_error(None, source)` or the existing `Error::from(source)`.
+- **Breaking:** `Error::SaveFileCleanup` is non-exhaustive and gains
+  `target_path` (E3, E5–E6). Replace direct construction with
+  `Error::save_file_cleanup_error(target_path, temporary_path, save_error,
+  cleanup_error)` and add `..` to field patterns.
 - **Breaking:** the library no longer enables Tokio's `macros` and `rt-multi-thread`
   features (T1). An application that used `#[tokio::main]`, `#[tokio::test]` or the
   multi-threaded runtime without enabling these features itself fails to compile
@@ -254,12 +307,10 @@ This RFC changes behavior that users can observe. It is released in
    reporters, `tracing` and `anyhow::Error::chain`, and it is the less common
    convention for wrapping errors. Rejected in favor of E1, but see
    [Q1](#open-questions).
-2. **An operation field on `Error::Io`** (read, write, replace, …) (A2). It would
-   allow messages such as `failed to read "config.toml"`, but the save path alone
-   has several distinct operations (metadata, temporary file creation, writing,
-   permissions, rename), and the variant would gain a public enum that has to stay
-   stable. The path and the `io::ErrorKind` identify the problem well enough.
-   Deferred, see [Q2](#open-questions).
+2. **Keep only the path on `Error::Io`** (A2). The path and `io::ErrorKind`
+   identify the file and low-level error, but the path of a temporary file alone
+   does not tell the caller whether creation, preparation or writing failed.
+   Rejected in favor of the optional `IoOperation` in E2.
 3. **A new variant `ParseFile { path, source }`** (A3). It would keep
    `Parse(toml::de::Error)` source-compatible, but matching every parse error would
    need two patterns, and `Io` already uses an optional path. Rejected.
@@ -280,6 +331,10 @@ This RFC changes behavior that users can observe. It is released in
 10. **Leave `Io` and `Parse` directly constructible.** This avoids the migration
     in E5, but adding a field would break construction and patterns that list all
     fields. Rejected in favor of non-exhaustive variants and constructors.
+11. **Infer the target path from `save_error` or `temporary_path`.** It would avoid
+     one field in `SaveFileCleanup`, but a primary failure may carry only a
+     temporary path, and temporary paths are not a public naming contract from
+     which the target can be recovered reliably. Rejected in favor of E6.
 
 ## Out of scope
 
@@ -295,13 +350,19 @@ This RFC changes behavior that users can observe. It is released in
   and assert that `source()` returns the wrapped error for each wrapping variant.
 - A test asserts that no wrapping variant's `Display` contains the message of its
   source.
+- Tests in `store.rs` assert the operation and the directly affected path for
+  target inspection, temporary-file creation, preparation, writing and
+  replacement. Each public `save_file` I/O path has an explicit operation.
+- A test of simultaneous save and cleanup failure asserts `target_path`,
+  `temporary_path`, the nested operation and the updated `Display` and source
+  chain. It also verifies that the cleanup cause is not repeated by `source()`.
 - Tests of `from_file` and `load_file` with invalid TOML assert
   `Error::Parse { path: Some(p), .. }` with the read path; a `from_str` test asserts
   `path: None`.
-- Tests outside the library crate construct `Io` and `Parse` with the public
-  constructors, with and without paths, and inspect their fields using patterns
-  with `..`. Compile-fail tests outside the crate verify that direct construction
-  and patterns without `..` are rejected for both variants.
+- Tests outside the library crate construct `Io`, `Parse` and
+  `SaveFileCleanup` with the public constructors and inspect their fields using
+  patterns with `..`. Compile-fail tests outside the crate verify that direct
+  construction and patterns without `..` are rejected for all three variants.
 - `cargo test -p conferencier --no-default-features --locked` and the workspace tests
   pass with the reduced Tokio features; a test or doctest runs an async method on
   a current-thread runtime.
@@ -314,9 +375,9 @@ This RFC changes behavior that users can observe. It is released in
 
 ## Documentation deliverables
 
-- Rustdoc of `Error` (variants, constructors and the I/O example), `ConfigStore`
-  (`Debug`, setters, `from_file`, `load_file`) and the crate-level note about
-  Tokio features (T2).
+- Rustdoc of `Error` and `IoOperation` (variants, operations, constructors and
+  the I/O example), `ConfigStore` (`Debug`, setters, `from_file`, `load_file`)
+  and the crate-level note about Tokio features (T2).
 - Guide: printing errors with their source chain in
   [troubleshooting](../../conferencier/guide/troubleshooting.md); the I/O error
   construction example in
@@ -332,20 +393,22 @@ This RFC changes behavior that users can observe. It is released in
 
 ## Resolved questions
 
-- **Q5 — Extensibility of `Io` and `Parse`.** Review noted that the
+- **Q2 — Operation in `Error::Io`.** The path alone is ambiguous for save failures
+  involving a temporary file. E2 adds an optional, stable `IoOperation`; errors
+  from callers can leave it as `None`. E6 separately retains the save target in
+  `SaveFileCleanup`.
+- **Q5 — Extensibility of wrapping variants.** Review noted that the
   `#[non_exhaustive]` attribute on `Error` protects against new variants, not new
-  fields in existing variants. E5 makes these two variants non-exhaustive and
-  provides constructors, allowing fields to be added when suitable defaults
-  exist. `SaveFileCleanup` is considered separately with save-file diagnostics.
+  fields in existing variants. E5 makes `Io`, `Parse` and `SaveFileCleanup`
+  non-exhaustive and provides constructors, allowing fields to be added when
+  suitable defaults exist.
 
 ## Open questions
 
 - **Q1 — Cause in `Display` or in `source()`?** E1 follows the convention of the
   Rust error-handling project group and works best with reporters, but an application printing
-  `{}` sees only `I/O error on "config.toml"` without the reason. Alternative 1 is
-  the opposite trade-off. Which side should conferencier take?
-- **Q2 — Operation in `Error::Io`?** Is the path enough, or should the message say
-  what failed (read, write, replace)?
+  `{}` sees only `failed to read file "config.toml"` without the reason.
+  Alternative 1 is the opposite trade-off. Which side should conferencier take?
 - **Q3 — Debug content.** Are top-level keys enough, or should `Debug` also list
   nested table names, or print only the number of sections?
 - **Q4 — Strict by default.** Is the decision of K1 (keep lenient) acceptable for
