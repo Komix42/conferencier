@@ -17,7 +17,9 @@ by the library, non-finite `f32` values, the signatures of the typed setters and
 the `Debug` output of `ConfigStore`. It also records the decision about strict
 unknown-key handling by default, which
 [RFC-0006](../devel-0.0.x/RFC-0006_strict_unknown_keys.md) Q6 postponed until
-before 0.1.0.
+before 0.1.0. It also establishes the 0.x compatibility policy, the Rust 1.85
+MSRV commitment for 0.1.x, and the API-compatibility check process for beta.1
+and later 0.1.x releases.
 
 Internal fixes from the audit (A8, B1–B5) are not specified here; they change no
 public behavior beyond what the changelog records.
@@ -33,6 +35,13 @@ public behavior beyond what the changelog records.
   constructors (E5). `Io` can identify the operation, task join failures have
   their own variant, and every `save_file` error names the save target (E2–E6).
 - The library enables only the Tokio features `sync`, `rt` and `fs` (T1–T2).
+- `0.1.x` compatibility starts with `0.1.0-beta.1`; breaking changes defer to
+  `0.2.0`.
+  Rust 1.85 remains supported throughout 0.1.x, and the post-1.0 MSRV policy
+  will be set before `1.0.0` (Versioning, Q9, Q18).
+- API compatibility is audited for both crates against `0.0.8` before beta.1,
+  then against the preceding published 0.1.x release; `conferencier` is checked
+  with and without default features (Q10).
 - `f32` fields accept infinity and NaN like `f64` fields (F1–F2).
 - `set_string` accepts `impl Into<String>`, the vector setters accept compatible
   iterators (S1–S3).
@@ -128,8 +137,8 @@ Non-goals:
 
 - **E2 — Path rendering and I/O operation.** Where a message names a file, the
   path is rendered with `Path::display` and enclosed in double quotes, without
-  escaping. The exact path is available in the variant's `path` field; the
-  message is for humans only.
+  escaping. The exact path is available in the corresponding variant field
+  (`path`, `target_path` or `temporary_path`); the message is for humans only.
 
   `Error::Io` gains `operation: Option<IoOperation>`. `IoOperation` is a public,
   `#[non_exhaustive]` enum re-exported from the crate root, with stable,
@@ -468,7 +477,7 @@ release's changelog and migration notes.
 
 The public API exposes types from both `toml` and `tokio`: `toml` is re-exported
 from the crate root, its values and errors appear in public interfaces, and
-[`SharedScope`](crate::SharedScope) is an alias for
+[`SharedScope`](../../conferencier/src/scope.rs) is an alias for
 `Arc<tokio::sync::RwLock<T>>`. Changing the major version of either dependency
 can change these public types and is therefore a breaking change for
 conferencier. Such an upgrade requires the next `0.x` minor release and a
@@ -540,6 +549,9 @@ This RFC changes behavior that users can observe. It is released in
   `Error::io_error(path, source)` or
   `Error::io_error_with_operation(path, operation, source)`, and add `..` to
   patterns such as `Error::Io { path, operation, source, .. }`.
+- **Breaking:** a `save_file` task join failure is returned as
+  `Error::SaveFileTaskJoin` instead of `Error::Io` (E2). Callers matching `Io`
+  for this failure must handle the new variant.
 - **Breaking:** `Error::Parse` is a non-exhaustive struct variant (E4–E5).
   Patterns `Error::Parse(_)` become `Error::Parse { .. }` or
   `Error::Parse { source, .. }`. Replace direct construction with
@@ -572,9 +584,9 @@ This RFC changes behavior that users can observe. It is released in
   application that relied on this rejection must check the value itself.
 - K1 changes nothing.
 
-`Error` is already `#[non_exhaustive]`; this RFC adds `SaveFileTaskJoin` without
-changing or removing any existing variant. The addition is backward-compatible
-for external matches, which already require a fallback arm.
+`Error` is already `#[non_exhaustive]`, so adding `SaveFileTaskJoin` is
+source-compatible for external matches, which already require a fallback arm.
+No existing variant is removed; changes to existing variants are listed above.
 
 ## Alternatives considered
 
@@ -752,7 +764,8 @@ for external matches, which already require a fallback arm.
 - **Q2 — Operation in `Error::Io`.** The path alone is ambiguous for save failures
   involving a temporary file. E2 adds an optional, stable `IoOperation`; errors
   from callers can leave it as `None`. E6 makes every `save_file` error name its
-  target: `Io.target_path`, `Serialize.path` and `SaveFileCleanup.target_path`.
+  target: `Io.target_path`, `Serialize.path`, `SaveFileCleanup.target_path` and
+  `SaveFileTaskJoin.target_path`.
 - **Q3 — Debug content.** Top-level keys are enough; their order is unspecified.
   D2 retains non-blocking lock acquisition and makes a poisoned lock visible
   while still showing the available keys.
