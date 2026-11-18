@@ -928,19 +928,21 @@ No existing variant is removed; changes to existing variants are listed above.
   for target inspection, temporary-file creation, preparation, writing and
   replacement. For target inspection and replacement, they assert that `path`
   and `target_path` contain the same path. Each file-operation `save_file` error
-  has an explicit operation and the target path. A separate join-failure test
-  asserts `SaveFileTaskJoin`, its target path and `Display`, and that its source
-  is the original `tokio::task::JoinError`. It does not assert that the target
-  is unchanged or that a temporary file was removed.
+  has an explicit operation and the target path. A separate test injects a
+  panic in the blocking task and asserts `SaveFileTaskJoin`, its target path and
+  `Display`, and that its source is the original `tokio::task::JoinError`. It
+  does not assert that the target is unchanged or that a temporary file was
+  removed.
 - Tests for unsupported save targets assert `operation: Some(InspectTarget)`,
   the target in both path fields, an `InvalidInput` source and that the source
   chain exposes the rejection reason.
 - A serialization failure from `save_file` yields
   `Error::Serialize { target_path: Some(target), .. }` and leaves the target
   untouched; the same failure from `save_str` has `target_path: None`.
-- A test of simultaneous save and cleanup failure asserts `target_path`,
-  `temporary_path`, the nested operation and the updated `Display` and source
-  chain. It also verifies that the cleanup cause is not repeated by `source()`.
+- A test helper injects both a save failure and a cleanup failure. The test
+  asserts `target_path`, `temporary_path`, the nested operation and the updated
+  `Display` and source chain. It also verifies that the cleanup cause is not
+  repeated by `source()`.
 - Tests of `from_file` and `load_file` with invalid TOML assert
   `Error::Parse { path: Some(p), .. }` with the read path; tests of `from_str`
   and `load_str` assert `path: None`.
@@ -980,8 +982,8 @@ No existing variant is removed; changes to existing variants are listed above.
   accept both finite endpoints and reject finite values just outside
   `f32::MIN` and `f32::MAX`, including a value above `f32::MAX` that would cast
   to a finite `f32`. Vector range errors include the element index. A round trip
-  of a non-finite `f32` default through save and load succeeds and checks the
-  reloaded NaN with `is_nan()`.
+  of non-finite scalar and vector `f32` values through save and load succeeds.
+  It checks infinities with equality and reloaded NaN values with `is_nan()`.
 - Save tests for out-of-range `u64` and `usize` values assert the exact generic
   `ValueParse` message and that it does not contain the numeric value; vector
   errors still identify the element index.
@@ -997,6 +999,9 @@ No existing variant is removed; changes to existing variants are listed above.
   conversion that reads from the same store completes before the write lock is
   acquired. Use a bounded wait so a regression cannot leave a test blocked
   indefinitely.
+- A setter test submits observable input to a store with an invalid section.
+  It verifies that input preparation consumes the input before returning the
+  section error and that the store remains unchanged.
 - Tests assert that ordinary and alternate `Debug` output contains all top-level
   keys, including non-table keys, and no values, without relying on key order.
   With the write lock held, `Debug` does not wait and indicates that it could not
