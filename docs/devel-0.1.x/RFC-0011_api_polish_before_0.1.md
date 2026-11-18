@@ -995,7 +995,7 @@ No existing variant is removed; changes to existing variants are listed above.
   format. The contention test uses a bounded wait and releases the lock even on
   timeout, so a regression cannot leave the test blocked indefinitely.
 - The guide's custom scope `Debug` example is tested as a doctest.
-- Before publishing `0.1.0-beta.1`, build two small downstream consumer
+- Before publishing `0.1.0-beta.1`, build three small downstream consumer
   projects outside the repository workspace against the actual `.crate`
   archives for `conferencier` and `conferencier-derive`. Resolve the matching
   unpublished beta packages from an isolated temporary local registry or
@@ -1003,9 +1003,12 @@ No existing variant is removed; changes to existing variants are listed above.
   not use workspace package paths. In one consumer, enable default features and
   derive a `ConfigScope` or `ConfigTable` using the crate-root re-export. In a
   separate consumer, depend on `conferencier` with default features disabled
-  and compile a manual `ConfigScope` or `ConfigTable` implementation. Both
-  builds must succeed. This is a one-time beta.1 release gate, not a recurring
-  CI job.
+  and compile a manual `ConfigScope` or `ConfigTable` implementation. In a
+  third consumer, disable the core crate's default features, pin both
+  dependencies to the same exact beta version, import both macros directly
+  from `conferencier-derive`, and derive a `ConfigScope` and `ConfigTable`.
+  All three builds must succeed. This is a one-time beta.1 release gate, not a
+  recurring CI job.
 - Before publishing `0.1.0-beta.1`, compare both public crates with 0.0.8 using
   the commands in [Public API checks](#public-api-checks), including both
   `conferencier` feature configurations, and reconcile all reported breaks with
@@ -1067,6 +1070,13 @@ No existing variant is removed; changes to existing variants are listed above.
   promise, including pre-releases and the deferral of breaking changes to
   0.2.0. State that Rust 1.85 is supported throughout 0.1.x, retain the MSRV
   badge, and link the migration guide with an absolute URL.
+- [`conferencier-derive/README.md`](../../conferencier-derive/README.md):
+  retain the direct-use example and show `conferencier` with default features
+  disabled and `conferencier-derive` pinned to the same exact beta version.
+  Show the exact dependency requirements, for example
+  `=0.1.0-beta.1`. Explain that direct users must keep both versions matched
+  and update them together; the default-feature re-export from `conferencier`
+  remains the recommended setup.
 - `CONTRIBUTING.md`: document the 0.1.x MSRV commitment and the public API
   compatibility-check process, including the feature configurations and rolling
   baseline. Document that the MSRV CI checks both the locked graph and a fresh
@@ -1264,9 +1274,11 @@ No existing variant is removed; changes to existing variants are listed above.
   unchanged. This prevents caller code from executing while the write lock is
   held and ensures readers see only complete values.
 - **Q25 — External package-consumer check.** Before publishing beta.1, compile
-  separate downstream consumers against the packaged crate archives: one using
-  the re-exported derive with default features and one using manual trait
-  implementations with default features disabled. Resolve the unpublished
+  three separate downstream consumers against the packaged crate archives:
+  one using the re-exported derive with default features, one using manual trait
+  implementations with default features disabled, and one using direct imports
+  of both macros with the core crate's default features disabled and both
+  dependencies pinned to the same exact beta version. Resolve the unpublished
   beta archives from an isolated local source, not workspace package paths.
   Treat this as a one-time release gate, not a recurring CI job.
 
