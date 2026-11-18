@@ -34,8 +34,8 @@ public behavior beyond what the changelog records.
   path (E2–E6).
 - The library enables only the Tokio features `sync`, `rt` and `fs` (T1–T2).
 - `f32` fields accept infinity and NaN like `f64` fields (F1–F2).
-- `set_string` accepts `impl Into<String>`, the vector setters accept any
-  `IntoIterator` (S1–S3).
+- `set_string` accepts `impl Into<String>`, the vector setters accept compatible
+  iterators (S1–S3).
 - `Debug` of `ConfigStore` lists the top-level keys when available, not the values
   (D1–D2). Error diagnostics are not redacted and may contain sensitive input (E7).
 - Unknown keys stay accepted by default; strictness remains opt-in (K1).
@@ -281,12 +281,16 @@ Non-goals:
 - **S1 — Strings.** `ConfigStore::set_string` takes `value: impl Into<String>`.
 - **S2 — String arrays.** `ConfigStore::set_string_vec` takes
   `values: impl IntoIterator<Item = impl Into<String>>`, so arrays of `&str`,
-  vectors of `String` and iterators are accepted.
+  vectors of `String` and iterators are accepted. A borrowed `Vec<String>` is
+  accepted directly; a borrowed slice of `&str` needs `.iter().copied()` to
+  yield `&str` rather than `&&str`.
 - **S3 — Other arrays.** `set_integer_vec`, `set_float_vec`, `set_boolean_vec` and
   `set_datetime_vec` take `values: impl IntoIterator<Item = T>` with their current
-  element type `T` (`i64`, `f64`, `bool`, `Datetime`). The scalar setters
-  `set_integer`, `set_float`, `set_boolean` and `set_datetime` are unchanged; widening
-  conversions such as `impl Into<i64>` are not added.
+  element type `T` (`i64`, `f64`, `bool`, `Datetime`). Borrowed slices and
+  vectors can be passed as `.iter().copied()`, without constructing an
+  intermediate vector. A bare `vec![]` still infers the setter's element type.
+  The scalar setters `set_integer`, `set_float`, `set_boolean` and `set_datetime`
+  are unchanged; widening conversions such as `impl Into<i64>` are not added.
 
 What the setters store, their section validation and their errors are unchanged.
 
@@ -384,7 +388,9 @@ This RFC changes behavior that users can observe. It is released in
 - **Breaking:** calls such as `set_string("App", "name", "demo".into())` or
   `set_string_vec("App", "langs", vec!["en".into()])` no longer infer the target
   type (S1, S2). Pass the value directly: `set_string("App", "name", "demo")`.
-  Calls that pass a `String` or `Vec<String>` keep compiling.
+  Similarly, `set_string_vec("App", "langs", vec![])` needs an element type, for
+  example `Vec::<String>::new()`. Calls that pass a `String` or a typed
+  `Vec<String>` keep compiling.
 - **Breaking:** the `Debug` output of `ConfigStore` no longer contains values (D1).
 - `f32` fields that previously failed with `non-finite float` now load (F1). An
   application that relied on this rejection must check the value itself.
@@ -481,7 +487,11 @@ This RFC changes behavior that users can observe. It is released in
   `f32::MAX` that would cast to a finite `f32`. Vector range errors include the
   element index. A round trip of a non-finite `f32` default through save and load
   succeeds and checks the reloaded NaN with `is_nan()`.
-- Setter tests pass `&str`, `String`, arrays of `&str` and iterators.
+- Setter tests pass `&str`, `String`, arrays of `&str` and iterators. They also
+  cover a borrowed `Vec<String>`, a borrowed slice of `&str` via
+  `.iter().copied()`, and borrowed numeric, boolean and datetime slices via
+  `.iter().copied()`. Empty arrays are stored using an inferred `vec![]` for an
+  integer setter and a typed empty vector for the string setter.
 - Tests assert that ordinary and alternate `Debug` output contains all top-level
   keys, including non-table keys, and no values, without relying on key order.
   With the write lock held, `Debug` does not wait and reports `<locked>`; a
@@ -493,8 +503,9 @@ This RFC changes behavior that users can observe. It is released in
 ## Documentation deliverables
 
 - Rustdoc of `Error` and `IoOperation` (variants, operations, constructors, the
-  I/O example and the diagnostic warning in E7), `ConfigStore` (`Debug`, setters,
-  `from_file`, `load_file`) and the crate-level note about Tokio features (T2).
+  I/O example and the diagnostic warning in E7), `ConfigStore` (`Debug`, setters
+  including borrowed slices and typed empty string arrays, `from_file`, `load_file`)
+  and the crate-level note about Tokio features (T2).
 - Guide: printing errors with their source chain in
   [troubleshooting](../../conferencier/guide/troubleshooting.md), including the
   opt-in helper from E1 and the warning in E7; the custom scope `Debug` example
