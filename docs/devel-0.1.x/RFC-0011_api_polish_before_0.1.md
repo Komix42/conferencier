@@ -417,10 +417,14 @@ Non-goals:
 
   `io_error` stores `operation: None`; `io_error_with_operation` stores
   `operation: Some(operation)`; both store `target_path: None`. A caller that
-  needs an `Io.target_path` sets the public field on the constructed error, as
-  shown for `Parse.path` in E4. The existing `From<std::io::Error>`,
-  `From<toml::de::Error>` and `From<toml::ser::Error>` conversions remain
-  available and set every path and the operation to `None`. `SaveFileTaskJoin`
+  needs different context can set or revise the public `Io.path`,
+  `Io.operation` and `Io.target_path` fields after construction, including
+  after converting a `std::io::Error` with `From`; these fields are
+  caller-mutable context, not immutable invariants. A mutable match with `..`
+  can update them, as shown for `Parse.path` in E4. The existing
+  `From<std::io::Error>`, `From<toml::de::Error>` and
+  `From<toml::ser::Error>` conversions remain available and set every path and
+  the operation to `None`. `SaveFileTaskJoin`
   and `SaveFileCleanup` have no public constructors; `save_file` creates them
   internally. Callers can still inspect and match these non-exhaustive variants,
   but cannot create them.
@@ -1149,6 +1153,9 @@ No existing variant is removed; changes to existing variants are listed above.
   State that `Display` wording is not stable and that callers should inspect
   variants, fields and sources instead of parsing messages. Explain that escaped
   path text may be lossy and does not sanitize the rest of the diagnostics.
+  Explicitly document `Io.path`, `Io.operation` and `Io.target_path` as
+  caller-mutable context fields, including that callers may attach them after
+  converting a `std::io::Error` with `From`.
   Document `table_path` as the TOML table
   diagnostic path for key errors, `path` as the filesystem path of the file
   directly involved for `Io` and `Parse`, and every `target_path` as the
