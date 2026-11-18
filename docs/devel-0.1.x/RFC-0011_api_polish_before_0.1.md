@@ -455,14 +455,16 @@ bug fixes and additive changes that preserve backward compatibility. A breaking
 change requires the next minor release, for example `0.2.0` after `0.1.x`. This
 policy also applies between pre-releases of the same minor version; for example,
 `0.1.0-beta.2` must remain backward compatible with `0.1.0-beta.1`. Starting
-with `1.0.0`, the project follows SemVer.
+with `1.0.0`, public API compatibility follows SemVer. This RFC does not define
+whether an MSRV increase is breaking for 1.x; the project will publish a
+separate MSRV policy before the first `1.0.0` release.
 
 The current MSRV is Rust 1.85 and remains supported throughout the 0.1.x line.
-Raising the MSRV is a breaking change under this policy and requires a later
-minor version, no earlier than 0.2.0. A new minor version does not itself
-require an MSRV increase; it may retain 1.85. When the MSRV is raised, update
-`rust-version`, the CI MSRV jobs, contributor documentation and the release's
-changelog and migration notes. Starting with 1.0.0, MSRV changes follow SemVer.
+Under the 0.x compatibility policy, raising the MSRV is a breaking change and
+requires a later minor version, no earlier than 0.2.0. A new minor version does
+not itself require an MSRV increase; it may retain 1.85. When the MSRV is raised,
+update `rust-version`, the CI MSRV jobs, contributor documentation and the
+release's changelog and migration notes.
 
 The public API exposes types from both `toml` and `tokio`: `toml` is re-exported
 from the crate root, its values and errors appear in public interfaces, and
@@ -760,10 +762,10 @@ for external matches, which already require a fallback arm.
   the minor version as the compatibility boundary throughout `0.x`: patch
   releases and pre-releases within the same minor preserve backward
   compatibility, and a breaking change requires the next minor (for example
-  `0.2.0`). After `1.0.0`, follow SemVer. Since major versions of `toml` and
-  `tokio` change types exposed by the public API, upgrading either is a breaking
-  change under this policy; compatible upgrades within a dependency major remain
-  allowed.
+  `0.2.0`). After `1.0.0`, follow SemVer for public API compatibility. Since
+  major versions of `toml` and `tokio` change types exposed by the public API,
+  upgrading either is a breaking change under this policy; compatible upgrades
+  within a dependency major remain allowed.
 - **Q10 — Public API compatibility checks.** Before publishing beta.1, compare
   both published crates against 0.0.8 with `cargo-semver-checks` in patch mode
   and reconcile its findings with the migration documentation. After beta.1 is
@@ -807,10 +809,12 @@ for external matches, which already require a fallback arm.
   The field holds context, not an invariant; no wrapper type or `with_path`
   helper is added.
 - **Q18 — Raising the MSRV.** Keep Rust 1.85 supported throughout 0.1.x.
-  Raising the MSRV is breaking and can happen only in a later 0.x minor version;
-  that minor release is not required to raise it. When raised, update the
-  `rust-version` metadata, CI, contributor documentation and migration notes.
-  After 1.0.0, follow SemVer.
+  Under the 0.x compatibility policy, raising the MSRV is breaking and can
+  happen only in a later 0.x minor version; that minor release is not required
+  to raise it. When raised, update the `rust-version` metadata, CI, contributor
+  documentation and migration notes. The project will define and publish a
+  separate MSRV policy before the first 1.0.0 release; this RFC does not decide
+  whether an MSRV increase in 1.x requires a major version.
 - **Q19 — Extensibility of key-error variants.** Mark `MissingKey`,
   `TypeMismatch`, `ValueParse` and `UnknownKey` non-exhaustive alongside the
   wrapping variants. Their existing public constructors preserve manual error
