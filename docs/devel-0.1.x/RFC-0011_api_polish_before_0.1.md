@@ -666,6 +666,11 @@ language, generated-code behavior or the `#[doc(hidden)]` support in
 `conferencier::__private`. Review those areas manually and keep the derive
 inputs and generated code compatible with the matching library release.
 
+Before publishing `0.1.0-beta.1`, also run the external package-consumer checks
+specified in [Testing](#testing). These are a separate release gate: they
+exercise the actual packaged artifacts and a downstream derive expansion, which
+the semver comparison does not verify.
+
 After the `0.1.0-beta.1` release tag exists, add a CI check for both published
 crates using `cargo-semver-checks`. Check `conferencier` with both feature
 selectors shown above and `conferencier-derive` once. Compare each candidate
@@ -950,6 +955,17 @@ No existing variant is removed; changes to existing variants are listed above.
   format. The contention test uses a bounded wait and releases the lock even on
   timeout, so a regression cannot leave the test blocked indefinitely.
 - The guide's custom scope `Debug` example is tested as a doctest.
+- Before publishing `0.1.0-beta.1`, build two small downstream consumer
+  projects outside the repository workspace against the actual `.crate`
+  archives for `conferencier` and `conferencier-derive`. Resolve the matching
+  unpublished beta packages from an isolated temporary local registry or
+  `[patch.crates-io]` entries pointing to the extracted package archives; do
+  not use workspace package paths. In one consumer, enable default features and
+  derive a `ConfigScope` or `ConfigTable` using the crate-root re-export. In a
+  separate consumer, depend on `conferencier` with default features disabled
+  and compile a manual `ConfigScope` or `ConfigTable` implementation. Both
+  builds must succeed. This is a one-time beta.1 release gate, not a recurring
+  CI job.
 - Before publishing `0.1.0-beta.1`, compare both public crates with 0.0.8 using
   the commands in [Public API checks](#public-api-checks), including both
   `conferencier` feature configurations, and reconcile all reported breaks with
@@ -1091,11 +1107,12 @@ No existing variant is removed; changes to existing variants are listed above.
   additive ones. Check `conferencier` with `--default-features` and
   `--only-explicit-features` (default and no-default feature configurations),
   and check `conferencier-derive` once; reconcile findings with the migration
-  documentation. After beta.1 is tagged, compare each candidate with the
-  immediately preceding published 0.1.x release tag, including pre-releases,
-  and advance the configured baseline after each release. Manually review
-  derive syntax, generated-code behavior and the `#[doc(hidden)]` `__private`
-  support, which the tool does not check.
+  documentation. This API comparison does not replace the separate external
+  package-consumer release gate in Testing. After beta.1 is tagged, compare
+  each candidate with the immediately preceding published 0.1.x release tag,
+  including pre-releases, and advance the configured baseline after each
+  release. Manually review derive syntax, generated-code behavior and the
+  `#[doc(hidden)]` `__private` support, which the tool does not check.
 - **Q11 — Beta policy and stable exit criteria.** Treat beta.1 as the first
   release covered by the 0.1.x compatibility commitment: each subsequent
   pre-release and release must remain backward compatible with the immediately
@@ -1173,6 +1190,12 @@ No existing variant is removed; changes to existing variants are listed above.
   validation fails, the input has already been consumed but the store remains
   unchanged. This prevents caller code from executing while the write lock is
   held and ensures readers see only complete values.
+- **Q25 — External package-consumer check.** Before publishing beta.1, compile
+  separate downstream consumers against the packaged crate archives: one using
+  the re-exported derive with default features and one using manual trait
+  implementations with default features disabled. Resolve the unpublished
+  beta archives from an isolated local source, not workspace package paths.
+  Treat this as a one-time release gate, not a recurring CI job.
 
 ## Open questions
 
