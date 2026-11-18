@@ -129,18 +129,20 @@ Non-goals:
   `SaveFileTaskJoin`. The wrapped errors remain public fields, so callers can
   still match on them.
 
-  Applications that want the full chain can opt in to formatting it. The
-  troubleshooting guide includes a small helper with no additional dependency:
+  Applications that want the full chain can opt in to formatting it, with each
+  source on a new line prefixed by `Caused by:`. The troubleshooting guide
+  includes a small helper with no additional dependency:
 
   ```rust,ignore
   fn display_error_chain(error: &dyn std::error::Error) -> String {
-      let mut messages = vec![error.to_string()];
+      let mut message = error.to_string();
       let mut source = error.source();
       while let Some(cause) = source {
-          messages.push(cause.to_string());
+          message.push_str("\nCaused by: ");
+          message.push_str(&cause.to_string());
           source = cause.source();
       }
-      messages.join(": ")
+      message
   }
   ```
 
@@ -773,7 +775,8 @@ No existing variant is removed; changes to existing variants are listed above.
 - A test asserts that no wrapping variant's `Display` contains the message of its
   source.
 - A doctest for `display_error_chain` verifies that it includes the outer error
-  and every source in order.
+  and every source in order, each source on a new `Caused by:` line. Include a
+  multi-line source and verify that its text is preserved.
 - Tests in `store.rs` assert `operation: Some(Read)`, the read path and
   `target_path: None` for file-read errors from `from_file` and `load_file`.
   They also assert the operation, the directly affected path and `target_path`
@@ -881,9 +884,9 @@ No existing variant is removed; changes to existing variants are listed above.
   or `tokio` types are breaking changes under the 0.x policy.
 - Guide: printing errors with their source chain in
   [troubleshooting](../../conferencier/guide/troubleshooting.md), including the
-  opt-in helper from E1 and the warning in E7 that diagnostics are not generally
-  redacted; the custom scope `Debug` example and synchronous file-loading example
-  with path context in
+  line-oriented opt-in helper from E1 and the warning in E7 that diagnostics
+  are not generally redacted; the custom scope `Debug` example and synchronous
+  file-loading example with path context in
   [concepts](../../conferencier/guide/concepts.md); the I/O error construction
   example in
   [concepts](../../conferencier/guide/concepts.md#reading-a-file-before-the-runtime-starts);
