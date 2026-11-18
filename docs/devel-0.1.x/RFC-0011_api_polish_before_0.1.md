@@ -521,6 +521,13 @@ not itself require an MSRV increase; it may retain 1.85. When the MSRV is raised
 update `rust-version`, the CI MSRV jobs, contributor documentation and the
 release's changelog and migration notes.
 
+This support commitment is checked both against the locked dependency graph and
+against a fresh dependency resolution on Rust 1.85 using Cargo's MSRV-aware
+resolver in fallback mode. The fresh-resolution check validates the dependency
+versions currently permitted by the crate manifests; it cannot guarantee that
+arbitrary versions selected by a downstream application's full dependency
+graph will also support Rust 1.85.
+
 The public API exposes types from both `toml` and `tokio`: `toml` is re-exported
 from the crate root, its values and errors appear in public interfaces, and
 [`SharedScope`](../../conferencier/src/scope.rs) is an alias for
@@ -784,6 +791,12 @@ No existing variant is removed; changes to existing variants are listed above.
   `cargo check -p conferencier --lib --no-default-features --locked`. This checks
   that the normal dependencies supply the features needed to compile the library;
   test and doctest dev-dependencies cannot mask a missing Tokio feature.
+- The MSRV CI job keeps its existing checks with `--locked` and also performs a
+  separate fresh dependency resolution on Rust 1.85 with Cargo's MSRV-aware
+  resolver in fallback mode, without reusing the workspace `Cargo.lock`. It
+  checks the workspace with all targets and features and checks `conferencier`
+  without default features against that resolved graph. Keep the fresh lockfile
+  isolated so this check does not change the committed lockfile.
 - During implementation, inspect the production Tokio feature graph with
   `cargo tree -p conferencier --edges normal,build,features --invert tokio --locked`
   both with and without `--no-default-features`, and verify that it enables only
@@ -844,8 +857,9 @@ No existing variant is removed; changes to existing variants are listed above.
   badge, and link the migration guide with an absolute URL.
 - `CONTRIBUTING.md`: document the 0.1.x MSRV commitment and the public API
   compatibility-check process, including the feature configurations and rolling
-  baseline. State that major upgrades of public `toml` or `tokio` types are
-  breaking changes under the 0.x policy.
+  baseline. Document that the MSRV CI checks both the locked graph and a fresh
+  MSRV-aware dependency resolution. State that major upgrades of public `toml`
+  or `tokio` types are breaking changes under the 0.x policy.
 - Guide: printing errors with their source chain in
   [troubleshooting](../../conferencier/guide/troubleshooting.md), including the
   opt-in helper from E1 and the warning in E7; the custom scope `Debug` example
@@ -973,10 +987,14 @@ No existing variant is removed; changes to existing variants are listed above.
 - **Q18 — Raising the MSRV.** Keep Rust 1.85 supported throughout 0.1.x.
   Under the 0.x compatibility policy, raising the MSRV is breaking and can
   happen only in a later 0.x minor version; that minor release is not required
-  to raise it. When raised, update the `rust-version` metadata, CI, contributor
-  documentation and migration notes. The project will define and publish a
-  separate MSRV policy before the first 1.0.0 release; this RFC does not decide
-  whether an MSRV increase in 1.x requires a major version.
+  to raise it. CI checks both the locked dependency graph and fresh resolution
+  with Cargo's MSRV-aware resolver in fallback mode. This validates the crate's
+  declared dependency constraints at the time of the check, not arbitrary
+  versions selected by a downstream application's full dependency graph. When
+  raised, update the `rust-version` metadata, CI, contributor documentation and
+  migration notes. The project will define and publish a separate MSRV policy
+  before the first 1.0.0 release; this RFC does not decide whether an MSRV
+  increase in 1.x requires a major version.
 - **Q19 — Extensibility of key-error variants.** Mark `MissingKey`,
   `TypeMismatch`, `ValueParse` and `UnknownKey` non-exhaustive alongside the
   wrapping variants. Their public constructors, renamed with the `_error`
