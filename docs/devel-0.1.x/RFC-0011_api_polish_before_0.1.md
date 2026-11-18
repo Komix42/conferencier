@@ -135,6 +135,8 @@ Non-goals:
   user-facing operations:
 
   ```rust,ignore
+  #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+  #[non_exhaustive]
   pub enum IoOperation {
       /// Read a configuration file.
       Read,
@@ -791,6 +793,10 @@ This RFC changes behavior that users can observe. It is released in
 - **Q20 — `SaveFileCleanup` constructor signature.** Accept target and temporary
   paths as `impl Into<PathBuf>`, accept the original failure as `Error` and box
   it internally, and accept the cleanup failure as `std::io::Error`.
+- **Q21 — `IoOperation` trait implementations.** Derive `Debug`, `Clone`, `Copy`,
+  `PartialEq` and `Eq`. `Debug` supports the derived `Error` formatter; the
+  remaining traits support ordinary copying and comparisons. Do not derive
+  `Hash` without a concrete use case.
 
 ## Open questions
 
