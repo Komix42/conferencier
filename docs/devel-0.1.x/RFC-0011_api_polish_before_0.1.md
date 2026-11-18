@@ -252,6 +252,10 @@ Non-goals:
   - `Error::parse_error(path: Option<PathBuf>, source: toml::de::Error) -> Error`;
   - `Error::serialize_error(path: Option<PathBuf>, source: toml::ser::Error) -> Error`.
 
+  The I/O constructors use the concrete `Option<PathBuf>` rather than
+  `Option<impl Into<PathBuf>>`, so callers can pass `None` without a type
+  annotation. When a path is known, callers can pass it as `Some(path.into())`.
+
   `io_error` stores `operation: None`; `io_error_with_operation` stores
   `operation: Some(operation)`; both store `target_path: None`. A caller that
   needs `target_path` sets the public field on the constructed error, as shown
@@ -744,6 +748,9 @@ This RFC changes behavior that users can observe. It is released in
   from I/O and TOML errors for ergonomic `?` propagation. They set no path,
   operation or save target; callers with contextual information use the public
   constructors instead.
+- **Q16 — I/O constructor path type.** Keep `Option<PathBuf>` for the optional
+  path arguments. It lets callers use an unambiguous `None`; a generic inner
+  `impl Into<PathBuf>` would require type annotation for pathless calls.
 
 ## Open questions
 
