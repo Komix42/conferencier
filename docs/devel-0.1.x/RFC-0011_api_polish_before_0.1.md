@@ -448,10 +448,10 @@ Non-goals:
 ## Non-finite `f32` values
 
 - **F1 — Accepted like `f64`.** Loading an `f32` or `Vec<f32>` field accepts the
-  TOML values `inf`, `+inf`, `-inf` and `nan` and stores the corresponding `f32`
-  value. The `non-finite float` error is removed. NaN remains NaN when saved and
-  loaded again, but its sign and payload are not preserved as part of this
-  contract.
+  TOML values `inf`, `+inf`, `-inf`, `nan`, `+nan` and `-nan` and stores the
+  corresponding `f32` value. The `non-finite float` error is removed. NaN
+  remains NaN when saved and loaded again, but its sign and payload are not
+  preserved as part of this contract.
 - **F2 — Range unchanged.** A finite `f64` value is rejected if it is less than
   `f32::MIN as f64` or greater than `f32::MAX as f64`. Both endpoints are
   accepted. This deliberately rejects any finite value outside the mathematical
@@ -925,13 +925,14 @@ No existing variant is removed; changes to existing variants are listed above.
   both with and without `--no-default-features`, and verify that it enables only
   `sync`, `rt` and `fs`. This manual check covers unwanted features; the CI
   compile checks alone do not enforce their absence.
-- Derive tests load `inf`, `+inf`, `-inf` and `nan` into `f32` and `Vec<f32>`
-  fields and verify infinities with equality and NaN with `is_nan()`, without
-  asserting its sign or payload. Tests accept both finite endpoints and reject
-  finite values just outside `f32::MIN` and `f32::MAX`, including a value above
-  `f32::MAX` that would cast to a finite `f32`. Vector range errors include the
-  element index. A round trip of a non-finite `f32` default through save and load
-  succeeds and checks the reloaded NaN with `is_nan()`.
+- Derive tests load `inf`, `+inf`, `-inf`, `nan`, `+nan` and `-nan` into `f32`
+  and `Vec<f32>` fields. They verify infinities with equality and all NaN
+  spellings with `is_nan()`, without asserting NaN's sign or payload. Tests
+  accept both finite endpoints and reject finite values just outside
+  `f32::MIN` and `f32::MAX`, including a value above `f32::MAX` that would cast
+  to a finite `f32`. Vector range errors include the element index. A round trip
+  of a non-finite `f32` default through save and load succeeds and checks the
+  reloaded NaN with `is_nan()`.
 - Save tests for out-of-range `u64` and `usize` values assert the exact generic
   `ValueParse` message and that it does not contain the numeric value; vector
   errors still identify the element index.
