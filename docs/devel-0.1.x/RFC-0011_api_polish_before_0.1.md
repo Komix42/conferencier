@@ -458,8 +458,10 @@ Non-goals:
     `save_error`, `temporary_path` and `cleanup_error`. The primary failure
     remains available in full through `save_error`, including an
     `Io.operation`, the directly affected `Io.path`, `Io.target_path`, the I/O
-    kind and the raw OS code. The target path is therefore retained even when
-    the primary failure involved only the temporary file.
+    kind and the raw OS code. Its `Io.target_path` already identifies the save
+    destination, even when `Io.path` identifies only the temporary file.
+    `SaveFileCleanup.target_path` deliberately repeats the destination on the
+    outer error so callers can inspect it without unwrapping `save_error`.
 
   `SaveFileTaskJoin` does not guarantee that the target is unchanged or that a
   temporary file was removed. Its source indicates cancellation or panic, but
@@ -918,10 +920,16 @@ No existing variant is removed; changes to existing variants are listed above.
     fields. Rejected in favor of non-exhaustive variants, public constructors
     where downstream code needs to create errors, and internal creation of the
     `save_file`-specific variants.
-11. **Infer the target path from `save_error` or `temporary_path`.** It would avoid
-     one field in `SaveFileCleanup`, but a primary failure may carry only a
-     temporary path, and temporary paths are not a public naming contract from
-     which the target can be recovered reliably. Rejected in favor of E6.
+11. **Infer the target path from `save_error` or `temporary_path`.** Every
+     library-generated `save_file` I/O error already carries the destination in
+     `Io.target_path`, including failures whose `Io.path` names only the
+     temporary file (E2). Removing `SaveFileCleanup.target_path` would therefore
+     avoid duplicating that value, but callers would have to unwrap and inspect
+     `save_error` to get the destination. Keeping the field makes the outer
+     cleanup error self-contained and gives callers direct access to its target.
+     The target cannot be recovered reliably from `temporary_path`, whose
+     relationship to the target is not a public naming contract. Rejected in
+     favor of E6.
 12. **A wrapping variant `SaveFile { target_path, source: Box<Error> }`** for every
      `save_file` failure. It names the target in one place, but callers would
      match nested errors for ordinary I/O failures, and it overlaps with
@@ -1021,10 +1029,13 @@ No existing variant is removed; changes to existing variants are listed above.
 - A serialization failure from `save_file` yields
   `Error::Serialize { target_path: Some(target), .. }` and leaves the target
   untouched; the same failure from `save_str` has `target_path: None`.
-- A test helper injects both a save failure and a cleanup failure. The test
-  asserts `target_path`, `temporary_path`, the nested operation and the updated
-  `Display` and source chain. It also verifies that the cleanup cause is not
-  repeated by `source()`.
+- Tests inject a save failure followed by successful cleanup, cleanup returning
+  `NotFound`, and another cleanup failure. Successful cleanup and `NotFound`
+  return the original save error unchanged; another cleanup failure returns
+  `SaveFileCleanup`. The simultaneous-failure test asserts that the outer
+  `target_path` equals the nested `Io.target_path`, and checks
+  `temporary_path`, the nested operation, `Display` and the source chain. It
+  also verifies that the cleanup cause is not repeated by `source()`.
 - Tests of `from_file` and `load_file` with invalid TOML assert
   `Error::Parse { path: Some(p), .. }` with the read path; tests of `from_str`
   and `load_str` assert `path: None`. A test of `str::parse::<ConfigStore>()`
