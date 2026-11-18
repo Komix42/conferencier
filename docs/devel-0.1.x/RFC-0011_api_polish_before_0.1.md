@@ -255,7 +255,8 @@ Non-goals:
   - `Error::missing_key(path: impl Into<String>, key: impl Into<String>) -> Error`;
   - `Error::type_mismatch(path: impl Into<String>, key: impl Into<String>, expected: &'static str, found: &'static str) -> Error`;
   - `Error::value_parse(path: impl Into<String>, key: impl Into<String>, message: impl Into<String>) -> Error`;
-  - `Error::unknown_key(path: impl Into<String>, key: impl Into<String>) -> Error`.
+  - `Error::unknown_key(path: impl Into<String>, key: impl Into<String>) -> Error`;
+  - `Error::save_file_cleanup_error(target_path: impl Into<PathBuf>, temporary_path: impl Into<PathBuf>, save_error: Error, cleanup_error: std::io::Error) -> Error`.
 
   The I/O constructors use the concrete `Option<PathBuf>` rather than
   `Option<impl Into<PathBuf>>`, so callers can pass `None` without a type
@@ -267,11 +268,10 @@ Non-goals:
   for `Parse.path` in E4. The existing `From<std::io::Error>`,
   `From<toml::de::Error>` and `From<toml::ser::Error>` conversions remain
   available and set every path and the operation to `None`. `SaveFileCleanup` is
-  normally created inside conferencier; because it is non-exhaustive, a public
-  `Error::save_file_cleanup_error(target_path, temporary_path, save_error,
-  cleanup_error)` constructor is provided for tests and manual construction.
-  Additional fields can later be added without breaking construction or
-  patterns if the existing constructors can supply suitable defaults for them.
+  normally created inside conferencier. Its public constructor accepts the
+  unboxed `save_error` and boxes it internally. Additional fields can later be
+  added without breaking construction or patterns if the existing constructors
+  can supply suitable defaults for them.
 
 - **E6 — Save target and temporary file.** Every error returned by `save_file`
   identifies the path passed to it, without inferring it from the temporary
@@ -788,6 +788,9 @@ This RFC changes behavior that users can observe. It is released in
   creation; downstream direct construction and exhaustive field patterns must
   migrate. New fields may be added compatibly in 0.1.x only when the existing
   constructors can supply suitable defaults.
+- **Q20 — `SaveFileCleanup` constructor signature.** Accept target and temporary
+  paths as `impl Into<PathBuf>`, accept the original failure as `Error` and box
+  it internally, and accept the cleanup failure as `std::io::Error`.
 
 ## Open questions
 
