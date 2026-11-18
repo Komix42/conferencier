@@ -29,8 +29,8 @@ public behavior beyond what the changelog records.
 - `Error::Io` names its file without debug formatting, and `Error::Parse` becomes
   a struct variant with an optional path, filled in by file methods or attached
   by callers that parse text themselves (E2, E4).
-- `Io`, `Parse`, `Serialize` and `SaveFileCleanup` are non-exhaustive variants
-  with public constructors (E5). `Io` can also identify the operation, and every
+- All eight data-bearing `Error` variants are non-exhaustive and have public
+  constructors (E5). `Io` can also identify the operation, and every
   `save_file` error names the save target (E2–E6).
 - The library enables only the Tokio features `sync`, `rt` and `fs` (T1–T2).
 - `f32` fields accept infinity and NaN like `f64` fields (F1–F2).
@@ -240,17 +240,22 @@ Non-goals:
 
   This does not add a blocking file API or a general error-context helper.
 
-- **E5 — Extensible variants and constructors.** `Error::Io`, `Error::Parse`,
-  `Error::Serialize` and `Error::SaveFileCleanup` are individually marked
-  `#[non_exhaustive]`, in addition to the existing attribute on `Error` itself.
-  Their public fields remain public. Outside the crate, patterns must include `..`
-  and callers cannot construct these variants directly. Callers use these public
+- **E5 — Extensible variants and constructors.** All eight variants of `Error`
+  (`Io`, `SaveFileCleanup`, `Parse`, `Serialize`, `MissingKey`, `TypeMismatch`,
+  `ValueParse` and `UnknownKey`) are individually marked `#[non_exhaustive]`, in
+  addition to the existing attribute on `Error` itself. Their public fields
+  remain public. Outside the crate, patterns must include `..` and callers
+  cannot construct these variants directly. Callers use these public
   constructors:
 
   - `Error::io_error(path: Option<PathBuf>, source: std::io::Error) -> Error`;
   - `Error::io_error_with_operation(path: Option<PathBuf>, operation: IoOperation, source: std::io::Error) -> Error`;
   - `Error::parse_error(path: Option<PathBuf>, source: toml::de::Error) -> Error`;
-  - `Error::serialize_error(path: Option<PathBuf>, source: toml::ser::Error) -> Error`.
+  - `Error::serialize_error(path: Option<PathBuf>, source: toml::ser::Error) -> Error`;
+  - `Error::missing_key(path: impl Into<String>, key: impl Into<String>) -> Error`;
+  - `Error::type_mismatch(path: impl Into<String>, key: impl Into<String>, expected: &'static str, found: &'static str) -> Error`;
+  - `Error::value_parse(path: impl Into<String>, key: impl Into<String>, message: impl Into<String>) -> Error`;
+  - `Error::unknown_key(path: impl Into<String>, key: impl Into<String>) -> Error`.
 
   The I/O constructors use the concrete `Option<PathBuf>` rather than
   `Option<impl Into<PathBuf>>`, so callers can pass `None` without a type
@@ -515,6 +520,10 @@ This RFC changes behavior that users can observe. It is released in
   `target_path` (E3, E5–E6). Replace direct construction with
   `Error::save_file_cleanup_error(target_path, temporary_path, save_error,
   cleanup_error)` and add `..` to field patterns.
+- **Breaking:** `MissingKey`, `TypeMismatch`, `ValueParse` and `UnknownKey`
+  become non-exhaustive (E5). Replace direct construction with their existing
+  `Error::missing_key`, `Error::type_mismatch`, `Error::value_parse` and
+  `Error::unknown_key` constructors. Add `..` to field patterns.
 - **Breaking:** the library no longer enables Tokio's `macros` and `rt-multi-thread`
   features (T1). An application that used `#[tokio::main]`, `#[tokio::test]` or the
   multi-threaded runtime without enabling these features itself fails to compile
@@ -561,9 +570,10 @@ This RFC changes behavior that users can observe. It is released in
    application types that contain a store. Rejected.
 9. **Strict by default with an `allow_unknown_keys` opt-out** (K1). Catches typos
    earlier, but breaks shared and forward-compatible files by default. Rejected.
-10. **Leave `Io` and `Parse` directly constructible.** This avoids the migration
+10. **Leave error variants directly constructible.** This avoids the migration
     in E5, but adding a field would break construction and patterns that list all
-    fields. Rejected in favor of non-exhaustive variants and constructors.
+    fields. Rejected in favor of non-exhaustive variants and constructors for
+    all eight variants.
 11. **Infer the target path from `save_error` or `temporary_path`.** It would avoid
      one field in `SaveFileCleanup`, but a primary failure may carry only a
      temporary path, and temporary paths are not a public naming contract from
@@ -614,10 +624,10 @@ This RFC changes behavior that users can observe. It is released in
   `path: None`.
 - A doctest for synchronous file loading verifies that a parse error from
   `from_str` can be given the source file path without losing its parser source.
-- Tests outside the library crate construct `Io`, `Parse`, `Serialize` and
-  `SaveFileCleanup` with the public constructors and inspect their fields using
-  patterns with `..`. Compile-fail tests outside the crate verify that direct
-  construction and patterns without `..` are rejected for all four variants.
+- Tests outside the library crate construct all eight error variants with the
+  public constructors and inspect their fields using patterns with `..`.
+  Compile-fail tests outside the crate verify that direct construction and
+  patterns without `..` are rejected for all eight variants.
 - `cargo test -p conferencier --no-default-features --locked` and the workspace tests
   pass with the reduced Tokio features; a test or doctest runs an async method on
   a current-thread runtime.
@@ -698,11 +708,11 @@ This RFC changes behavior that users can observe. It is released in
   `deny_unknown_keys` opt-in per type. This preserves compatibility with shared
   and forward-extended configuration files. A separate API for inspecting
   unclaimed keys without rejecting them remains in the backlog.
-- **Q5 — Extensibility of wrapping variants.** Review noted that the
+- **Q5 — Extensibility of error variants.** Review noted that the
   `#[non_exhaustive]` attribute on `Error` protects against new variants, not new
-  fields in existing variants. E5 makes `Io`, `Parse`, `Serialize` and
-  `SaveFileCleanup` non-exhaustive and provides constructors, allowing fields to
-  be added when suitable defaults exist.
+  fields in existing variants. E5 makes all eight variants non-exhaustive and
+  provides constructors, allowing fields to be added when suitable defaults
+  exist.
 - **Q6 — Sensitive values in diagnostics.** Conferencier cannot determine which
   values an application considers sensitive. E7 documents the risk instead of
   adding redaction; the application can customize its scope's `Debug`, but that
@@ -772,6 +782,12 @@ This RFC changes behavior that users can observe. It is released in
   that minor release is not required to raise it. When raised, update the
   `rust-version` metadata, CI, contributor documentation and migration notes.
   After 1.0.0, follow SemVer.
+- **Q19 — Extensibility of key-error variants.** Mark `MissingKey`,
+  `TypeMismatch`, `ValueParse` and `UnknownKey` non-exhaustive alongside the
+  wrapping variants. Their existing public constructors preserve manual error
+  creation; downstream direct construction and exhaustive field patterns must
+  migrate. New fields may be added compatibly in 0.1.x only when the existing
+  constructors can supply suitable defaults.
 
 ## Open questions
 
