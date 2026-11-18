@@ -370,10 +370,12 @@ Non-goals:
 - **E7 — Sensitive diagnostics.** Error messages, `Debug` output and source
   chains are not redacted. A TOML parse error's source can include the offending
   line of input; other diagnostics can include values, key names or file paths.
-  For example, an out-of-range `u64` saved by a derive currently appears in the
-  `ValueParse` message. Applications should decide how to handle these diagnostics
-  before displaying or logging them. The `ConfigStore` `Debug` policy (D1) does
-  not sanitize errors or their sources.
+  When a derived `u64` or `usize` is out of range for a TOML integer during save,
+  its `ValueParse` message is `value out of range for TOML integer` without the
+  numeric value; a vector error appends `(at index N)`. This narrow exception
+  does not redact other diagnostics. Applications should decide how to handle
+  errors before displaying or logging them. The `ConfigStore` `Debug` policy (D1)
+  does not sanitize errors or their sources.
 
 ## Tokio features
 
@@ -683,6 +685,8 @@ stable text format, and must not be parsed by callers.
 - **Breaking:** the `Debug` output of `ConfigStore` no longer contains values (D1).
 - `f32` fields that previously failed with `non-finite float` now load (F1). An
   application that relied on this rejection must check the value itself.
+- Save-time range errors for `u64` and `usize` no longer include the numeric
+  value (E7); vector errors continue to include the element index.
 - K1 changes nothing.
 
 `Error` is already `#[non_exhaustive]`, so adding `SaveFileTaskJoin` is
@@ -741,7 +745,9 @@ No existing variant is removed; changes to existing variants are listed above.
   [backlog](../BACKLOG.md#planned-for-010-beta1).
 - A library-level redaction mechanism for values, fields or error diagnostics.
 - A blocking variant of `from_file`.
-- Changes to the key-related error messages.
+- Changes to the `MissingKey`, `TypeMismatch`, `ValueParse` and `UnknownKey`
+  messages, other than the specific save-time integer range message in E7 and
+  the `f32` range messages in F2.
 
 ## Testing
 
@@ -809,6 +815,9 @@ No existing variant is removed; changes to existing variants are listed above.
   `f32::MAX` that would cast to a finite `f32`. Vector range errors include the
   element index. A round trip of a non-finite `f32` default through save and load
   succeeds and checks the reloaded NaN with `is_nan()`.
+- Save tests for out-of-range `u64` and `usize` values assert the exact generic
+  `ValueParse` message and that it does not contain the numeric value; vector
+  errors still identify the element index.
 - Setter tests pass `&str`, `String`, arrays of `&str` and iterators. They also
   cover a borrowed `Vec<String>`, a borrowed slice of `&str` via
   `.iter().copied()`, and borrowed numeric, boolean and datetime slices via
@@ -862,8 +871,9 @@ No existing variant is removed; changes to existing variants are listed above.
   or `tokio` types are breaking changes under the 0.x policy.
 - Guide: printing errors with their source chain in
   [troubleshooting](../../conferencier/guide/troubleshooting.md), including the
-  opt-in helper from E1 and the warning in E7; the custom scope `Debug` example
-  and synchronous file-loading example with path context in
+  opt-in helper from E1 and the warning in E7 that diagnostics are not generally
+  redacted; the custom scope `Debug` example and synchronous file-loading example
+  with path context in
   [concepts](../../conferencier/guide/concepts.md); the I/O error construction
   example in
   [concepts](../../conferencier/guide/concepts.md#reading-a-file-before-the-runtime-starts);
@@ -878,8 +888,9 @@ No existing variant is removed; changes to existing variants are listed above.
   including the `Io.operation`, `Io.target_path`, `Parse.path`, `Serialize.path`
   and `SaveFileCleanup.target_path` fields, other error-shape changes, Tokio
   features, setter signatures, `ConfigStore`'s `Debug` output and constructor
-  renames. Record acceptance of non-finite `f32` values as a non-breaking change
-  in the same section.
+  renames. Record acceptance of non-finite `f32` values and omission of the raw
+  value in save-time `u64`/`usize` range messages as non-breaking changes in the
+  same section.
 - Add `Amended by: RFC-0011` to the headers of RFC-0001, RFC-0006 and RFC-0007
   when this RFC is implemented.
 
