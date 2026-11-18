@@ -276,9 +276,13 @@ Non-goals:
   | `Serialize { target_path: None, .. }` | `failed to serialize TOML` |
   | `SaveFileCleanup { .. }` | `failed to save "<target>"; removing temporary file "<t>" also failed (<cleanup_error>)` |
 
-  The diagnostic context selected by each row and the path precedence below
-  remain guarantees throughout 0.1.x. Exact wording, punctuation and layout are
-  not part of the compatibility contract and may change within 0.1.x.
+  The diagnostic context selected by each row remains a guarantee for
+  library-generated errors throughout 0.1.x. Exact wording, punctuation and
+  layout are not part of the compatibility contract and may change within
+  0.1.x. The table also specifies the initial beta.1 output for caller-created
+  or caller-modified `Io` values, but path precedence for field combinations
+  that library operations do not produce is not a 0.1.x compatibility
+  guarantee.
 
   The initial key-error templates remain `missing key <k>`,
   `expected <expected> at <k> but found <found>`,
@@ -292,16 +296,18 @@ Non-goals:
   variants and inspect fields and sources rather than parse messages.
   `ValueParse` has no separate typed reason code.
 
-  The `operation: None, target_path: Some(_)` row applies before the
-  `operation: None, path: Some(_)` row, even if both paths are present. This is
-  deterministic; library-generated `save_file` I/O errors always have an
-  operation, and the public I/O constructors leave `target_path` unset.
+  In the initial beta.1 output, the `operation: None, target_path: Some(_)` row
+  applies before the `operation: None, path: Some(_)` row, even if both paths
+  are present. Library-generated `save_file` I/O errors always have an
+  operation, and the public I/O constructors leave `target_path` unset, so this
+  precedence for caller-modified values is not a compatibility guarantee.
 
-  The first matching row determines the displayed context. For `Read`, the
-  message never displays `target_path`; it uses `path` when present and
-  otherwise displays only the generic operation message, even if
-  `target_path` is `Some`. In beta.1, `<op>`
-  uses the operation names above without a path, for example
+  In the initial beta.1 output, the first matching row determines the displayed
+  context. For `Read`, the message does not display `target_path`; it uses
+  `path` when present and otherwise displays only the generic operation message,
+  even if a caller has set `target_path`. Library-generated read errors always
+  have a path and no target path. In beta.1, `<op>` uses the operation names
+  above without a path, for example
   `failed to write temporary file`. For `CreateTemporary`, `PrepareTemporary`
   and `WriteTemporary`, a `target_path` of `Some` is included as context, with
   or without `<p>`. In beta.1, the message appends ` for "<target>"`, for
@@ -726,9 +732,12 @@ This RFC changes behavior that users can observe. It is released in
 0.1.0-beta.1, the first release of the 0.1.x line.
 
 `Error`'s `Display` retains the diagnostic context and path escaping specified
-in E2–E3, but its exact wording and formatting, including the key-error
-templates, are not stable in 0.1.x. Callers should inspect variants, fields
-and sources instead of parsing messages. `ConfigStore`'s `Debug` output has
+in E2–E3 for library-generated errors and errors built with the public
+constructors, but its exact wording and formatting, including the key-error
+templates, are not stable in 0.1.x. The initial beta.1 path precedence for
+caller-modified `Io` values with field combinations that library operations do
+not produce is not a compatibility guarantee. Callers should inspect variants,
+fields and sources instead of parsing messages. `ConfigStore`'s `Debug` output has
 only the content guarantees in D1–D2, not a stable text format, and must not be
 parsed by callers. The derived `Debug` output of `Error` and `IoOperation` is
 not part of the compatibility contract either.
@@ -897,9 +906,9 @@ No existing variant is removed; changes to existing variants are listed above.
 - The `Io` display tests cover pathless operations with and without
   `target_path`, including `InspectTarget` and `ReplaceTarget` using the known
   target path, temporary-file operations including that target as context, and
-  `Read` never displaying `target_path`. They also cover `operation: None` with
-  both `path` and `target_path` present, verifying the first-matching-row
-  precedence in E3.
+  the initial beta.1 `Read` message not displaying `target_path`. They also
+  cover `operation: None` with both `path` and `target_path` present, verifying
+  the initial beta.1 first-matching-row precedence in E3.
 - Display tests use synthetic paths containing quotes, backslashes, newline,
   carriage return, a terminal escape character and Unicode line and paragraph
   separators. They verify E2's escaping for `Io`, `Parse`, `Serialize`,
@@ -1211,10 +1220,12 @@ No existing variant is removed; changes to existing variants are listed above.
   calls; they do not promise a particular platform-specific implementation.
   The non-exhaustive enum can gain new variants, but existing names and meanings
   are not changed in 0.1.x.
-- **Q13 — Pathless I/O display.** When `operation` is known but the directly
-  affected `path` is absent, keep the operation-specific message. If
-  `target_path` is available, `InspectTarget` and `ReplaceTarget` use it as the
-  displayed path; temporary-file operations include it as save-target context.
+- **Q13 — Pathless I/O display.** In the initial beta.1 output, when `operation`
+  is known but the directly affected `path` is absent, use the operation-specific
+  message. If `target_path` is available, `InspectTarget` and `ReplaceTarget`
+  use it as the displayed path; temporary-file operations include it as
+  save-target context. Precedence for caller-modified `Io` field combinations
+  that library operations do not produce is not a 0.1.x compatibility guarantee.
 - **Q14 — `spawn_blocking` join failure.** Return the new
   `Error::SaveFileTaskJoin { target_path, source }` variant rather than wrapping
   the join failure in `std::io::Error`. A Tokio task join failure does not
