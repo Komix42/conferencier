@@ -1,7 +1,7 @@
 # AUDIT-001: Quality audit of 0.0.8
 
 Date: 2026-11-17
-Status: Open
+Status: Closed
 Author: Komix42 <komix[at]ignore.cz>
 Audited release: 0.0.8 (commit a363dc7)
 Target release: 0.1.0-beta.1
@@ -62,6 +62,9 @@ expose the cause either in `Display` or through `source()`, not both.
 
 Decision: **RFC**. Messages are part of observable behavior and tests compare them.
 
+Resolution: [RFC-0011](../devel-0.1.x/RFC-0011_api_polish_before_0.1.md#error-messages-and-sources),
+released in 0.1.0-beta.1.
+
 ### A2. `Error::Io` displays a debug-formatted `Option`
 
 The message is built as `I/O error (path: {path:?})`, so users see
@@ -71,6 +74,9 @@ replace) would help as well.
 
 Decision: **RFC**, together with A1.
 
+Resolution: [RFC-0011](../devel-0.1.x/RFC-0011_api_polish_before_0.1.md#error-messages-and-sources),
+released in 0.1.0-beta.1.
+
 ### A3. Parse errors of files do not name the file
 
 `ConfigStore::from_file` and `load_file` return `Error::Parse` without the
@@ -79,6 +85,9 @@ cannot tell which one is invalid without wrapping every call.
 
 Decision: **RFC**. Attaching the path needs a field or variant change in the
 non-exhaustive `Error` enum.
+
+Resolution: [RFC-0011](../devel-0.1.x/RFC-0011_api_polish_before_0.1.md#error-messages-and-sources),
+released in 0.1.0-beta.1.
 
 ### A4. The library enables unneeded Tokio features
 
@@ -91,6 +100,9 @@ Cargo features are additive, every user compiles them.
 Decision: **RFC**. Removing features can break users who rely on them
 transitively; the RFC also states the minimal feature set as a documented promise.
 
+Resolution: [RFC-0011](../devel-0.1.x/RFC-0011_api_polish_before_0.1.md#tokio-features),
+released in 0.1.0-beta.1.
+
 ### A5. `f32` fields reject infinity and NaN, `f64` fields accept them
 
 The generated conversion of `f32` and `Vec<f32>` returns
@@ -102,6 +114,9 @@ these values, so the asymmetry is not needed for correctness.
 Decision: **RFC**. Either accept non-finite values for `f32` (only finite values
 outside the `f32` range are errors) or document the rule for both types.
 
+Resolution: [RFC-0011](../devel-0.1.x/RFC-0011_api_polish_before_0.1.md#non-finite-f32-values)
+accepts non-finite `f32` values, released in 0.1.0-beta.1.
+
 ### A6. Typed setters take owned `String` and `Vec`
 
 `ConfigStore::set_string(&self, section, key, value: String)` and the vector
@@ -112,6 +127,9 @@ convenient.
 Decision: **RFC**. A signature change; generic parameters can affect type
 inference in existing calls.
 
+Resolution: [RFC-0011](../devel-0.1.x/RFC-0011_api_polish_before_0.1.md#setter-signatures),
+released in 0.1.0-beta.1.
+
 ### A7. `Debug` of `ConfigStore` prints the whole document
 
 `ConfigStore` derives `Debug` ([store.rs](../../conferencier/src/store.rs)), so
@@ -120,6 +138,9 @@ logs. A manual implementation could print only the section names, or the
 document only with the alternate flag.
 
 Decision: **RFC**.
+
+Resolution: [RFC-0011](../devel-0.1.x/RFC-0011_api_polish_before_0.1.md#debug-of-configstore),
+released in 0.1.0-beta.1.
 
 ### A8. The derive dependency is not pinned to an exact version
 
@@ -130,6 +151,9 @@ from the same release. With pre-releases, a caret requirement can pair different
 betas. Crates with the same structure, such as `serde`, use `=` requirements.
 
 Decision: **Fix**, before 0.1.0-beta.1: use `=` in the workspace dependency.
+
+Resolution: fixed in 0.1.0-beta.1 (`=0.1.0-beta.1`); the policy is specified in
+[RFC-0011](../devel-0.1.x/RFC-0011_api_polish_before_0.1.md#versioning-and-public-dependencies).
 
 ## Findings: internal quality
 
@@ -146,12 +170,19 @@ fail to compile.
 Decision: **Fix**. Use absolute paths everywhere and add a trybuild pass test
 that shadows these names.
 
+Resolution: fixed in 0.1.0-beta.1 for the `core` and `std` paths, with the
+trybuild pass test `pass_generated_hygiene`. The path to the `conferencier`
+crate itself remained relative; see
+[AUDIT-002](../devel-0.1.x/AUDIT-002_quality_0.1.0-beta.1.md) A1.
+
 ### B2. Unused dev-dependency `once_cell`
 
 `once_cell` is listed in the dev-dependencies of `conferencier` but not used.
 `std::sync::LazyLock` (Rust 1.80) covers its use case within the MSRV.
 
 Decision: **Fix**.
+
+Resolution: removed in 0.1.0-beta.1.
 
 ### B3. Dead branch in `annotate_with_index`
 
@@ -162,6 +193,8 @@ so the branch is effectively unreachable.
 
 Decision: **Fix**. Remove the branch or make it annotate consistently.
 
+Resolution: the branch was removed in 0.1.0-beta.1.
+
 ### B4. Unused `doc_cfg` attribute
 
 `#![cfg_attr(docsrs, feature(doc_cfg))]` is enabled in
@@ -170,6 +203,8 @@ the manifest has no `[package.metadata.docs.rs]` that sets `--cfg docsrs`.
 Items behind the `derive` feature are therefore not marked as such on docs.rs.
 
 Decision: **Fix**. Either configure docs.rs and mark the `derive` items, or remove the attribute.
+
+Resolution: the attribute was removed in 0.1.0-beta.1.
 
 ### B5. Field types are classified by name only
 
@@ -189,6 +224,10 @@ should be documented and the diagnostics improved.
 
 Decision: **Fix** for the diagnostics and the documentation; supporting more
 types belongs to the backlog entry *Conversion hooks*.
+
+Resolution: fixed in 0.1.0-beta.1; the derive reports type aliases, references
+and nested vectors with specific diagnostics, and the
+[derive guide](../../conferencier/guide/derive.md) documents the naming rule.
 
 ## Not taken up
 
