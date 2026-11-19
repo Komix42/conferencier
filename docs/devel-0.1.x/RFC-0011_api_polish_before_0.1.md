@@ -1,7 +1,7 @@
 # RFC-0011: Public API polish before 0.1.0
 
 Date: 2026-11-17
-Status: Draft
+Status: Approved
 Author: Komix42 <komix[at]ignore.cz>
 Target release: 0.1.0-beta.1
 Amends: [RFC-0001](../devel-0.0.x/RFC-0001_baseline_architecture.md), [RFC-0004](../devel-0.0.x/RFC-0004_nested_tables.md), [RFC-0005](../devel-0.0.x/RFC-0005_api_redesign.md), [RFC-0006](../devel-0.0.x/RFC-0006_strict_unknown_keys.md), [RFC-0007](../devel-0.0.x/RFC-0007_default_expressions.md), [RFC-0009](../devel-0.0.x/RFC-0009_save_file_replacement.md)
@@ -1230,12 +1230,15 @@ No existing variant is removed; changes to existing variants are listed above.
   `https://docs.rs/conferencier/%5E0.1.0-beta.1/...` instead of `latest`.
   docs.rs resolves `latest` to the newest stable release, which during the beta
   is 0.0.8 and after 0.2.0 would be the next series; an exact version would go
-  stale with every release. The range resolves to the newest published version
-  from `0.1.0-beta.1` up to, but excluding, `0.2.0`, including pre-releases; a
-  plain `^0.1` would exclude them. Use `%5E` instead of `^` for portability in
-  Markdown. Links to the crate root without a version, such as the docs.rs
-  badge, the derive crate's introduction and the issue template, remain
-  unchanged. Historical `CHANGELOG.md` entries are not edited.
+  stale with every release. The range resolves to the newest matching version:
+  pre-releases of `0.1.0` from `0.1.0-beta.1` onward and stable `0.1.x`
+  releases. It does not match pre-releases of later patch versions, such as
+  `0.1.1-beta.1`; until a matching stable release is published, the links
+  resolve to the newest matching earlier version. A plain `^0.1` would exclude
+  all pre-releases. Use `%5E` instead of `^` for portability in Markdown.
+  Links to the crate root without a version, such as the docs.rs badge, the
+  derive crate's introduction and the issue template, remain unchanged.
+  Historical `CHANGELOG.md` entries are not edited.
 - [`conferencier-derive/README.md`](../../conferencier-derive/README.md):
   retain the direct-use example and show `conferencier` with default features
   disabled and `conferencier-derive` pinned to the same exact beta version.
