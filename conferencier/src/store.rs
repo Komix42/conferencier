@@ -1,8 +1,9 @@
+use std::fmt;
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockError};
 
 use tokio::fs;
 use toml::value::Datetime;
@@ -85,9 +86,39 @@ use crate::value_conversion;
 /// a write is not a transaction, and another task may change the document between them.
 /// The [guide](https://docs.rs/conferencier/latest/conferencier/guide/concepts/index.html#locking)
 /// explains the design assumptions behind this lock.
-#[derive(Clone, Debug, Default)]
+///
+/// # Debug output
+///
+/// The `Debug` implementation lists top-level key names only and never displays
+/// configuration values. If the lock is unavailable, it reports that the keys could not
+/// be read rather than waiting. Key names may themselves be sensitive, and the output
+/// format is not stable or intended for parsing.
+#[derive(Clone, Default)]
 pub struct ConfigStore {
     table: Arc<RwLock<Table>>,
+}
+
+impl fmt::Debug for ConfigStore {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let keys = match self.table.try_read() {
+            Ok(table) => Some(table.keys().cloned().collect::<Vec<_>>()),
+            Err(TryLockError::WouldBlock) => None,
+            Err(TryLockError::Poisoned(error)) => {
+                Some(error.into_inner().keys().cloned().collect::<Vec<_>>())
+            }
+        };
+
+        let mut debug_struct = f.debug_struct("ConfigStore");
+        match keys {
+            Some(keys) => {
+                debug_struct.field("keys", &keys);
+            }
+            None => {
+                debug_struct.field("keys", &"<unavailable: locked>");
+            }
+        }
+        debug_struct.finish_non_exhaustive()
+    }
 }
 
 impl ConfigStore {
@@ -1100,7 +1131,7 @@ mod tests {
 
     #[test]
     fn poisoned_lock_keeps_working() -> Result<()> {
-        let store = ConfigStore::from_str("[App]\nport = 1")?;
+        let store = ConfigStore::from_str("[App]\nport = 718293")?;
         let shared = store.clone();
         let _ = std::thread::spawn(move || {
             let _guard = shared.write();
@@ -1109,8 +1140,49 @@ mod tests {
         .join();
         assert!(store.table.is_poisoned());
 
+        let debug = format!("{store:?}");
+        assert!(debug.contains("App"));
+        assert!(!debug.contains("718293"));
         store.set_integer("App", "port", 2)?;
         assert_eq!(store.get_integer("App", "port")?, 2);
+        Ok(())
+    }
+
+    #[test]
+    fn debug_lists_top_level_keys_without_values() -> Result<()> {
+        let store = ConfigStore::from_str(
+            "App = { password = \"sensitive_value_marker\" }\nMode = \"secret_mode_marker\"\nCounter = 92837465",
+        )?;
+
+        for debug in [format!("{store:?}"), format!("{store:#?}")] {
+            assert!(debug.contains("App"));
+            assert!(debug.contains("Mode"));
+            assert!(debug.contains("Counter"));
+            assert!(!debug.contains("sensitive_value_marker"));
+            assert!(!debug.contains("secret_mode_marker"));
+            assert!(!debug.contains("92837465"));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn debug_does_not_wait_for_a_locked_store() -> Result<()> {
+        let store = ConfigStore::from_str("[App]\nport = 80")?;
+        let guard = store.write();
+        let debug_store = store.clone();
+        let (sender, receiver) = sync_channel(1);
+
+        let debug_thread = std::thread::spawn(move || {
+            let _ = sender.send(format!("{debug_store:?}"));
+        });
+
+        let result = receiver.recv_timeout(Duration::from_secs(5));
+        drop(guard);
+        let debug = result.expect("Debug should not wait for the store lock");
+        debug_thread
+            .join()
+            .expect("formatting the store should not panic");
+        assert!(debug.contains("locked"));
         Ok(())
     }
 
