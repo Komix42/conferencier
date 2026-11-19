@@ -200,6 +200,140 @@ pub enum Error {
     },
 }
 
+#[cfg(doctest)]
+/// Each non-exhaustive variant rejects external construction and full patterns.
+///
+/// ```compile_fail
+/// # fn construct(source: std::io::Error) {
+/// let _ = conferencier::Error::Io {
+///     path: None,
+///     operation: None,
+///     target_path: None,
+///     source,
+/// };
+/// # }
+/// ```
+///
+/// ```compile_fail
+/// # fn inspect(error: conferencier::Error) {
+/// if let conferencier::Error::Io { path, operation, target_path, source } = error {}
+/// # }
+/// ```
+///
+/// ```compile_fail
+/// # fn construct(save_error: conferencier::Error, cleanup_error: std::io::Error) {
+/// let _ = conferencier::Error::SaveFileCleanup {
+///     target_path: "config.toml".into(),
+///     save_error: Box::new(save_error),
+///     temporary_path: "temp.toml".into(),
+///     cleanup_error,
+/// };
+/// # }
+/// ```
+///
+/// ```compile_fail
+/// # fn inspect(error: conferencier::Error) {
+/// if let conferencier::Error::SaveFileCleanup {
+///     target_path, save_error, temporary_path, cleanup_error
+/// } = error {}
+/// # }
+/// ```
+///
+/// ```compile_fail
+/// # fn construct(source: conferencier::toml::de::Error) {
+/// let _ = conferencier::Error::Parse { path: None, source };
+/// # }
+/// ```
+///
+/// ```compile_fail
+/// # fn inspect(error: conferencier::Error) {
+/// if let conferencier::Error::Parse { path, source } = error {}
+/// # }
+/// ```
+///
+/// ```compile_fail
+/// # fn construct(source: conferencier::toml::ser::Error) {
+/// let _ = conferencier::Error::Serialize { target_path: None, source };
+/// # }
+/// ```
+///
+/// ```compile_fail
+/// # fn inspect(error: conferencier::Error) {
+/// if let conferencier::Error::Serialize { target_path, source } = error {}
+/// # }
+/// ```
+///
+/// ```compile_fail
+/// # fn construct(source: tokio::task::JoinError) {
+/// let _ = conferencier::Error::SaveFileTaskJoin {
+///     target_path: "config.toml".into(),
+///     source,
+/// };
+/// # }
+/// ```
+///
+/// ```compile_fail
+/// # fn inspect(error: conferencier::Error) {
+/// if let conferencier::Error::SaveFileTaskJoin { target_path, source } = error {}
+/// # }
+/// ```
+///
+/// ```compile_fail
+/// let _ = conferencier::Error::MissingKey {
+///     table_path: "App".into(),
+///     key: "port".into(),
+/// };
+/// ```
+///
+/// ```compile_fail
+/// # fn inspect(error: conferencier::Error) {
+/// if let conferencier::Error::MissingKey { table_path, key } = error {}
+/// # }
+/// ```
+///
+/// ```compile_fail
+/// let _ = conferencier::Error::TypeMismatch {
+///     table_path: "App".into(),
+///     key: "port".into(),
+///     expected: "integer",
+///     found: "string",
+/// };
+/// ```
+///
+/// ```compile_fail
+/// # fn inspect(error: conferencier::Error) {
+/// if let conferencier::Error::TypeMismatch { table_path, key, expected, found } = error {}
+/// # }
+/// ```
+///
+/// ```compile_fail
+/// let _ = conferencier::Error::ValueParse {
+///     table_path: "App".into(),
+///     key: "port".into(),
+///     message: "out of range".into(),
+/// };
+/// ```
+///
+/// ```compile_fail
+/// # fn inspect(error: conferencier::Error) {
+/// if let conferencier::Error::ValueParse { table_path, key, message } = error {}
+/// # }
+/// ```
+///
+/// ```compile_fail
+/// let _ = conferencier::Error::UnknownKey {
+///     table_path: "App".into(),
+///     key: "port".into(),
+/// };
+/// ```
+///
+/// ```compile_fail
+/// # fn inspect(error: conferencier::Error) {
+/// if let conferencier::Error::UnknownKey { table_path, key } = error {}
+/// # }
+/// ```
+struct ErrorVariantExtensibilityDoctests;
+
 impl Error {
     /// Creates an I/O error with optional path context and no operation.
     ///
@@ -546,6 +680,19 @@ mod tests {
 
     use super::*;
 
+    fn assert_display_without_source(error: &Error, expected: &str) {
+        let display = error.to_string();
+        assert_eq!(display, expected);
+        let source = error.source().expect("wrapping errors have a source");
+        assert!(!display.contains(&source.to_string()));
+    }
+
+    #[test]
+    fn error_is_send_sync_and_static() {
+        fn assert_traits<T: Send + Sync + 'static>() {}
+        assert_traits::<Error>();
+    }
+
     #[test]
     fn value_errors_preserve_messages_and_have_no_source() {
         let cases = [
@@ -560,6 +707,10 @@ mod tests {
             (
                 Error::value_parse_error("App", "port", "out of range"),
                 "invalid value at App.port: out of range",
+            ),
+            (
+                Error::unknown_key_error("App", "port"),
+                "unknown key App.port",
             ),
         ];
 
@@ -613,10 +764,15 @@ mod tests {
             let source = error.source().unwrap().downcast_ref::<IoError>().unwrap();
             assert_eq!(source.kind(), ErrorKind::NotFound);
             assert_eq!(source.to_string(), "missing config");
+            let Error::Io { source: stored, .. } = &error else {
+                unreachable!("the constructor returns an I/O error");
+            };
+            assert!(std::ptr::eq(source, stored));
         }
 
+        let path = PathBuf::from("temp.toml");
         let error = Error::io_error_with_operation(
-            Some("temp.toml".into()),
+            Some(path.clone()),
             IoOperation::WriteTemporary,
             IoError::new(ErrorKind::WriteZero, "write failed"),
         );
@@ -625,19 +781,49 @@ mod tests {
             "failed to write temporary file \"temp.toml\""
         );
         assert!(matches!(
-            error,
+            &error,
             Error::Io {
+                path: Some(error_path),
                 operation: Some(IoOperation::WriteTemporary),
                 target_path: None,
+                source,
                 ..
-            }
+            } if error_path == &path
+                && source.kind() == ErrorKind::WriteZero
+                && source.to_string() == "write failed"
         ));
+        let source = error.source().unwrap().downcast_ref::<IoError>().unwrap();
+        assert_eq!(source.kind(), ErrorKind::WriteZero);
+        assert_eq!(source.to_string(), "write failed");
+        let Error::Io { source: stored, .. } = &error else {
+            unreachable!("the constructor returns an I/O error");
+        };
+        assert!(std::ptr::eq(source, stored));
+    }
+
+    #[test]
+    fn io_error_conversion_leaves_context_unset() {
+        let error = Error::from(IoError::new(ErrorKind::NotFound, "missing config"));
+        assert!(matches!(
+            &error,
+            Error::Io {
+                path: None,
+                operation: None,
+                target_path: None,
+                source,
+                ..
+            } if source.kind() == ErrorKind::NotFound && source.to_string() == "missing config"
+        ));
+        let source = error.source().unwrap().downcast_ref::<IoError>().unwrap();
+        assert_eq!(source.kind(), ErrorKind::NotFound);
+        assert_eq!(source.to_string(), "missing config");
     }
 
     #[test]
     fn successful_save_file_cleanup_returns_original_error() {
-        let error = Error::io_error(
+        let error = Error::io_error_with_operation(
             Some(PathBuf::from("config.toml")),
+            IoOperation::ReplaceTarget,
             IoError::new(ErrorKind::PermissionDenied, "save failed"),
         )
         .with_save_target(Path::new("config.toml"));
@@ -649,8 +835,15 @@ mod tests {
         );
 
         match error {
-            Error::Io { path, source, .. } => {
+            Error::Io {
+                path,
+                operation: Some(IoOperation::ReplaceTarget),
+                target_path: Some(target_path),
+                source,
+                ..
+            } => {
                 assert_eq!(path, Some(PathBuf::from("config.toml")));
+                assert_eq!(target_path, PathBuf::from("config.toml"));
                 assert_eq!(source.kind(), ErrorKind::PermissionDenied);
                 assert_eq!(source.to_string(), "save failed");
             }
@@ -660,8 +853,9 @@ mod tests {
 
     #[test]
     fn missing_save_file_cleanup_returns_original_error() {
-        let error = Error::io_error(
+        let error = Error::io_error_with_operation(
             Some(PathBuf::from("config.toml")),
+            IoOperation::ReplaceTarget,
             IoError::new(ErrorKind::WriteZero, "save failed"),
         )
         .with_save_target(Path::new("config.toml"));
@@ -673,8 +867,15 @@ mod tests {
         );
 
         match error {
-            Error::Io { path, source, .. } => {
+            Error::Io {
+                path,
+                operation: Some(IoOperation::ReplaceTarget),
+                target_path: Some(target_path),
+                source,
+                ..
+            } => {
                 assert_eq!(path, Some(PathBuf::from("config.toml")));
+                assert_eq!(target_path, PathBuf::from("config.toml"));
                 assert_eq!(source.kind(), ErrorKind::WriteZero);
                 assert_eq!(source.to_string(), "save failed");
             }
@@ -684,8 +885,9 @@ mod tests {
 
     #[test]
     fn failed_save_file_cleanup_preserves_both_errors() {
-        let error = Error::io_error(
-            Some(PathBuf::from("config.toml")),
+        let error = Error::io_error_with_operation(
+            Some(PathBuf::from(".conferencier.123.0.tmp")),
+            IoOperation::WriteTemporary,
             IoError::new(ErrorKind::PermissionDenied, "save failed"),
         )
         .with_save_target(Path::new("config.toml"));
@@ -712,9 +914,18 @@ mod tests {
                 assert_eq!(target_path, &PathBuf::from("config.toml"));
                 assert_eq!(temporary_path, &PathBuf::from(".conferencier.123.0.tmp"));
                 assert_eq!(cleanup_error.kind(), ErrorKind::PermissionDenied);
+                let reported_source = error.source().unwrap().downcast_ref::<Error>().unwrap();
+                assert!(std::ptr::eq(save_error.as_ref(), reported_source));
                 match save_error.as_ref() {
-                    Error::Io { path, source, .. } => {
-                        assert_eq!(path.as_deref(), Some(std::path::Path::new("config.toml")));
+                    Error::Io {
+                        path: Some(path),
+                        operation: Some(IoOperation::WriteTemporary),
+                        target_path: Some(nested_target),
+                        source,
+                        ..
+                    } => {
+                        assert_eq!(path, temporary_path);
+                        assert_eq!(nested_target, target_path);
                         assert_eq!(source.kind(), ErrorKind::PermissionDenied);
                         assert_eq!(source.to_string(), "save failed");
                     }
@@ -724,16 +935,16 @@ mod tests {
             other => panic!("unexpected error: {other}"),
         }
 
-        let expected_source = match &error {
-            Error::SaveFileCleanup { save_error, .. } => {
-                assert_eq!(save_error.to_string(), "failed to save \"config.toml\"");
-                save_error.to_string()
-            }
-            other => panic!("unexpected error: {other}"),
-        };
         let source = error.source().expect("save error is the error source");
         assert!(source.downcast_ref::<Error>().is_some());
-        assert_eq!(source.to_string(), expected_source);
+        assert_eq!(
+            source.to_string(),
+            "failed to write temporary file \".conferencier.123.0.tmp\" for \"config.toml\""
+        );
+        assert!(!error.to_string().contains(&source.to_string()));
+        assert!(!source.to_string().contains("cleanup failed"));
+        let io_source = source.source().unwrap().downcast_ref::<IoError>().unwrap();
+        assert_eq!(io_source.to_string(), "save failed");
     }
 
     #[test]
@@ -787,62 +998,263 @@ mod tests {
     }
 
     #[test]
-    fn file_error_display_escapes_paths_and_keeps_context() {
-        let source = IoError::new(ErrorKind::PermissionDenied, "denied");
-        let error = Error::io_error_with_operation(
-            Some("line\n\"quoted\"\\path".into()),
-            IoOperation::WriteTemporary,
-            source,
-        )
-        .with_save_target(Path::new("target\u{2028}.toml"));
-        assert_eq!(
-            error.to_string(),
-            "failed to write temporary file \"line\\n\\\"quoted\\\"\\\\path\" for \"target\\u{2028}.toml\""
-        );
-
-        let error = Error::io_error_with_operation(
-            None,
-            IoOperation::InspectTarget,
-            IoError::new(ErrorKind::InvalidInput, "directory"),
-        )
-        .with_save_target(Path::new("target.toml"));
-        assert_eq!(
-            error.to_string(),
-            "failed to inspect save target \"target.toml\""
-        );
-    }
-
-    #[test]
     fn parse_and_serialize_constructors_keep_source_out_of_display() {
+        let path = PathBuf::from("config.toml");
         let parse_source = toml::from_str::<toml::Table>("[broken").unwrap_err();
-        let parse_error = Error::parse_error(Some("config.toml".into()), parse_source);
+        let parse_error = Error::parse_error(Some(path.clone()), parse_source);
         assert_eq!(
             parse_error.to_string(),
             "failed to parse TOML file \"config.toml\""
         );
-        assert!(parse_error.source().is_some());
+        match &parse_error {
+            Error::Parse {
+                path: Some(error_path),
+                source,
+                ..
+            } => {
+                assert_eq!(error_path, &path);
+                let reported_source = parse_error
+                    .source()
+                    .unwrap()
+                    .downcast_ref::<toml::de::Error>()
+                    .unwrap();
+                assert!(std::ptr::eq(source, reported_source));
+            }
+            other => panic!("unexpected error: {other}"),
+        }
 
         let serialize_source = toml::to_string(&"not a table").unwrap_err();
-        let serialize_error = Error::serialize_error(Some("config.toml".into()), serialize_source);
+        let serialize_error = Error::serialize_error(Some(path.clone()), serialize_source);
         assert_eq!(
             serialize_error.to_string(),
             "failed to serialize TOML for \"config.toml\""
         );
-        assert!(serialize_error.source().is_some());
+        match &serialize_error {
+            Error::Serialize {
+                target_path: Some(target_path),
+                source,
+                ..
+            } => {
+                assert_eq!(target_path, &path);
+                let reported_source = serialize_error
+                    .source()
+                    .unwrap()
+                    .downcast_ref::<toml::ser::Error>()
+                    .unwrap();
+                assert!(std::ptr::eq(source, reported_source));
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
+    fn io_display_uses_operation_and_path_precedence() {
+        let cases = [
+            (
+                IoOperation::Read,
+                "failed to read file",
+                "failed to read file \"affected.toml\"",
+                "failed to read file",
+                "failed to read file \"affected.toml\"",
+            ),
+            (
+                IoOperation::InspectTarget,
+                "failed to inspect save target",
+                "failed to inspect save target \"affected.toml\"",
+                "failed to inspect save target \"target.toml\"",
+                "failed to inspect save target \"affected.toml\"",
+            ),
+            (
+                IoOperation::CreateTemporary,
+                "failed to create temporary file",
+                "failed to create temporary file \"affected.toml\"",
+                "failed to create temporary file for \"target.toml\"",
+                "failed to create temporary file \"affected.toml\" for \"target.toml\"",
+            ),
+            (
+                IoOperation::PrepareTemporary,
+                "failed to prepare temporary file",
+                "failed to prepare temporary file \"affected.toml\"",
+                "failed to prepare temporary file for \"target.toml\"",
+                "failed to prepare temporary file \"affected.toml\" for \"target.toml\"",
+            ),
+            (
+                IoOperation::WriteTemporary,
+                "failed to write temporary file",
+                "failed to write temporary file \"affected.toml\"",
+                "failed to write temporary file for \"target.toml\"",
+                "failed to write temporary file \"affected.toml\" for \"target.toml\"",
+            ),
+            (
+                IoOperation::ReplaceTarget,
+                "failed to replace target file",
+                "failed to replace target file \"affected.toml\"",
+                "failed to replace target file \"target.toml\"",
+                "failed to replace target file \"affected.toml\"",
+            ),
+        ];
+
+        for (operation, pathless, with_path, target_only, with_both) in cases {
+            for (path, target_path, expected) in [
+                (None, None, pathless),
+                (Some("affected.toml"), None, with_path),
+                (None, Some("target.toml"), target_only),
+                (Some("affected.toml"), Some("target.toml"), with_both),
+            ] {
+                let error = Error::Io {
+                    path: path.map(PathBuf::from),
+                    operation: Some(operation),
+                    target_path: target_path.map(PathBuf::from),
+                    source: IoError::other("distinct I/O source"),
+                };
+                assert_eq!(
+                    error.to_string(),
+                    expected,
+                    "{operation:?}, {path:?}, {target_path:?}"
+                );
+            }
+        }
+
+        for (path, target_path, expected) in [
+            (None, None, "I/O error"),
+            (
+                Some("affected.toml"),
+                None,
+                "I/O error on \"affected.toml\"",
+            ),
+            (None, Some("target.toml"), "failed to save \"target.toml\""),
+            (
+                Some("affected.toml"),
+                Some("target.toml"),
+                "failed to save \"target.toml\"",
+            ),
+        ] {
+            let error = Error::Io {
+                path: path.map(PathBuf::from),
+                operation: None,
+                target_path: target_path.map(PathBuf::from),
+                source: IoError::other("distinct I/O source"),
+            };
+            assert_eq!(error.to_string(), expected, "{path:?}, {target_path:?}");
+        }
     }
 
     #[tokio::test]
-    async fn save_task_join_error_displays_target_and_exposes_join_source() {
+    async fn file_error_displays_escape_paths_without_repeating_sources() {
+        let fragment = "name\"\\\n\r\u{1b}\u{2028}\u{2029}";
+        let escaped = r#"name\"\\\n\r\u{1b}\u{2028}\u{2029}"#;
+        let temporary_path = PathBuf::from(format!("temp-{fragment}"));
+        let target_path = PathBuf::from(format!("target-{fragment}"));
+        let temporary_display = format!("temp-{escaped}");
+        let target_display = format!("target-{escaped}");
+
+        let io_error = Error::io_error_with_operation(
+            Some(temporary_path.clone()),
+            IoOperation::WriteTemporary,
+            IoError::other("primary I/O failure"),
+        )
+        .with_save_target(&target_path);
+        assert_display_without_source(
+            &io_error,
+            &format!(
+                "failed to write temporary file \"{temporary_display}\" for \"{target_display}\""
+            ),
+        );
+        assert!(matches!(
+            &io_error,
+            Error::Io { path: Some(path), target_path: Some(target), .. }
+                if path == &temporary_path && target == &target_path
+        ));
+        assert!(
+            io_error
+                .source()
+                .unwrap()
+                .downcast_ref::<IoError>()
+                .is_some()
+        );
+
+        let parse_source = toml::from_str::<toml::Table>("[broken").unwrap_err();
+        let parse_error = Error::parse_error(Some(temporary_path.clone()), parse_source);
+        assert_display_without_source(
+            &parse_error,
+            &format!("failed to parse TOML file \"{temporary_display}\""),
+        );
+        assert!(matches!(
+            &parse_error,
+            Error::Parse { path: Some(path), .. } if path == &temporary_path
+        ));
+        assert!(
+            parse_error
+                .source()
+                .unwrap()
+                .downcast_ref::<toml::de::Error>()
+                .is_some()
+        );
+
+        let serialize_source = toml::to_string(&"not a table").unwrap_err();
+        let serialize_error = Error::serialize_error(Some(target_path.clone()), serialize_source);
+        assert_display_without_source(
+            &serialize_error,
+            &format!("failed to serialize TOML for \"{target_display}\""),
+        );
+        assert!(matches!(
+            &serialize_error,
+            Error::Serialize { target_path: Some(target), .. } if target == &target_path
+        ));
+        assert!(
+            serialize_error
+                .source()
+                .unwrap()
+                .downcast_ref::<toml::ser::Error>()
+                .is_some()
+        );
+
         let task = tokio::spawn(std::future::pending::<()>());
         task.abort();
         let source = task.await.unwrap_err();
-        let source_message = source.to_string();
-        let error = Error::SaveFileTaskJoin {
-            target_path: "config.toml".into(),
+        let join_error = Error::SaveFileTaskJoin {
+            target_path: target_path.clone(),
             source,
         };
+        assert_display_without_source(&join_error, &format!("failed to save \"{target_display}\""));
+        assert!(matches!(
+            &join_error,
+            Error::SaveFileTaskJoin { target_path: target, .. } if target == &target_path
+        ));
+        assert!(
+            join_error
+                .source()
+                .unwrap()
+                .downcast_ref::<tokio::task::JoinError>()
+                .is_some()
+        );
 
-        assert_eq!(error.to_string(), "failed to save \"config.toml\"");
-        assert_eq!(error.source().unwrap().to_string(), source_message);
+        let cleanup_error = Error::SaveFileCleanup {
+            target_path: target_path.clone(),
+            save_error: Box::new(io_error),
+            temporary_path: temporary_path.clone(),
+            cleanup_error: IoError::other("secondary cleanup failure"),
+        };
+        assert_display_without_source(
+            &cleanup_error,
+            &format!(
+                "failed to save \"{target_display}\"; removing temporary file \"{temporary_display}\" also failed (secondary cleanup failure)"
+            ),
+        );
+        assert!(matches!(
+            &cleanup_error,
+            Error::SaveFileCleanup {
+                target_path: target,
+                temporary_path: temporary,
+                ..
+            } if target == &target_path && temporary == &temporary_path
+        ));
+        assert!(
+            cleanup_error
+                .source()
+                .unwrap()
+                .downcast_ref::<Error>()
+                .is_some()
+        );
     }
 }

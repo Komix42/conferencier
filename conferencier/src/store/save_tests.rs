@@ -1,4 +1,5 @@
 use super::*;
+use std::error::Error as _;
 use std::ffi::OsString;
 use std::io::Read;
 
@@ -81,11 +82,53 @@ async fn save_file_rejects_directory_without_creating_temporary_file() -> Result
     store.set_integer("App", "value", 42)?;
     let error = store.save_file(&path).await.unwrap_err();
     assert_save_io_context(&error, &path, IoOperation::InspectTarget, &path);
+    let chained_source = error
+        .source()
+        .unwrap()
+        .downcast_ref::<std::io::Error>()
+        .unwrap();
+    assert_eq!(chained_source.kind(), ErrorKind::InvalidInput);
+    assert!(chained_source.to_string().contains("directory"));
     let source = io_error_at(error, &path, ErrorKind::InvalidInput);
     assert!(source.to_string().contains("directory"));
     assert!(path.is_dir());
     assert!(entries(&path)?.is_empty());
     assert_eq!(entries(dir.path())?, ["directory"]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn save_file_reports_temporary_creation_error_with_target() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let path = dir.path().join("missing-parent").join("config.toml");
+    let error = ConfigStore::new().save_file(&path).await.unwrap_err();
+    let temporary_path = match &error {
+        Error::Io {
+            path: Some(temporary_path),
+            ..
+        } => temporary_path,
+        other => panic!("unexpected error: {other}"),
+    };
+    assert_eq!(temporary_path.parent(), path.parent());
+    assert!(
+        temporary_path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with(".conferencier.")
+    );
+    assert_save_io_context(&error, temporary_path, IoOperation::CreateTemporary, &path);
+    assert_eq!(
+        error.to_string(),
+        format!("failed to create temporary file {temporary_path:?} for {path:?}")
+    );
+    let source = error
+        .source()
+        .unwrap()
+        .downcast_ref::<std::io::Error>()
+        .unwrap();
+    assert_eq!(source.kind(), ErrorKind::NotFound);
+    assert!(!path.exists());
     Ok(())
 }
 
@@ -478,13 +521,14 @@ fn existing_unix_modes_are_established_before_writing_through_open_handle() -> R
     Ok(())
 }
 
-#[cfg(unix)]
 #[test]
-fn permission_preparation_failure_stops_writing_and_cleans_empty_temporary() -> Result<()> {
+fn preparation_failure_stops_writing_and_cleans_empty_temporary() -> Result<()> {
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir()?;
     let path = dir.path().join("config.toml");
     std::fs::write(&path, "original")?;
+    #[cfg(unix)]
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
     let error = write_atomic_blocking_with(
         &path,
@@ -493,11 +537,12 @@ fn permission_preparation_failure_stops_writing_and_cleans_empty_temporary() -> 
         |file, metadata| {
             assert!(metadata.is_some());
             assert_eq!(file.metadata()?.len(), 0);
+            #[cfg(unix)]
             assert_eq!(file.metadata()?.permissions().mode() & 0o177, 0);
             Err(std::io::Error::from_raw_os_error(123))
         },
-        |_, _| panic!("permission failure must stop writing"),
-        |_, _| panic!("permission failure must stop publication"),
+        |_, _| panic!("preparation failure must stop writing"),
+        |_, _| panic!("preparation failure must stop publication"),
     )
     .unwrap_err();
     let temporary_path = match &error {
@@ -529,6 +574,7 @@ fn permission_preparation_failure_stops_writing_and_cleans_empty_temporary() -> 
         other => panic!("unexpected error: {other}"),
     }
     assert_eq!(std::fs::read(&path)?, b"original");
+    #[cfg(unix)]
     assert_eq!(
         std::fs::metadata(&path)?.permissions().mode() & 0o777,
         0o600

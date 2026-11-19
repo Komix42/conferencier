@@ -271,7 +271,7 @@ impl ConfigStore {
         let serialized = self
             .save_str()
             .map_err(|error| error.with_save_target(path))?;
-        write_atomic(path, serialized).await
+        write_atomic(path, serialized, write_atomic_blocking).await
     }
 
     /// Returns an owned snapshot of the raw TOML value at `section` and `key`.
@@ -829,10 +829,14 @@ async fn read_file(path: &Path) -> Result<String> {
 /// Every call writes its own temporary sibling, so concurrent saves to the same path never
 /// share a temporary file; on error cleanup is attempted. The blocking file
 /// operations run on Tokio's blocking pool, like those of [`tokio::fs`].
-async fn write_atomic(path: &Path, contents: String) -> Result<()> {
+async fn write_atomic(
+    path: &Path,
+    contents: String,
+    run_save: impl FnOnce(&Path, &[u8]) -> Result<()> + Send + 'static,
+) -> Result<()> {
     let target_path = path.to_path_buf();
     let task_path = target_path.clone();
-    tokio::task::spawn_blocking(move || write_atomic_blocking(&task_path, contents.as_bytes()))
+    tokio::task::spawn_blocking(move || run_save(&task_path, contents.as_bytes()))
         .await
         .map_err(|source| Error::SaveFileTaskJoin {
             target_path,
@@ -1094,33 +1098,87 @@ mod tests {
     #[test]
     fn from_str_and_parse_agree() -> Result<()> {
         let source = "[App]\nport = 8080\n";
-        let inherent = ConfigStore::from_str(source)?;
+        let store = ConfigStore::from_str(source)?;
         let parsed: ConfigStore = source.parse()?;
-        assert_eq!(inherent.save_str()?, parsed.save_str()?);
+        assert_eq!(store.save_str()?, parsed.save_str()?);
 
         let invalid = "[App\nport = 8080";
         let inherent = ConfigStore::from_str(invalid).unwrap_err();
         let parsed = invalid.parse::<ConfigStore>().unwrap_err();
-        assert!(matches!(inherent, Error::Parse { path: None, .. }));
+        assert!(matches!(&inherent, Error::Parse { path: None, .. }));
+        assert!(matches!(&parsed, Error::Parse { path: None, .. }));
         assert_eq!(inherent.to_string(), parsed.to_string());
+
+        let error = store.load_str(invalid).unwrap_err();
+        assert!(matches!(&error, Error::Parse { path: None, .. }));
+        assert_eq!(error.to_string(), "failed to parse TOML");
+        assert!(
+            error
+                .source()
+                .unwrap()
+                .downcast_ref::<toml::de::Error>()
+                .is_some()
+        );
+        assert_eq!(store.get_integer("App", "port")?, 8080);
         Ok(())
     }
 
     #[tokio::test]
-    async fn from_file_reports_missing_path() {
+    async fn file_reads_report_missing_path() {
         let dir = tempfile::tempdir().expect("temp dir");
         let path = dir.path().join("missing.toml");
-        let error = ConfigStore::from_file(&path).await.unwrap_err();
-        assert!(matches!(
-            &error,
-            Error::Io {
-                path: Some(reported),
-                operation: Some(IoOperation::Read),
-                target_path: None,
+        let store = ConfigStore::from_str("[App]\nport = 8080").unwrap();
+        for error in [
+            ConfigStore::from_file(&path).await.unwrap_err(),
+            store.load_file(&path).await.unwrap_err(),
+        ] {
+            assert!(matches!(
+                &error,
+                Error::Io {
+                    path: Some(reported),
+                    operation: Some(IoOperation::Read),
+                    target_path: None,
+                    ..
+                } if reported == &path
+            ));
+            assert_eq!(error.to_string(), format!("failed to read file {path:?}"));
+            let source = error
+                .source()
+                .unwrap()
+                .downcast_ref::<std::io::Error>()
+                .unwrap();
+            assert_eq!(source.kind(), ErrorKind::NotFound);
+        }
+        assert_eq!(store.get_integer("App", "port").unwrap(), 8080);
+    }
+
+    #[tokio::test]
+    async fn blocking_save_panic_preserves_join_error_and_target() {
+        let path = Path::new("config.toml");
+        let error = write_atomic(path, String::new(), |_, _| {
+            panic!("injected blocking save panic")
+        })
+        .await
+        .unwrap_err();
+        assert_eq!(error.to_string(), format!("failed to save {path:?}"));
+
+        match &error {
+            Error::SaveFileTaskJoin {
+                target_path,
+                source,
                 ..
-            } if reported == &path
-        ));
-        assert_eq!(error.to_string(), format!("failed to read file {path:?}"));
+            } => {
+                assert_eq!(target_path, path);
+                assert!(source.is_panic());
+                let reported_source = error
+                    .source()
+                    .unwrap()
+                    .downcast_ref::<tokio::task::JoinError>()
+                    .unwrap();
+                assert!(std::ptr::eq(source, reported_source));
+            }
+            other => panic!("unexpected error: {other}"),
+        }
     }
 
     #[test]
@@ -1593,6 +1651,23 @@ mod tests {
             },
         )?;
 
+        let error = store.save_str().unwrap_err();
+        assert!(matches!(
+            &error,
+            Error::Serialize {
+                target_path: None,
+                ..
+            }
+        ));
+        assert_eq!(error.to_string(), "failed to serialize TOML");
+        assert!(
+            error
+                .source()
+                .unwrap()
+                .downcast_ref::<toml::ser::Error>()
+                .is_some()
+        );
+
         let error = store.save_file(&path).await.unwrap_err();
         assert!(matches!(
             &error,
@@ -1605,7 +1680,13 @@ mod tests {
             error.to_string(),
             format!("failed to serialize TOML for {path:?}")
         );
-        assert!(error.source().is_some());
+        assert!(
+            error
+                .source()
+                .unwrap()
+                .downcast_ref::<toml::ser::Error>()
+                .is_some()
+        );
         assert!(!path.exists());
         Ok(())
     }

@@ -1,5 +1,81 @@
-use conferencier::toml::{Table, Value};
-use conferencier::{ConfigStore, Error, Result};
+use std::io::{Error as IoError, ErrorKind};
+use std::path::PathBuf;
+
+use conferencier::toml::{self, Table, Value};
+use conferencier::{ConfigStore, Error, IoOperation, Result};
+
+#[test]
+fn public_error_constructors_can_be_inspected_externally() {
+    let path = PathBuf::from("config.toml");
+    let io = Error::io_error(
+        Some(path.clone()),
+        IoError::new(ErrorKind::NotFound, "missing config"),
+    );
+    assert!(matches!(
+        io,
+        Error::Io {
+            path: Some(ref actual),
+            operation: None,
+            target_path: None,
+            ref source,
+            ..
+        } if actual == &path && source.kind() == ErrorKind::NotFound
+    ));
+
+    let io = Error::io_error_with_operation(
+        Some(path.clone()),
+        IoOperation::Read,
+        IoError::new(ErrorKind::PermissionDenied, "read denied"),
+    );
+    assert!(matches!(
+        io,
+        Error::Io {
+            path: Some(ref actual),
+            operation: Some(IoOperation::Read),
+            target_path: None,
+            ref source,
+            ..
+        } if actual == &path && source.kind() == ErrorKind::PermissionDenied
+    ));
+
+    let source = toml::from_str::<Table>("[broken").unwrap_err();
+    let source_message = source.to_string();
+    let parse = Error::parse_error(Some(path.clone()), source);
+    assert!(matches!(
+        parse,
+        Error::Parse { path: Some(ref actual), ref source, .. }
+            if actual == &path && source.to_string() == source_message
+    ));
+
+    let source = toml::to_string(&"not a table").unwrap_err();
+    let source_message = source.to_string();
+    let serialize = Error::serialize_error(Some(path.clone()), source);
+    assert!(matches!(
+        serialize,
+        Error::Serialize { target_path: Some(ref actual), ref source, .. }
+            if actual == &path && source.to_string() == source_message
+    ));
+
+    let table = "App.servers[1]";
+    assert!(matches!(
+        Error::missing_key_error(table, "port"),
+        Error::MissingKey { table_path, key, .. } if table_path == table && key == "port"
+    ));
+    assert!(matches!(
+        Error::type_mismatch_error(table, "port", "integer", "string"),
+        Error::TypeMismatch { table_path, key, expected, found, .. }
+            if table_path == table && key == "port" && expected == "integer" && found == "string"
+    ));
+    assert!(matches!(
+        Error::value_parse_error(table, "port", "out of range"),
+        Error::ValueParse { table_path, key, message, .. }
+            if table_path == table && key == "port" && message == "out of range"
+    ));
+    assert!(matches!(
+        Error::unknown_key_error(table, "port"),
+        Error::UnknownKey { table_path, key, .. } if table_path == table && key == "port"
+    ));
+}
 
 #[tokio::test]
 async fn load_and_save_roundtrip() -> Result<()> {
