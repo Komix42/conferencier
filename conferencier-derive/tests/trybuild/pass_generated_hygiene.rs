@@ -12,6 +12,10 @@ mod f64 {}
 #[allow(non_camel_case_types)]
 mod i64 {}
 
+// Generated paths to the core crate must not resolve to this module.
+#[allow(dead_code)]
+mod conferencier {}
+
 #[allow(unused_macros)]
 macro_rules! format {
     ($($tokens:tt)*) => {

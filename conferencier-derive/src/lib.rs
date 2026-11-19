@@ -5,6 +5,11 @@
 //! with its default `derive` feature. The generated code calls into `conferencier`,
 //! so it is always a dependency. The attribute reference is in the `conferencier`
 //! documentation.
+//!
+//! The generated code names the crate by an absolute path, such as `::conferencier`,
+//! taken from the dependency in `Cargo.toml`, including a renamed one. Items named
+//! `conferencier` in the deriving module therefore do not affect it. Only if no such
+//! dependency is found does the code use the relative path `conferencier`.
 
 mod codegen;
 mod crate_path;
