@@ -41,6 +41,7 @@ The section-name migration guard stays until 0.2.0.
 
 ## Technical debt
 
+- **Semver CI after beta.1.** Before the first release after `0.1.0-beta.1`, add `cargo-semver-checks` to CI for both crates, checking `conferencier` with and without default features. Compare each candidate against the immediately preceding published 0.1.x tag, including pre-releases, with `--release-type minor`, and advance the baseline after each release. Origin: [RFC-0011](./devel-0.1.x/RFC-0011_api_polish_before_0.1.md).
 - **Temporary section-name migration guard.** Following [RFC-0005](./devel-0.0.x/RFC-0005_api_redesign.md), `ConfigScope` derives in 0.0.5 and later 0.0.x and 0.1.x releases whose implicit section was affected by the old `Confer` prefix rule require an explicit section. Remove the guard in 0.2.0, and warn in its migration notes that a direct upgrade from 0.0.4 bypasses the guard. Origin: RFC-0005 N7.
 
 ## Ideas

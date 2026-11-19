@@ -41,6 +41,12 @@ jobs:
       - name: Clippy lints
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
+      - name: Check core library with derive
+        run: cargo check -p conferencier --lib --locked
+
+      - name: Check core library without default features
+        run: cargo check -p conferencier --lib --no-default-features --locked
+
   test:
     runs-on: ${{ matrix.os }}
     strategy:
@@ -119,6 +125,20 @@ jobs:
       # trybuild tests are skipped here: their .stderr snapshots track stable diagnostics.
       - name: Run core tests
         run: cargo test -p conferencier --all-features --locked
+
+      - name: Check fresh MSRV dependency resolution
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          fresh_dir="$RUNNER_TEMP/msrv-fresh"
+          mkdir -p "$fresh_dir"
+          git archive HEAD | tar -x -C "$fresh_dir"
+          rm "$fresh_dir/Cargo.lock"
+          cd "$fresh_dir"
+          # The workspace's resolver = "3" enables MSRV-aware fallback.
+          cargo check --workspace --all-targets --all-features
+          cargo check -p conferencier --no-default-features
 
   package:
     runs-on: ubuntu-latest
