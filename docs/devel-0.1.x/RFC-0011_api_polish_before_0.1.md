@@ -23,12 +23,11 @@ and later 0.1.x releases. Finally, it documents when the library can panic or
 end the process, based on a review of panics and process termination made after
 the audit.
 
-Internal fixes from the audit (A8, B1–B5) are not specified here; they change no
+Internal fixes from the audit (B1–B5) are not specified here; they change no
 public behavior beyond what the changelog records. For A8, this RFC specifies
-only the release invariant it motivates: `conferencier` and
-`conferencier-derive` are released in lockstep. The exact dependency requirement
-used to enforce that invariant is an implementation fix, not a requirement
-introduced by this RFC.
+the release invariant it motivates and its enforcement: `conferencier` and
+`conferencier-derive` are released in lockstep, and `conferencier` depends on
+the exact matching `conferencier-derive` version.
 
 ## Synopsis
 
@@ -707,11 +706,12 @@ major versions of either dependency.
 
 `conferencier` and `conferencier-derive` are released in lockstep with the same
 version, including the same pre-release identifier. The `conferencier` crate
-must use the matching `conferencier-derive` version so the derive macro remains
-paired with the library support code for which it generates calls. Pinning the
-workspace dependency to that exact version is the implementation fix for audit
-finding A8; this RFC specifies the lockstep invariant, not the manifest
-mechanism used to enforce it.
+depends on the matching `conferencier-derive` version with an exact requirement
+(for example `=0.1.0-beta.1`), so the derive macro remains paired with the
+library support code for which it generates calls. A caret requirement would let
+Cargo select a newer derive release whose generated calls do not match the
+library's `#[doc(hidden)]` support code. Applying this requirement to the
+workspace manifest is the implementation fix for audit finding A8.
 
 The derive compatibility contract includes the accepted `#[derive(...)]` and
 `#[confer(...)]` syntax and the behavior of the generated code. Removing or
@@ -973,10 +973,10 @@ No existing variant is removed; changes to existing variants are listed above.
 
 ## Out of scope
 
-- The implementation fixes for audit findings A8 and B1–B5; they follow the
-  plan in the [backlog](../BACKLOG.md#planned-for-010-beta1). The lockstep
-  release invariant motivated by A8 is specified above, but the exact
-  dependency requirement is not.
+- The implementation fixes for audit findings B1–B5; they follow the
+  plan in the [backlog](../BACKLOG.md#planned-for-010-beta1). For A8, the
+  lockstep release invariant and its exact dependency requirement are
+  specified above.
 - A library-level redaction mechanism for values, fields or error diagnostics.
 - A blocking variant of `from_file`.
 - A nesting limit of conferencier's own and an error for a missing Tokio
@@ -1060,14 +1060,18 @@ No existing variant is removed; changes to existing variants are listed above.
   separate doctest so one compile error cannot mask missing coverage. These
   doctests run with the core crate's tests, including the MSRV job.
 - Tests run `from_file`, `load_file` and `save_file` on a current-thread runtime.
-  Tests also poll the file methods without a Tokio runtime inside
-  `catch_unwind`: `from_file` and `load_file` panic when they reach the file
-  read, and `save_file` panics when a successful serialization reaches
-  `spawn_blocking`. A separate case verifies that a serialization failure from
-  `save_file` is returned before any runtime is needed and leaves the target
-  untouched.
+  To test behavior without a runtime, pin each future and poll it exactly once
+  using a `Context` built from `Waker::noop()`; do not use an executor or wait
+  for the waker. `Poll::Pending` is a test failure in every case. Wrap the poll
+  in `catch_unwind` when a panic is expected: `from_file` and `load_file` panic
+  when the poll reaches the file read, and `save_file` panics when a successful
+  serialization reaches `spawn_blocking`. A separate case verifies that a
+  serialization failure from `save_file` is returned as `Poll::Ready(Err(_))`
+  before any runtime is needed and leaves the target untouched.
 - A test constructs, loads and saves a derived scope without a Tokio runtime,
-  using fields and defaults that do not themselves require one.
+  using fields and defaults that do not themselves require one. Poll its
+  `load` and `save` futures once with the same no-op waker and require
+  `Poll::Ready(Ok(()))`; `Poll::Pending` fails the test.
 - `cargo test -p conferencier --no-default-features --locked` and the workspace
   tests pass with the reduced Tokio features.
 - A test passes input nested far beyond `toml`'s default limit to `from_str`
@@ -1145,6 +1149,9 @@ No existing variant is removed; changes to existing variants are listed above.
   and derives a `ConfigScope` and `ConfigTable`. All three builds must succeed.
   This is a release gate for every 0.1.x publication, not a recurring CI job
   for every pull request.
+- Review before each 0.1.x publication confirms that the packaged files of both
+  crates contain no `docs.rs/conferencier/latest` links. This is a manual
+  search, not a CI job.
 - Before publishing `0.1.0-beta.1`, compare both public crates with 0.0.8 using
   the commands in [Public API checks](#public-api-checks), including both
   `conferencier` feature configurations, and reconcile all reported breaks with
@@ -1195,8 +1202,8 @@ No existing variant is removed; changes to existing variants are listed above.
   text in `lib.rs` without it. The same crate-level documentation states the
   Tokio feature promise (T2). Keep the
   `crate::guide::migration` intra-doc link in `overview.md` with `derive`, and
-  link from `lib.rs` without `derive` to the versioned beta guide at
-  `https://docs.rs/conferencier/0.1.0-beta.1/conferencier/guide/migration/index.html`.
+  link from `lib.rs` without `derive` to the 0.1.x guide at
+  `https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/migration/index.html`.
   Also document `ConfigScope`
   and `ConfigTable` (manual
   implementations remain supported; their required signatures, bounds and
@@ -1217,7 +1224,18 @@ No existing variant is removed; changes to existing variants are listed above.
   before "Learn more", describing the beta status and the 0.1.x compatibility
   promise, including pre-releases and the deferral of breaking changes to
   0.2.0. State that Rust 1.85 is supported throughout 0.1.x, retain the MSRV
-  badge, and link the migration guide with an absolute URL.
+  badge, and link the migration guide with an absolute 0.1.x series URL.
+- Absolute docs.rs links to versioned content (the guide and API pages) in the
+  rustdoc of both crates and in both READMEs use the 0.1.x series range
+  `https://docs.rs/conferencier/%5E0.1.0-beta.1/...` instead of `latest`.
+  docs.rs resolves `latest` to the newest stable release, which during the beta
+  is 0.0.8 and after 0.2.0 would be the next series; an exact version would go
+  stale with every release. The range resolves to the newest published version
+  from `0.1.0-beta.1` up to, but excluding, `0.2.0`, including pre-releases; a
+  plain `^0.1` would exclude them. Use `%5E` instead of `^` for portability in
+  Markdown. Links to the crate root without a version, such as the docs.rs
+  badge, the derive crate's introduction and the issue template, remain
+  unchanged. Historical `CHANGELOG.md` entries are not edited.
 - [`conferencier-derive/README.md`](../../conferencier-derive/README.md):
   retain the direct-use example and show `conferencier` with default features
   disabled and `conferencier-derive` pinned to the same exact beta version.
@@ -1232,7 +1250,9 @@ No existing variant is removed; changes to existing variants are listed above.
   and require running them before each 0.1.x publication, including pre-releases,
   on Rust 1.85.
   State that major upgrades of public `toml` or `tokio` types are breaking
-  changes under the 0.x policy.
+  changes under the 0.x policy. Require absolute docs.rs links to versioned
+  content to use the current series range instead of `latest`, and to move the
+  range when the next development cycle starts.
 - [`SECURITY.md`](../../SECURITY.md): in "Scope", state that the documented
   exceptions of P1, T3 and P2 are not vulnerabilities in conferencier: panics in
   caller-supplied code, file methods polled outside a Tokio runtime, and stack
