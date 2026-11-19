@@ -19,36 +19,33 @@ dependencies resolve to that precise derive release rather than a later beta.
 
 ### Beta.1 release steps
 
-1. **Review and finalize.** Review the repository for beta readiness and make
-   the agreed revisions, including the fixes planned in
-   [AUDIT-002](./devel-0.1.x/AUDIT-002_quality_0.1.0-beta.1.md#follow-up).
-   Close [AUDIT-001](./devel-0.0.x/AUDIT-001_quality_0.0.8.md) and AUDIT-002
-   by linking each finding to the RFC, release or backlog entry that resolved it.
-2. **Verify the final candidate locally.** Run these checks only after the
-   review and revisions are complete. If the candidate changes afterward,
-   rerun the affected checks:
-   - Run the local equivalents of the [CI workflow](../.github/workflows/ci.yml):
-     formatting, Clippy, tests, library-only builds, rustdoc, Rust 1.85 checks
-     with both locked and fresh dependency resolutions, dependency audit,
-     packaged doctests and publish dry-runs. Record any checks that cannot be
-     reproduced locally and the platforms not tested.
-   - Audit `conferencier` against 0.0.8 with `cargo-semver-checks` and
-     `--release-type minor`, with and without default features, using the
-     commands in
-     [CONTRIBUTING.md](../CONTRIBUTING.md#01x-compatibility-and-release-checks).
-     Review every reported break against the compatibility and migration
-     documentation; intentional breaks are expected. Separately review
-     behavior, derive inputs and generated code, and matching `__private`
-     support, which the checker does not cover; it cannot check the
-     proc-macro crate `conferencier-derive` at all.
-   - On Rust 1.85, build all three external consumers described in
+1. ~~**Review and finalize.**~~ Done: the AUDIT-002 fixes are in, and
+   [AUDIT-001](./devel-0.0.x/AUDIT-001_quality_0.0.8.md) and
+   [AUDIT-002](./devel-0.1.x/AUDIT-002_quality_0.1.0-beta.1.md) are closed with
+   a resolution for each finding.
+2. ~~**Verify the final candidate locally.**~~ Done on commit `dce7a23`; later
+   commits change only documents that are not packaged. If the candidate
+   changes, rerun the affected checks.
+   - All local CI equivalents passed on Windows (stable 1.99.1) and Linux
+     (WSL, stable 1.100.0), including Rust 1.85 with locked and fresh
+     resolutions, `cargo audit`, packaged doctests and publish dry-runs. Not
+     tested locally: macOS, and on Windows the fresh 1.85 resolution and the
+     packaged doctests, which CI also runs only on Linux.
+   - `cargo-semver-checks` 0.51.0 against 0.0.8 reported the same breaks with
+     and without default features: renamed key-error constructors and the
+     `path` field, tuple-to-struct `Parse` and `Serialize`, and
+     `#[non_exhaustive]` error variants. All are intentional and covered by the
+     changelog and migration guide. Manual review: derive inputs are unchanged
+     apart from diagnostics, generated code uses absolute paths, and
+     `__private` changed only a parameter name. The checker cannot check the
+     proc-macro crate `conferencier-derive`.
+   - The three consumers from
      [CONTRIBUTING.md](../CONTRIBUTING.md#01x-compatibility-and-release-checks)
-     against the actual candidate `.crate` archives for both crates. Verify the
-     exact derive version requirement in the packaged core manifest.
-   - Inspect both packaged archives for `docs.rs/conferencier/latest` links;
-     neither package may contain them.
-3. **Publish beta.1** only after the other checks pass and the completed semver
-   audit's findings have all been reviewed and accounted for.
+     built and ran on Rust 1.85 against the packaged archives. The packaged
+     core requires `conferencier-derive = "=0.1.0-beta.1"`, and neither archive
+     contains `docs.rs/conferencier/latest` links.
+3. **Publish beta.1**: date the `[Unreleased]` changelog section as
+   `0.1.0-beta.1`, merge `develop` into `main`, and publish both crates.
 
 ### Stable 0.1.0 exit criteria
 
