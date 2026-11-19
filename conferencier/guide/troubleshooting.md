@@ -51,6 +51,8 @@ Error sources are not generally redacted: for example, a TOML parser diagnostic
 may include the offending line of input. Decide whether to display or log a
 complete chain based on the data your application handles.
 
+## Common error messages
+
 - "unsupported field type" → use one of the [supported](crate::guide::derive#supported-field-types) scalar/container combinations; for a struct, derive `ConfigTable` on it and add `#[confer(table)]` to the field.
 - "cannot be used as a nested configuration table" → the type of a `#[confer(table)]` field must implement `ConfigTable`; derive it, or remove `#[confer(table)]` from a scalar field.
 - "duplicate TOML key" → two loaded fields map to the same key; rename one via `#[confer(rename = ...)]`.

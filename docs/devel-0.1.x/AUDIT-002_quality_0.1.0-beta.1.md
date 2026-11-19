@@ -159,13 +159,14 @@ Decision: **Confirm**.
 
 ### B1. The changelog links to `/latest/` docs
 
-The [changelog](../../CHANGELOG.md) entry for the rustdoc guide links to
+The [changelog](../../CHANGELOG.md) entry of 0.0.7 for the rustdoc guide links to
 `https://docs.rs/conferencier/latest/conferencier/guide/`. docs.rs serves the
-newest stable version at `/latest/`, which is 0.0.8 without the guide until
-0.1.0 is published. CONTRIBUTING requires versioned links; the release step only
-inspects the packaged archives, so the root changelog is not caught.
+newest stable version at `/latest/`, so the link of a historical entry moves to
+later releases as they are published. CONTRIBUTING requires versioned links; the
+release step only inspects the packaged archives, so the root changelog is not
+caught.
 
-Decision: **Fix**. Use the `%5E0.1.0-beta.1` range URL.
+Decision: **Fix**. Link the guide of the release that the entry describes, 0.0.7.
 
 ### B2. Error-message list in the troubleshooting guide has no heading
 

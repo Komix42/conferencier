@@ -165,6 +165,34 @@ async fn main() -> conferencier::Result<()> {
 
 Keep state that must survive reloads directly in the scope: ignored fields inside `ConfigTable` values are initialized again on every load (see [Nested tables](crate::guide::tables)).
 
+## Reading a scope as a plain value
+
+`from_store` always returns a shared `SharedScope<T>`. Tests, validation steps or
+one-shot tools that want a plain value can also derive
+[`ConfigTable`](crate::ConfigTable) on the scope struct and convert its section
+directly:
+
+```rust
+use conferencier::{ConfigScope, ConfigStore, ConfigTable};
+
+#[derive(ConfigScope, ConfigTable)]
+#[confer(section = "App")]
+struct AppConfig {
+    port: u16,
+}
+
+let store = ConfigStore::from_str("[App]\nport = 8080")?;
+let section = store.get_section("App").unwrap_or_default();
+let app = AppConfig::from_table("App", section)?;
+assert_eq!(app.port, 8080);
+# Ok::<(), conferencier::Error>(())
+```
+
+The section name is repeated in the call. Ignored fields are initialized as in
+`from_store`. Unlike `from_store`, `get_section` returns `None` for a top-level
+entry that is not a table, so this code loads it as an empty section instead of
+reporting a type mismatch.
+
 ## Debugging scope values
 
 The application controls `Debug` on its scope types. Implement it explicitly to
