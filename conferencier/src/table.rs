@@ -17,7 +17,7 @@ use crate::Result;
 ///
 /// With the default `derive` feature, `#[derive(ConfigTable)]` implements this
 /// trait for named-field structs. The
-/// [nested tables guide](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/tables/index.html)
+/// [nested tables guide](https://docs.rs/conferencier/%5E0.1.0/conferencier/guide/tables/index.html)
 /// describes the table field shapes, their attributes and how tables behave on reload.
 ///
 /// Manual implementations own the input table and can move values out instead of cloning

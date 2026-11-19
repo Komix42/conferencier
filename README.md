@@ -50,7 +50,7 @@ async fn main() -> conferencier::Result<()> {
 Add `conferencier` and Tokio to your project:
 
 ```sh
-cargo add conferencier@0.1.0-beta.1
+cargo add conferencier@0.1.0
 cargo add tokio --features macros,rt-multi-thread
 ```
 
@@ -58,7 +58,7 @@ or to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-conferencier = "0.1.0-beta.1"
+conferencier = "0.1.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -72,7 +72,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 ## Project scope
 
-Conferencier supports TOML and uses Tokio for async operations. It does not layer configuration sources, watch files or validate application-specific rules. Saving a scope replaces its section; saving the store does not preserve comments or formatting. See [saving configuration](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/files/index.html) for details.
+Conferencier supports TOML and uses Tokio for async operations. It does not layer configuration sources, watch files or validate application-specific rules. Saving a scope replaces its section; saving the store does not preserve comments or formatting. See [saving configuration](https://docs.rs/conferencier/%5E0.1.0/conferencier/guide/files/index.html) for details.
 
 ## Status and compatibility
 
@@ -80,12 +80,12 @@ The 0.1.x API is in beta. Starting with `0.1.0-beta.1`, each later 0.1.x
 pre-release and release must remain backward compatible with the immediately
 preceding published 0.1.x version; breaking changes are deferred to `0.2.0`.
 Rust 1.85 is supported throughout 0.1.x. See the
-[migration guide](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/migration/index.html)
+[migration guide](https://docs.rs/conferencier/%5E0.1.0/conferencier/guide/migration/index.html)
 when upgrading from an earlier release.
 
 ## Learn more
 
-- [Guide and API reference](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/), including [concepts](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/concepts/index.html), the [derive attributes](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/derive/index.html), and [migration guides](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/migration/index.html).
+- [Guide and API reference](https://docs.rs/conferencier/%5E0.1.0/conferencier/), including [concepts](https://docs.rs/conferencier/%5E0.1.0/conferencier/guide/concepts/index.html), the [derive attributes](https://docs.rs/conferencier/%5E0.1.0/conferencier/guide/derive/index.html), and [migration guides](https://docs.rs/conferencier/%5E0.1.0/conferencier/guide/migration/index.html).
 - [Examples](https://github.com/Komix42/conferencier/tree/main/conferencier/examples) in the repository, and three runnable applications: an [uptime monitor](https://github.com/Komix42/conferencier/tree/main/examples/uptime-monitor) with configuration reload, a [folder indexer](https://github.com/Komix42/conferencier/tree/main/examples/folder-indexer) that manages its own configuration, and a [modular agent](https://github.com/Komix42/conferencier/tree/main/examples/modular-agent) whose independent components own their configuration.
 - [Changelog](https://github.com/Komix42/conferencier/blob/main/CHANGELOG.md) for release history.
 - [Contributing](https://github.com/Komix42/conferencier/blob/main/CONTRIBUTING.md) and [issue tracker](https://github.com/Komix42/conferencier/issues).

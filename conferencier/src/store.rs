@@ -86,7 +86,7 @@ use crate::value_conversion;
 ///
 /// Individual calls are synchronized, not sequences of calls: a read followed by
 /// a write is not a transaction, and another task may change the document between them.
-/// The [guide](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/concepts/index.html#locking)
+/// The [guide](https://docs.rs/conferencier/%5E0.1.0/conferencier/guide/concepts/index.html#locking)
 /// explains the design assumptions behind this lock.
 ///
 /// # Debug output
@@ -103,7 +103,7 @@ use crate::value_conversion;
 /// nested input without the limit can overflow the stack during parsing. Values
 /// built in code are not limited and can overflow the stack when serialized,
 /// cloned or dropped. A stack overflow aborts the process. See the
-/// [guide](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/concepts/index.html#nesting-limits).
+/// [guide](https://docs.rs/conferencier/%5E0.1.0/conferencier/guide/concepts/index.html#nesting-limits).
 #[derive(Clone, Default)]
 pub struct ConfigStore {
     table: Arc<RwLock<Table>>,
@@ -158,7 +158,7 @@ impl ConfigStore {
     ///
     /// A failed read returns [`Error::Io`] with [`IoOperation::Read`] and `path`.
     /// This uses [`tokio::fs`] and must run within a Tokio runtime. There is no
-    /// blocking variant; the [guide](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/concepts/index.html#reading-a-file-before-the-runtime-starts)
+    /// blocking variant; the [guide](https://docs.rs/conferencier/%5E0.1.0/conferencier/guide/concepts/index.html#reading-a-file-before-the-runtime-starts)
     /// shows how to read a file before the runtime starts.
     ///
     /// # Errors
@@ -252,7 +252,7 @@ impl ConfigStore {
     /// targets. On Unix, an existing target's `rwx` mode bits are preserved;
     /// ownership, ACLs, Windows access settings and other metadata are not.
     ///
-    /// The [guide](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/files/index.html)
+    /// The [guide](https://docs.rs/conferencier/%5E0.1.0/conferencier/guide/files/index.html)
     /// describes the replacement, cancellation, temporary files with all reserved
     /// names, accepted targets and preserved permissions in detail, including how to
     /// create a private configuration file.

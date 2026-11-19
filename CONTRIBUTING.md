@@ -83,7 +83,7 @@ not a per-pull-request CI job.
 
 Use absolute docs.rs links to versioned documentation, not `/latest/`. During
 the 0.1.x series use the range URL beginning
-`https://docs.rs/conferencier/%5E0.1.0-beta.1/`; update it when the next
+`https://docs.rs/conferencier/%5E0.1.0/`; update it when the next
 development series begins. Before publication, inspect both packaged archives
 and confirm they contain no `docs.rs/conferencier/latest` links.
 
