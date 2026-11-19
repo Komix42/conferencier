@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.1.0-beta.1] - 2026-11-19
+
 ### Added
 - Added the public `IoOperation` enum and `Error::SaveFileTaskJoin` for failures to join the blocking save task. Added `Error::io_error`, `io_error_with_operation`, `parse_error` and `serialize_error` constructors; the library-created save-specific variants have no public constructors ([RFC-0011](docs/devel-0.1.x/RFC-0011_api_polish_before_0.1.md) E2, E5).
 
