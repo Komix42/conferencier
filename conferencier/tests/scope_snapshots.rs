@@ -100,10 +100,7 @@ async fn failing_save_leaves_the_store_unchanged() -> Result<()> {
     ));
     assert_eq!(
         error.to_string(),
-        format!(
-            "invalid value at Counters.total: value `{}` out of range for TOML integer",
-            u64::MAX
-        )
+        "invalid value at Counters.total: value out of range for TOML integer"
     );
     assert_eq!(store.save_str()?, before);
     Ok(())

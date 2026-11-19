@@ -1106,10 +1106,7 @@ async fn nested_save_errors_leave_the_store_unchanged() -> Result<()> {
     );
     assert_eq!(
         error.to_string(),
-        format!(
-            "invalid value at Stats.counters[1].total: value `{}` out of range for TOML integer",
-            u64::MAX
-        )
+        "invalid value at Stats.counters[1].total: value out of range for TOML integer"
     );
     assert_eq!(store.get_section("Stats"), before);
     Ok(())

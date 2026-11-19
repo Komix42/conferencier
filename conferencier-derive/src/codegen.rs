@@ -716,10 +716,7 @@ fn float_from_store(
             quote! {
                 {
                     let #raw = #value;
-                    if !#raw.is_finite() {
-                        return Err(#err::value_parse_error(#path, #key, String::from("non-finite float")));
-                    }
-                    if #raw < f32::MIN as f64 || #raw > f32::MAX as f64 {
+                    if #raw.is_finite() && (#raw < f32::MIN as f64 || #raw > f32::MAX as f64) {
                         return Err(#err::value_parse_error(#path, #key, String::from("value out of range for f32")));
                     }
                     #raw as f32
@@ -778,10 +775,7 @@ fn float_vec_from_store(
                 {
                     let mut #out = Vec::with_capacity(#value.len());
                     for (#index, #raw) in #value.into_iter().enumerate() {
-                        if !#raw.is_finite() {
-                            return Err(#err::value_parse_error(#path, #key, format!("non-finite float (at index {})", #index)));
-                        }
-                        if #raw < f32::MIN as f64 || #raw > f32::MAX as f64 {
+                        if #raw.is_finite() && (#raw < f32::MIN as f64 || #raw > f32::MAX as f64) {
                             return Err(#err::value_parse_error(#path, #key, format!("value out of range for f32 (at index {})", #index)));
                         }
                         #out.push(#raw as f32);
@@ -811,10 +805,10 @@ fn integer_to_store(
         IntegerKind::U64 | IntegerKind::Usize => {
             let error_message = match index {
                 Some(index) => quote! {
-                    format!("value `{}` out of range for TOML integer (at index {})", #raw, #index)
+                    format!("value out of range for TOML integer (at index {})", #index)
                 },
                 None => quote! {
-                    format!("value `{}` out of range for TOML integer", #raw)
+                    String::from("value out of range for TOML integer")
                 },
             };
             quote! {
