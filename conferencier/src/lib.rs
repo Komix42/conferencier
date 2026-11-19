@@ -12,7 +12,8 @@ implementations remain available:
   [`SharedScope<T>`]. Loading and saving explicitly copy data to and from a store.
 - [`ConfigTable`] converts plain values to and from nested TOML tables.
 - [`table_path`] formats diagnostic paths for manual implementations.
-- [`Error`] and [`Result`] carry file, TOML and field-conversion errors.
+- [`Error`] and [`Result`] carry file, TOML and field-conversion errors;
+  [`IoOperation`] identifies the phase of a file operation that failed.
 - [`toml`] and [`Datetime`] re-export the TOML types used by the public API.
 
 Enable the default `derive` feature for `#[derive(ConfigScope)]`,
@@ -30,7 +31,7 @@ mod table;
 pub mod table_path;
 mod value_conversion;
 
-pub use crate::error::{Error, Result};
+pub use crate::error::{Error, IoOperation, Result};
 pub use crate::scope::ConfigScope;
 pub use crate::scope::SharedScope;
 pub use crate::store::ConfigStore;

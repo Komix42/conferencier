@@ -1,5 +1,27 @@
 Common compile-time and load-time error messages and how to fix them.
 
+## Showing error causes
+
+`Error`'s `Display` describes the failed operation without repeating its source.
+To include the cause chain when reporting an error, format each source explicitly:
+
+```rust,ignore
+fn display_error_chain(error: &dyn std::error::Error) -> String {
+    let mut message = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        message.push_str("\nCaused by: ");
+        message.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    message
+}
+```
+
+Error sources are not generally redacted: for example, a TOML parser diagnostic
+may include the offending line of input. Decide whether to display or log a
+complete chain based on the data your application handles.
+
 - "unsupported field type" → use one of the [supported](crate::guide::derive#supported-field-types) scalar/container combinations; for a struct, derive `ConfigTable` on it and add `#[confer(table)]` to the field.
 - "cannot be used as a nested configuration table" → the type of a `#[confer(table)]` field must implement `ConfigTable`; derive it, or remove `#[confer(table)]` from a scalar field.
 - "duplicate TOML key" → two loaded fields map to the same key; rename one via `#[confer(rename = ...)]`.

@@ -94,7 +94,10 @@ fn malformed_radix_numbers_return_parse_errors() {
     for literal in ["0x_g", "0b_2", "0o_8"] {
         let source = format!("[App]\nvalue = {literal}\n");
         assert!(
-            matches!(ConfigStore::from_str(&source), Err(Error::Parse(_))),
+            matches!(
+                ConfigStore::from_str(&source),
+                Err(Error::Parse { path: None, .. })
+            ),
             "expected a parse error for {literal}"
         );
     }

@@ -21,6 +21,17 @@ use crate::config::{HttpConfig, MonitorConfig};
 
 type AppResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
+fn display_error_chain(error: &dyn std::error::Error) -> String {
+    let mut message = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        message.push_str("\nCaused by: ");
+        message.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    message
+}
+
 /// What the console commands work with.
 struct App {
     store: ConfigStore,
@@ -39,7 +50,7 @@ async fn main() -> ExitCode {
     match run().await {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("error: {error}");
+            eprintln!("error: {}", display_error_chain(error.as_ref()));
             ExitCode::FAILURE
         }
     }
@@ -101,7 +112,7 @@ async fn run() -> AppResult<()> {
                 match handle(&app, line.trim()).await {
                     Ok(Continue::Yes) => {}
                     Ok(Continue::No) => break Ok(()),
-                    Err(error) => eprintln!("error: {error}"),
+                    Err(error) => eprintln!("error: {}", display_error_chain(error.as_ref())),
                 }
             }
             _ = tokio::signal::ctrl_c() => break Ok(()),

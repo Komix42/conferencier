@@ -6,7 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+- Added the public `IoOperation` enum and `Error::SaveFileTaskJoin` for failures to join the blocking save task. Added `Error::io_error`, `io_error_with_operation`, `parse_error` and `serialize_error` constructors; the library-created save-specific variants have no public constructors ([RFC-0011](docs/devel-0.1.x/RFC-0011_api_polish_before_0.1.md) E2, E5).
+
 ### Changed
+- **Breaking:** `Error::Io` is now non-exhaustive and includes `operation` and `target_path`; use its public constructors rather than constructing the variant. File-method errors identify their operation and `save_file` destination. `Display` now describes the operation, escapes paths and omits the wrapped source ([RFC-0011](docs/devel-0.1.x/RFC-0011_api_polish_before_0.1.md) E1–E3, E5, E6).
+- **Breaking:** `Error::Parse` and `Error::Serialize` are now non-exhaustive struct variants with optional file and save-target paths, respectively. Their `Display` messages no longer repeat the wrapped source; inspect `source()` for parser and serializer diagnostics ([RFC-0011](docs/devel-0.1.x/RFC-0011_api_polish_before_0.1.md) E1, E3, E4, E5, E6).
+- **Breaking:** `Error::SaveFileCleanup` is non-exhaustive and includes `target_path`. Its `Display` includes the cleanup error but not the original save error; its source remains the original save error. A blocking-task join failure is reported separately as `SaveFileTaskJoin` ([RFC-0011](docs/devel-0.1.x/RFC-0011_api_polish_before_0.1.md) E1–E6).
 - **Breaking:** The key-error constructors are renamed with an `_error` suffix: `Error::missing_key_error`, `type_mismatch_error`, `value_parse_error` and `unknown_key_error`. Their argument types and order are unchanged; the old names are removed without aliases ([RFC-0011](docs/devel-0.1.x/RFC-0011_api_polish_before_0.1.md) E5).
 - **Breaking:** `Error::MissingKey`, `TypeMismatch`, `ValueParse` and `UnknownKey` store the formatted table path in `table_path` instead of `path`, and each variant is `#[non_exhaustive]`: patterns outside the crate must include `..`, and the constructors create these variants. The `ConfigTable` method parameter is documented as `table_path`; existing implementations keep compiling ([RFC-0011](docs/devel-0.1.x/RFC-0011_api_polish_before_0.1.md) E5).
 - `conferencier` depends on the exactly matching `conferencier-derive` version (`=0.1.0-beta.1`), so Cargo cannot pair the library with a different derive release ([RFC-0011](docs/devel-0.1.x/RFC-0011_api_polish_before_0.1.md), audit finding A8).

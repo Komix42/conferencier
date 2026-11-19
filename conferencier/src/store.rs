@@ -8,7 +8,7 @@ use tokio::fs;
 use toml::value::Datetime;
 use toml::{Table, Value};
 
-use crate::error::{Error, Result};
+use crate::error::{Error, IoOperation, Result};
 use crate::value_conversion;
 
 /// Shared handle to an in-memory TOML configuration document.
@@ -108,7 +108,7 @@ impl ConfigStore {
 
     /// Reads a TOML file asynchronously and builds a store from it.
     ///
-    /// A failed read returns [`Error::Io`] carrying `path`.
+    /// A failed read returns [`Error::Io`] with [`IoOperation::Read`] and `path`.
     /// This uses [`tokio::fs`] and must run within a Tokio runtime. There is no
     /// blocking variant; the [guide](https://docs.rs/conferencier/latest/conferencier/guide/concepts/index.html#reading-a-file-before-the-runtime-starts)
     /// shows how to read a file before the runtime starts.
@@ -116,11 +116,12 @@ impl ConfigStore {
     /// # Errors
     ///
     /// Returns [`Error::Io`] if the file cannot be read as UTF-8, or [`Error::Parse`]
-    /// if its contents are not valid TOML. Parse errors carry parser diagnostics,
-    /// not a separate file path.
+    /// if its contents are not valid TOML. Parse errors carry parser diagnostics
+    /// and the file path.
     pub async fn from_file(path: impl AsRef<Path> + Send + Sync) -> Result<Self> {
-        let contents = read_file(path.as_ref()).await?;
-        Self::from_str(&contents)
+        let path = path.as_ref().to_path_buf();
+        let contents = read_file(&path).await?;
+        Self::from_str(&contents).map_err(|error| error.with_parse_path(&path))
     }
 
     /// Replaces the in-memory document with the contents of the provided TOML string.
@@ -146,11 +147,13 @@ impl ConfigStore {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Io`] carrying `path` if reading fails, or [`Error::Parse`]
-    /// for invalid TOML.
+    /// Returns [`Error::Io`] with [`IoOperation::Read`] and `path` if reading
+    /// fails, or [`Error::Parse`] with `path` for invalid TOML.
     pub async fn load_file(&self, path: impl AsRef<Path> + Send + Sync) -> Result<()> {
-        let contents = read_file(path.as_ref()).await?;
+        let path = path.as_ref().to_path_buf();
+        let contents = read_file(&path).await?;
         self.load_str(&contents)
+            .map_err(|error| error.with_parse_path(&path))
     }
 
     /// Serializes the current document to a TOML string.
@@ -162,6 +165,7 @@ impl ConfigStore {
     /// # Errors
     ///
     /// Returns [`Error::Serialize`] if the in-memory values cannot be encoded as TOML.
+    /// The error's `target_path` is `None`.
     pub fn save_str(&self) -> Result<String> {
         toml::to_string(&*self.read()).map_err(Error::from)
     }
@@ -197,17 +201,22 @@ impl ConfigStore {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Serialize`] before any file is written if serialization fails.
-    /// Unsupported targets return [`Error::Io`] with [`ErrorKind::InvalidInput`],
-    /// the target path and a reason, before creating a temporary file. Metadata,
-    /// permission, write or replacement failures return [`Error::Io`] with the relevant
-    /// target or temporary path; metadata and permission failures stop before writing
-    /// data. If removing a temporary file also fails, returns
-    /// [`Error::SaveFileCleanup`] with the original error, temporary path and cleanup
-    /// error. An I/O failure does not change the in-memory store.
+    /// Returns [`Error::Serialize`] with `target_path` before any file is written
+    /// if serialization fails. Unsupported targets return [`Error::Io`] with
+    /// [`IoOperation::InspectTarget`], [`ErrorKind::InvalidInput`], and the target
+    /// path before creating a temporary file. Other file-operation errors carry
+    /// their [`IoOperation`], the relevant file in `path`, and the save destination
+    /// in `target_path`. If the blocking task cannot be joined, returns
+    /// [`Error::SaveFileTaskJoin`]. If removing a temporary file also fails,
+    /// returns [`Error::SaveFileCleanup`] with the target path, original error,
+    /// temporary path and cleanup error. An I/O failure does not change the
+    /// in-memory store.
     pub async fn save_file(&self, path: impl AsRef<Path> + Send + Sync) -> Result<()> {
-        let serialized = self.save_str()?;
-        write_atomic(path.as_ref(), serialized).await
+        let path = path.as_ref();
+        let serialized = self
+            .save_str()
+            .map_err(|error| error.with_save_target(path))?;
+        write_atomic(path, serialized).await
     }
 
     /// Returns an owned snapshot of the raw TOML value at `section` and `key`.
@@ -714,9 +723,9 @@ fn section_mismatch(section: &str, found: &Value) -> Error {
 
 /// Reads the file at `path`, attaching the path to I/O errors.
 async fn read_file(path: &Path) -> Result<String> {
-    fs::read_to_string(path)
-        .await
-        .map_err(|err| Error::io_error(Some(path.to_path_buf()), err))
+    fs::read_to_string(path).await.map_err(|err| {
+        Error::io_error_with_operation(Some(path.to_path_buf()), IoOperation::Read, err)
+    })
 }
 
 /// Persists `contents` to `path` through a temporary sibling and a rename
@@ -726,10 +735,14 @@ async fn read_file(path: &Path) -> Result<String> {
 /// share a temporary file; on error cleanup is attempted. The blocking file
 /// operations run on Tokio's blocking pool, like those of [`tokio::fs`].
 async fn write_atomic(path: &Path, contents: String) -> Result<()> {
-    let path = path.to_path_buf();
-    tokio::task::spawn_blocking(move || write_atomic_blocking(&path, contents.as_bytes()))
+    let target_path = path.to_path_buf();
+    let task_path = target_path.clone();
+    tokio::task::spawn_blocking(move || write_atomic_blocking(&task_path, contents.as_bytes()))
         .await
-        .map_err(|err| Error::from(std::io::Error::other(err)))?
+        .map_err(|source| Error::SaveFileTaskJoin {
+            target_path,
+            source,
+        })?
 }
 
 fn write_atomic_blocking(path: &Path, contents: &[u8]) -> Result<()> {
@@ -751,20 +764,36 @@ fn write_atomic_blocking_with(
     write: impl FnOnce(&mut std::fs::File, &[u8]) -> std::io::Result<()>,
     mut rename: impl FnMut(&Path, &Path) -> std::io::Result<()>,
 ) -> Result<()> {
-    let metadata = validate_target_metadata(path, metadata)?;
-    let (tmp_path, mut file) = create_temporary(metadata.as_ref(), || temporary_path(path))?;
+    let metadata =
+        validate_target_metadata(path, metadata).map_err(|error| error.with_save_target(path))?;
+    let (tmp_path, mut file) = create_temporary(metadata.as_ref(), || temporary_path(path))
+        .map_err(|error| error.with_save_target(path))?;
     let result = (|| {
-        let temporary_error = |err| Error::io_error(Some(tmp_path.clone()), err);
-        prepare(&file, metadata.as_ref()).map_err(temporary_error)?;
-        write(&mut file, contents).map_err(temporary_error)?;
+        prepare(&file, metadata.as_ref()).map_err(|err| {
+            Error::io_error_with_operation(
+                Some(tmp_path.clone()),
+                IoOperation::PrepareTemporary,
+                err,
+            )
+        })?;
+        write(&mut file, contents).map_err(|err| {
+            Error::io_error_with_operation(Some(tmp_path.clone()), IoOperation::WriteTemporary, err)
+        })?;
         // Close the handle before the rename, which Windows requires.
         drop(file);
-        rename(&tmp_path, path).map_err(|err| Error::io_error(Some(path.to_path_buf()), err))
+        rename(&tmp_path, path).map_err(|err| {
+            Error::io_error_with_operation(
+                Some(path.to_path_buf()),
+                IoOperation::ReplaceTarget,
+                err,
+            )
+        })
     })();
     match result {
         Ok(()) => Ok(()),
         Err(save_error) => Err(Error::with_save_file_cleanup(
-            save_error,
+            path.to_path_buf(),
+            save_error.with_save_target(path),
             tmp_path.clone(),
             std::fs::remove_file(&tmp_path),
         )),
@@ -778,7 +807,13 @@ fn validate_target_metadata(
     let metadata = match metadata {
         Ok(metadata) => metadata,
         Err(err) if err.kind() == ErrorKind::NotFound => return Ok(None),
-        Err(err) => return Err(Error::io_error(Some(path.to_path_buf()), err)),
+        Err(err) => {
+            return Err(Error::io_error_with_operation(
+                Some(path.to_path_buf()),
+                IoOperation::InspectTarget,
+                err,
+            ));
+        }
     };
     #[cfg(windows)]
     {
@@ -821,8 +856,9 @@ fn validate_target_metadata(
 }
 
 fn unsupported_target(path: &Path, kind: &str) -> Error {
-    Error::io_error(
+    Error::io_error_with_operation(
         Some(path.to_path_buf()),
+        IoOperation::InspectTarget,
         std::io::Error::new(
             ErrorKind::InvalidInput,
             format!("unsupported save target: {kind}"),
@@ -864,7 +900,13 @@ fn create_temporary(
             Err(err) if err.kind() == ErrorKind::AlreadyExists && attempt < ATTEMPTS => {
                 attempt += 1;
             }
-            Err(err) => return Err(Error::io_error(Some(tmp_path), err)),
+            Err(err) => {
+                return Err(Error::io_error_with_operation(
+                    Some(tmp_path),
+                    IoOperation::CreateTemporary,
+                    err,
+                ));
+            }
         }
     }
 }
@@ -907,6 +949,8 @@ mod save_tests;
 
 #[cfg(test)]
 mod tests {
+    use std::error::Error as _;
+
     use super::*;
     use crate::error::{Error, Result};
 
@@ -941,7 +985,7 @@ mod tests {
         let invalid = "[App\nport = 8080";
         let inherent = ConfigStore::from_str(invalid).unwrap_err();
         let parsed = invalid.parse::<ConfigStore>().unwrap_err();
-        assert!(matches!(inherent, Error::Parse(_)));
+        assert!(matches!(inherent, Error::Parse { path: None, .. }));
         assert_eq!(inherent.to_string(), parsed.to_string());
         Ok(())
     }
@@ -952,9 +996,48 @@ mod tests {
         let path = dir.path().join("missing.toml");
         let error = ConfigStore::from_file(&path).await.unwrap_err();
         assert!(matches!(
-            error,
-            Error::Io { path: Some(ref reported), .. } if *reported == path
+            &error,
+            Error::Io {
+                path: Some(reported),
+                operation: Some(IoOperation::Read),
+                target_path: None,
+                ..
+            } if reported == &path
         ));
+        assert_eq!(error.to_string(), format!("failed to read file {path:?}"));
+    }
+
+    #[tokio::test]
+    async fn file_parse_errors_keep_the_file_path_and_load_is_atomic() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("invalid.toml");
+        std::fs::write(&path, "[broken")?;
+
+        let error = ConfigStore::from_file(&path).await.unwrap_err();
+        assert!(matches!(
+            &error,
+            Error::Parse {
+                path: Some(error_path),
+                ..
+            } if error_path == &path
+        ));
+        assert_eq!(
+            error.to_string(),
+            format!("failed to parse TOML file {path:?}")
+        );
+        assert!(error.source().is_some());
+
+        let store = ConfigStore::from_str("[App]\nport = 8080")?;
+        let error = store.load_file(&path).await.unwrap_err();
+        assert!(matches!(
+            error,
+            Error::Parse {
+                path: Some(error_path),
+                ..
+            } if error_path == path
+        ));
+        assert_eq!(store.get_integer("App", "port")?, 8080);
+        Ok(())
     }
 
     #[test]
@@ -1158,6 +1241,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn save_serialization_error_carries_the_target_path() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("config.toml");
+        let store = ConfigStore::new();
+        store.set_datetime(
+            "App",
+            "invalid",
+            Datetime {
+                date: None,
+                time: None,
+                offset: None,
+            },
+        )?;
+
+        let error = store.save_file(&path).await.unwrap_err();
+        assert!(matches!(
+            &error,
+            Error::Serialize {
+                target_path: Some(target_path),
+                ..
+            } if target_path == &path
+        ));
+        assert_eq!(
+            error.to_string(),
+            format!("failed to serialize TOML for {path:?}")
+        );
+        assert!(error.source().is_some());
+        assert!(!path.exists());
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn save_file_overwrites_existing() -> Result<()> {
         let store = ConfigStore::new();
         store.set_boolean("Flags", "enabled", true)?;
@@ -1202,12 +1317,25 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(attempts, 1);
+        assert!(matches!(
+            &error,
+            Error::Io {
+                path: Some(error_path),
+                operation: Some(IoOperation::ReplaceTarget),
+                target_path: Some(target_path),
+                ..
+            } if error_path == &path && target_path == &path
+        ));
         match error {
             Error::Io {
                 path: error_path,
                 source,
+                operation: Some(IoOperation::ReplaceTarget),
+                target_path: Some(target_path),
+                ..
             } => {
                 assert_eq!(error_path.as_deref(), Some(path.as_path()));
+                assert_eq!(target_path, path);
                 assert_eq!(source.kind(), ErrorKind::AlreadyExists);
                 assert_eq!(source.to_string(), "rename failed");
             }
@@ -1237,6 +1365,7 @@ mod tests {
             Error::Io {
                 path: error_path,
                 source,
+                ..
             } => {
                 assert_eq!(error_path.as_deref(), Some(path.as_path()));
                 assert!(source.raw_os_error().is_some());

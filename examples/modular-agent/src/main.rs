@@ -23,12 +23,23 @@ use tokio::sync::{broadcast, mpsc, watch};
 
 type AppResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
+pub(crate) fn display_error_chain(error: &dyn std::error::Error) -> String {
+    let mut message = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        message.push_str("\nCaused by: ");
+        message.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    message
+}
+
 #[tokio::main]
 async fn main() -> ExitCode {
     match run(std::env::args().skip(1).collect(), components()).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("error: {error}");
+            eprintln!("error: {}", display_error_chain(error.as_ref()));
             ExitCode::FAILURE
         }
     }
@@ -99,7 +110,7 @@ async fn run(args: Vec<String>, components: Vec<Box<dyn Component>>) -> AppResul
                 match handle(&store, &mut running, line.trim_start()).await {
                     Ok(Continue::Yes) => {}
                     Ok(Continue::No) => break Ok(()),
-                    Err(error) => eprintln!("error: {error}"),
+                    Err(error) => eprintln!("error: {}", display_error_chain(error.as_ref())),
                 }
             }
             result = tokio::signal::ctrl_c() => {

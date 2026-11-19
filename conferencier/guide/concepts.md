@@ -46,16 +46,15 @@ assert_eq!(app.read().await.port, 7070);
 
 ## Reading a file before the runtime starts
 
-All in-memory work, including [`ConfigScope::from_store`](crate::ConfigScope::from_store), runs without a Tokio runtime, but `ConfigStore::from_file` is async and has no blocking variant. To read the configuration before the runtime starts, combine [`std::fs::read_to_string`] with `ConfigStore::from_str`. The standard library's error does not carry the path; attach it through [`Error::Io`](crate::Error::Io) if needed:
+All in-memory work, including [`ConfigScope::from_store`](crate::ConfigScope::from_store), runs without a Tokio runtime, but `ConfigStore::from_file` is async and has no blocking variant. To read the configuration before the runtime starts, combine [`std::fs::read_to_string`] with `ConfigStore::from_str`. The standard library's error does not carry the path; attach it with [`Error::io_error_with_operation`](crate::Error::io_error_with_operation) if needed:
 
 ```rust,no_run
-use conferencier::{ConfigStore, Error};
+use conferencier::{ConfigStore, Error, IoOperation};
 
 # fn main() -> conferencier::Result<()> {
 let path = std::path::Path::new("config.toml");
-let source = std::fs::read_to_string(path).map_err(|source| Error::Io {
-    path: Some(path.to_path_buf()),
-    source,
+let source = std::fs::read_to_string(path).map_err(|source| {
+    Error::io_error_with_operation(Some(path.to_path_buf()), IoOperation::Read, source)
 })?;
 let store = ConfigStore::from_str(&source)?;
 # let _ = store;

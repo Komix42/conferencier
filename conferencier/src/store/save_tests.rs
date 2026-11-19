@@ -15,10 +15,27 @@ fn io_error_at(error: Error, path: &Path, kind: ErrorKind) -> std::io::Error {
         Error::Io {
             path: error_path,
             source,
+            ..
         } => {
             assert_eq!(error_path.as_deref(), Some(path));
             assert_eq!(source.kind(), kind);
             source
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+fn assert_save_io_context(error: &Error, path: &Path, operation: IoOperation, target: &Path) {
+    match error {
+        Error::Io {
+            path: Some(error_path),
+            operation: Some(error_operation),
+            target_path: Some(target_path),
+            ..
+        } => {
+            assert_eq!(error_path, path);
+            assert_eq!(*error_operation, operation);
+            assert_eq!(target_path, target);
         }
         other => panic!("unexpected error: {other}"),
     }
@@ -45,6 +62,7 @@ fn metadata_failure_stops_before_temporary_creation() -> Result<()> {
             |_, _| panic!("metadata failure must stop publication"),
         )
         .unwrap_err();
+        assert_save_io_context(&error, &path, IoOperation::InspectTarget, &path);
         let source = io_error_at(error, &path, kind);
         assert_eq!(source.raw_os_error(), code);
         assert_eq!(source.to_string(), message);
@@ -61,11 +79,9 @@ async fn save_file_rejects_directory_without_creating_temporary_file() -> Result
     std::fs::create_dir(&path)?;
     let store = ConfigStore::new();
     store.set_integer("App", "value", 42)?;
-    let source = io_error_at(
-        store.save_file(&path).await.unwrap_err(),
-        &path,
-        ErrorKind::InvalidInput,
-    );
+    let error = store.save_file(&path).await.unwrap_err();
+    assert_save_io_context(&error, &path, IoOperation::InspectTarget, &path);
+    let source = io_error_at(error, &path, ErrorKind::InvalidInput);
     assert!(source.to_string().contains("directory"));
     assert!(path.is_dir());
     assert!(entries(&path)?.is_empty());
@@ -89,11 +105,16 @@ fn temporary_collisions_retry_without_opening_or_removing_existing_entries() -> 
             dir.path().join(format!("{attempts}.tmp"))
         });
         if collisions == 16 {
-            let source = io_error_at(
-                result.unwrap_err(),
-                &dir.path().join("16.tmp"),
-                ErrorKind::AlreadyExists,
-            );
+            let error = result.unwrap_err();
+            assert!(matches!(
+                &error,
+                Error::Io {
+                    operation: Some(IoOperation::CreateTemporary),
+                    target_path: None,
+                    ..
+                }
+            ));
+            let source = io_error_at(error, &dir.path().join("16.tmp"), ErrorKind::AlreadyExists);
             assert!(source.raw_os_error().is_some());
             assert_eq!(attempts, 16);
         } else {
@@ -173,11 +194,24 @@ fn missing_target_stays_absent_during_preparation_and_partial_writes() -> Result
             },
         );
         if fail_write {
-            match result.unwrap_err() {
+            let error = result.unwrap_err();
+            let temporary_path = match &error {
+                Error::Io {
+                    path: Some(temporary_path),
+                    ..
+                } => temporary_path.clone(),
+                other => panic!("unexpected error: {other}"),
+            };
+            assert_save_io_context(&error, &temporary_path, IoOperation::WriteTemporary, &path);
+            match error {
                 Error::Io {
                     path: Some(temporary_path),
                     source,
+                    operation: Some(IoOperation::WriteTemporary),
+                    target_path: Some(target_path),
+                    ..
                 } => {
+                    assert_eq!(target_path, path);
                     assert_eq!(source.kind(), ErrorKind::WriteZero);
                     assert_eq!(source.to_string(), "write failed");
                     assert_eq!(temporary_path.parent(), path.parent());
@@ -230,10 +264,13 @@ fn cleanup_after_publication_error_handles_missing_file_and_reports_failure() ->
         let save_error = if leave_directory {
             match error {
                 Error::SaveFileCleanup {
+                    target_path,
                     save_error,
                     temporary_path,
                     cleanup_error,
+                    ..
                 } => {
+                    assert_eq!(target_path, path);
                     assert_eq!(temporary_path.parent(), path.parent());
                     assert!(temporary_path.is_dir());
                     assert!(cleanup_error.raw_os_error().is_some());
@@ -245,6 +282,7 @@ fn cleanup_after_publication_error_handles_missing_file_and_reports_failure() ->
         } else {
             error
         };
+        assert_save_io_context(&save_error, &path, IoOperation::ReplaceTarget, &path);
         let source = io_error_at(
             save_error,
             &path,
@@ -462,11 +500,28 @@ fn permission_preparation_failure_stops_writing_and_cleans_empty_temporary() -> 
         |_, _| panic!("permission failure must stop publication"),
     )
     .unwrap_err();
+    let temporary_path = match &error {
+        Error::Io {
+            path: Some(temporary_path),
+            ..
+        } => temporary_path.clone(),
+        other => panic!("unexpected error: {other}"),
+    };
+    assert_save_io_context(
+        &error,
+        &temporary_path,
+        IoOperation::PrepareTemporary,
+        &path,
+    );
     match error {
         Error::Io {
             path: Some(temporary_path),
             source,
+            operation: Some(IoOperation::PrepareTemporary),
+            target_path: Some(target_path),
+            ..
         } => {
+            assert_eq!(target_path, path);
             assert_eq!(source.raw_os_error(), Some(123));
             assert_eq!(temporary_path.parent(), path.parent());
             assert!(!temporary_path.exists());
@@ -561,6 +616,7 @@ async fn save_file_accepts_read_only_regular_target_without_clearing_attribute()
                 Error::Io {
                     path: error_path,
                     source,
+                    ..
                 } => {
                     assert_eq!(error_path.as_deref(), Some(path.as_path()));
                     assert!(source.raw_os_error().is_some());
