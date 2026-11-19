@@ -1,7 +1,7 @@
 # AUDIT-002: Quality audit before 0.1.0-beta.1
 
 Date: 2026-11-19
-Status: Open
+Status: Closed
 Author: Komix42 <komix[at]ignore.cz>
 Audited release: 0.1.0-beta.1 candidate (commit 0ee5d7f)
 Target release: 0.1.0-beta.1
@@ -97,6 +97,11 @@ not found, and document it. Add a hygiene test with a local
 `mod conferencier`. An explicit `#[confer(crate = "...")]` attribute for facade
 crates is additive and goes to the **Backlog**.
 
+Resolution: fixed in 0.1.0-beta.1, with a local `mod conferencier` in the
+trybuild pass test `pass_generated_hygiene`. The `crate` attribute is the
+backlog entry *Explicit crate path for the derive* in
+[Derive attributes and field types](../BACKLOG.md#derive-attributes-and-field-types).
+
 ### A2. Scopes can only be constructed as shared values
 
 `ConfigScope::from_store` returns `SharedScope<Self>`
@@ -114,6 +119,11 @@ extension trait.
 Decision: **Confirm**. Document the dual-derive workaround in the guide;
 a free-standing helper can be added in 0.1.x if a need appears (**Backlog**).
 
+Resolution: confirmed. The workaround is documented in the
+[concepts guide](../../conferencier/guide/concepts.md) in 0.1.0-beta.1; the
+helper is the backlog entry *Unshared scope values* in
+[Store and errors](../BACKLOG.md#store-and-errors).
+
 ### A3. `load` and `save` are associated functions over `SharedScope`
 
 `AppConfig::load(&app, &store)` cannot be written as `app.load(&store)`, because
@@ -126,6 +136,8 @@ allow method syntax and hide Tokio from the signature, is no longer possible in
 
 Decision: **Confirm**.
 
+Resolution: confirmed; no change.
+
 ### A4. Blanket implementations of `ConfigTable` would be breaking
 
 The backlog entry "More table shapes" lists `Box<T>` and `Option<Vec<T>>` table
@@ -136,6 +148,9 @@ other blanket implementations of `ConfigScope` or `ConfigTable`.
 
 Decision: **Backlog**. Extend the entry with the constraint that new table shapes
 are recognized by the derive, not added through blanket trait implementations.
+
+Resolution: the constraint is part of the backlog entry *More table shapes* in
+[Derive attributes and field types](../BACKLOG.md#derive-attributes-and-field-types).
 
 ### A5. Signatures and lenient conversions that become permanent
 
@@ -155,6 +170,8 @@ The following details are reasonable and documented, but cannot change in
 
 Decision: **Confirm**.
 
+Resolution: confirmed; no change.
+
 ## Findings: documentation and tests
 
 ### B1. The changelog links to `/latest/` docs
@@ -168,6 +185,8 @@ caught.
 
 Decision: **Fix**. Link the guide of the release that the entry describes, 0.0.7.
 
+Resolution: fixed in 0.1.0-beta.1.
+
 ### B2. Error-message list in the troubleshooting guide has no heading
 
 [troubleshooting.md](../../conferencier/guide/troubleshooting.md) opens with
@@ -177,6 +196,8 @@ looks like part of that section and has no anchor of its own.
 
 Decision: **Fix**. Move the list under its own heading, such as
 "Common error messages".
+
+Resolution: fixed in 0.1.0-beta.1.
 
 ### B3. `Send` futures of the file methods are not tested
 
@@ -190,6 +211,9 @@ has such a test.
 
 Decision: **Fix**. Add a compile-time assertion for these futures and for
 `ConfigStore`.
+
+Resolution: fixed in 0.1.0-beta.1 by the unit test
+`store_and_file_futures_are_send` in [store.rs](../../conferencier/src/store.rs).
 
 ## Not taken up
 

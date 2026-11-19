@@ -107,6 +107,7 @@ The README's [Project scope](../README.md#project-scope) lists these as intentio
 
 ## Done
 
+- **AUDIT-002 fixes before the API freeze (A1, B1–B3, A2 documentation)**: completed for `0.1.0-beta.1` ([AUDIT-002](./devel-0.1.x/AUDIT-002_quality_0.1.0-beta.1.md)).
 - **RFC-0011 and internal 0.0.8 audit fixes (A1–A8, B1–B5)**: implemented and documented for `0.1.0-beta.1` ([RFC-0011](./devel-0.1.x/RFC-0011_api_polish_before_0.1.md), [AUDIT-001](./devel-0.0.x/AUDIT-001_quality_0.0.8.md)).
 - **Modular agent example application**: completed in 0.0.8 ([`examples/modular-agent`](../examples/modular-agent/README.md)).
 - **Folder indexer example application**: completed in 0.0.8 ([`examples/folder-indexer`](../examples/folder-indexer/README.md)).
