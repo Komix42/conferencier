@@ -5,6 +5,107 @@ order. Names in a section refer to the API of that release; for example,
 `ConferModule` in the 0.0.4 instructions becomes `ConfigScope` in 0.0.5.
 Before saving, check that each scope uses the intended TOML section.
 
+## From 0.0.8 to 0.1.0-beta.1
+
+This is the first 0.1.x release and includes breaking API changes. Check
+downstream code that constructs or matches errors, uses typed setters, or relies
+on Tokio features enabled transitively.
+
+### Errors
+
+- `Error::Io`, `Parse` and `Serialize` no longer repeat their source in
+  `Display`. `SaveFileCleanup` still displays its cleanup error, while
+  `source()` exposes the original save error. Use `source()` or an error-chain
+  reporter when the cause is needed. Do not parse diagnostic text or rely on
+  its exact wording; inspect variants, fields and sources instead. The
+  [troubleshooting guide](crate::guide::troubleshooting#showing-error-causes)
+  has an opt-in helper for displaying a full chain.
+- `Error::Io` is non-exhaustive and adds `operation` and `target_path`.
+  Replace direct construction with `Error::io_error` or
+  `Error::io_error_with_operation`, and include `..` in patterns.
+- `Error::Parse` and `Error::Serialize` are now non-exhaustive struct variants.
+  Replace tuple patterns such as `Error::Parse(_)` with
+  `Error::Parse { source, .. }`; use `Error::parse_error` or
+  `Error::serialize_error` when constructing them. `Parse.path` identifies the
+  parsed file; `Serialize.target_path` identifies a `save_file` destination.
+- `Error::SaveFileCleanup` is non-exhaustive, adds `target_path`, and has no
+  public constructor. Inspect the library-created variant with `..`.
+  `save_file` task failures now return `Error::SaveFileTaskJoin`, not
+  `Error::Io`; handle that variant where the distinction matters.
+- `MissingKey`, `TypeMismatch`, `ValueParse` and `UnknownKey` are non-exhaustive.
+  The key-error field `path` is renamed to `table_path`; filesystem `path`
+  fields are unchanged. Include `..` in key-error patterns. The constructors
+  are renamed with an `_error` suffix, with the same argument types and order
+  and no deprecated aliases.
+
+For manual `ConfigTable` implementations, rename key-error constructor calls
+and use the table path when building them. The method parameter's identifier is
+local and may keep any name; the example shows the recommended name:
+
+```rust,ignore
+// 0.0.8
+impl ConfigTable for Settings {
+    fn from_table(path: &str, _table: Table) -> Result<Self> {
+        Err(Error::missing_key(path, "port"))
+    }
+
+    fn to_table(&self, _path: &str) -> Result<Table> {
+        Ok(Table::new())
+    }
+}
+```
+
+**After (0.1.0-beta.1):**
+
+```rust,ignore
+impl ConfigTable for Settings {
+    fn from_table(table_path: &str, _table: Table) -> Result<Self> {
+        Err(Error::missing_key_error(table_path, "port"))
+    }
+
+    fn to_table(&self, _table_path: &str) -> Result<Table> {
+        Ok(Table::new())
+    }
+}
+```
+
+### Tokio, setters and `Debug`
+
+- The library no longer enables Tokio's `macros` or `rt-multi-thread` features.
+  Add the features your application uses to its own Tokio dependency.
+- Applications that import macros directly from `conferencier-derive` must
+  pin it to the exact same version as `conferencier`; the default-feature
+  re-export from `conferencier` is the recommended setup.
+- `set_string` accepts `impl Into<String>` and vector setters accept
+  `IntoIterator`. Pass values directly instead of relying on an ambiguous
+  `.into()`, and pass iterators directly instead of collecting them without a
+  type annotation. Empty string vectors need an element type, such as
+  `Vec::<String>::new()`.
+- `ConfigStore`'s `Debug` output no longer contains configuration values.
+  Its text format is not stable; do not parse it.
+
+### Non-breaking behavior changes
+
+- Scalar and vector `f32` fields now load infinities and NaNs. Validate values
+  in the application if non-finite values must be rejected; NaN sign and
+  payload are not preserved.
+- Save-time range errors for `u64` and `usize` no longer include the numeric
+  value. Vector errors still report the failing element index.
+
+### Existing behavior, not a source migration
+
+`from_file`, `load_file` and `save_file` still require an active Tokio runtime
+when their file operation reaches Tokio; polling them outside a runtime can
+panic. `save_file` returns a serialization error before it needs a runtime.
+Caller-supplied code may have its own runtime requirements. With the default
+TOML features, deeply nested untrusted input is rejected with a parse error;
+enabling `toml/unbounded` removes that limit and can allow stack overflow.
+
+Lenient loading followed by saving a scope can remove keys and nested tables
+that are not mapped by that scope. This is existing behavior, not a beta.1
+change; see [saving configuration](crate::guide::files) before saving a
+section that may contain keys written by another application version.
+
 ## From 0.0.7 to 0.0.8
 
 The 0.0.8 release adds example applications; no library API or configuration

@@ -17,7 +17,7 @@ use crate::Result;
 ///
 /// With the default `derive` feature, `#[derive(ConfigTable)]` implements this
 /// trait for named-field structs. The
-/// [nested tables guide](https://docs.rs/conferencier/latest/conferencier/guide/tables/index.html)
+/// [nested tables guide](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/tables/index.html)
 /// describes the table field shapes, their attributes and how tables behave on reload.
 ///
 /// Manual implementations own the input table and can move values out instead of cloning
@@ -25,7 +25,9 @@ use crate::Result;
 /// failing key to conversion errors. When delegating to a nested table, extend
 /// `table_path` with [`table_path`](crate::table_path) so that its errors carry
 /// the same paths as derived tables. Return a complete table from `to_table`, not a patch.
-/// These signatures and their TOML types may change while the API is in alpha.
+/// Manual implementations remain supported. The required signatures, bounds
+/// and documented behavior are stable throughout 0.1.x; neither this trait nor
+/// `ConfigScope` gains methods during that series.
 ///
 /// # Example
 ///

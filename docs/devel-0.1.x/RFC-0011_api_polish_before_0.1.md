@@ -1,7 +1,7 @@
 # RFC-0011: Public API polish before 0.1.0
 
 Date: 2026-11-17
-Status: Approved
+Status: Implemented
 Author: Komix42 <komix[at]ignore.cz>
 Target release: 0.1.0-beta.1
 Amends: [RFC-0001](../devel-0.0.x/RFC-0001_baseline_architecture.md), [RFC-0004](../devel-0.0.x/RFC-0004_nested_tables.md), [RFC-0005](../devel-0.0.x/RFC-0005_api_redesign.md), [RFC-0006](../devel-0.0.x/RFC-0006_strict_unknown_keys.md), [RFC-0007](../devel-0.0.x/RFC-0007_default_expressions.md), [RFC-0009](../devel-0.0.x/RFC-0009_save_file_replacement.md)

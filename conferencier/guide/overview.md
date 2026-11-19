@@ -6,6 +6,14 @@ The [guide](crate::guide) explains how the store, scopes and tables work togethe
 
 Conferencier does not layer configuration sources, watch files or validate application-specific rules. Saving a scope replaces its section; serializing the store does not preserve comments or formatting. See [saving to files](crate::guide::files) for details.
 
+The library enables only Tokio's `sync`, `rt` and `fs` features; applications
+enable runtime features such as `macros` and `rt-multi-thread` themselves.
+Invalid input handled by the library returns an error rather than panicking,
+with documented exceptions for caller-supplied code, file operations without a
+Tokio runtime, and deeply nested data when the parser's limit is removed. See
+[runtime requirements](crate::guide::concepts#reading-a-file-before-the-runtime-starts)
+and [nesting limits](crate::guide::concepts#nesting-limits).
+
 ## Start here
 
 - [Concepts](crate::guide::concepts): the store, scopes, loading, saving, shared runtime state and locking.

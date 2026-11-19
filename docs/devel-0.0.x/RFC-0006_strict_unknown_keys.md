@@ -5,6 +5,7 @@ Status: Implemented
 Author: Komix42 <komix[at]ignore.cz>
 Target release: 0.0.5
 Amends: [RFC-0004](./RFC-0004_nested_tables.md)
+Amended by: [RFC-0011](../devel-0.1.x/RFC-0011_api_polish_before_0.1.md)
 
 ## Document Scope
 

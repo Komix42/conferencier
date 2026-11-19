@@ -5,6 +5,7 @@ Status: Implemented
 Author: Komix42 <komix[at]ignore.cz>
 Target release: 0.0.5
 Amends: [RFC-0001](./RFC-0001_baseline_architecture.md), [RFC-0003](./RFC-0003_field_attributes.md), [RFC-0004](./RFC-0004_nested_tables.md)
+Amended by: [RFC-0011](../devel-0.1.x/RFC-0011_api_polish_before_0.1.md)
 
 ## Document Scope
 

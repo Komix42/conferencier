@@ -3,7 +3,7 @@
 Date: 2025-09-29
 Status: Implemented
 Author: Komix42 <komix[at]ignore.cz>
-Amended by: [RFC-0003](./RFC-0003_field_attributes.md), [RFC-0004](./RFC-0004_nested_tables.md), [RFC-0005](./RFC-0005_api_redesign.md), [RFC-0007](./RFC-0007_default_expressions.md), [RFC-0009](./RFC-0009_save_file_replacement.md), [RFC-0010](./RFC-0010_save_file_permissions.md)
+Amended by: [RFC-0003](./RFC-0003_field_attributes.md), [RFC-0004](./RFC-0004_nested_tables.md), [RFC-0005](./RFC-0005_api_redesign.md), [RFC-0007](./RFC-0007_default_expressions.md), [RFC-0009](./RFC-0009_save_file_replacement.md), [RFC-0010](./RFC-0010_save_file_permissions.md), [RFC-0011](../devel-0.1.x/RFC-0011_api_polish_before_0.1.md)
 
 > **Historical baseline.** This document describes the initial 0.0.1 state and is not edited when later RFCs change the behavior. Where an RFC listed in `Amended by` differs from this text, that RFC prevails. The READMEs describe the current behavior.
 

@@ -98,7 +98,7 @@ impl IoOperation {
 /// plain [`std::io::Error`] with `?` or `Error::from` leaves the paths unset; use
 /// [`Error::io_error`] or [`Error::io_error_with_operation`] to supply context,
 /// as shown in the
-/// [guide](https://docs.rs/conferencier/latest/conferencier/guide/concepts/index.html#reading-a-file-before-the-runtime-starts).
+/// [guide](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/concepts/index.html#reading-a-file-before-the-runtime-starts).
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Error {

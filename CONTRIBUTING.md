@@ -30,6 +30,59 @@ Thanks for your interest in improving **conferencier**! This quick guide explain
 4. **Document your changes** by updating `CHANGELOG.md`, the [guide](#documentation) and rustdoc comments or examples when appropriate.
 5. **Open a pull request** against the `develop` branch with a clear description of the change, including any follow-up work or known limitations.
 
+## 0.1.x compatibility and release checks
+
+The 0.1.x compatibility boundary is the minor version: every pre-release and
+release must remain backward compatible with the immediately preceding
+published 0.1.x version. Breaking changes, including major-version upgrades
+of public `toml` or `tokio` dependencies, are deferred to 0.2.0. Rust 1.85 is
+supported throughout 0.1.x.
+
+The MSRV checks validate both the locked dependency graph and a fresh,
+MSRV-aware dependency resolution in fallback mode on Rust 1.85. The fresh
+resolution uses an isolated lockfile and must not change the workspace
+`Cargo.lock`.
+
+Before publishing `0.1.0-beta.1`, audit the intentional transition from 0.0.8
+with `cargo-semver-checks`, using `--release-type minor` explicitly:
+
+```powershell
+cargo semver-checks --package conferencier --baseline-version 0.0.8 --release-type minor --default-features
+cargo semver-checks --package conferencier --baseline-version 0.0.8 --release-type minor --only-explicit-features
+cargo semver-checks --package conferencier-derive --baseline-version 0.0.8 --release-type minor
+```
+
+This is a reviewed audit, not a requirement that the transition have no
+reported breaks. Reconcile every break with the compatibility and migration
+documentation. After the beta.1 tag exists, compare each candidate with the
+immediately preceding 0.1.x tag using `--baseline-rev <tag>` and
+`--release-type minor`, using the same two `conferencier` feature
+configurations and one `conferencier-derive` check shown above. The baseline
+includes pre-releases and advances after each publication.
+
+Before every 0.1.x pre-release or release, also build three downstream
+consumers on Rust 1.85 against the actual packaged `.crate` archives for both
+crates, outside the workspace. A temporary local registry or `[patch]` entries
+to extracted package directories may resolve the archives; do not use workspace
+package paths:
+
+1. Use the `conferencier` default features and derive a scope through the
+   crate-root macro re-export.
+2. Disable `conferencier`'s default features and compile manual `ConfigScope`
+   and `ConfigTable` implementations.
+3. Disable the core default features, pin both crates to the same exact
+   candidate version, import both macros from `conferencier-derive`, and derive
+   both traits.
+
+All three builds must succeed. This packaged-consumer check is a release gate,
+not a per-pull-request CI job.
+
+Use absolute docs.rs links to versioned documentation, not `/latest/`. During
+the 0.1.x series use the range URL beginning
+`https://docs.rs/conferencier/%5E0.1.0-beta.1/`; update it when the next
+development series begins. Before publication, inspect both packaged archives
+and confirm they contain no `docs.rs/conferencier/latest` links.
+
 ## Documentation
 
 - **`README.md`** is a short showcase shared by GitHub and crates.io. Cargo copies it into the root of the `conferencier` package, so its links must be absolute URLs. Its Rust code blocks run as doctests of the unpublished `readme-tests` workspace member.
