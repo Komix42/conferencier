@@ -1,0 +1,5 @@
+error: references are not supported as field types for #[derive(ConfigScope)]; use an owned supported type
+ --> tests/trybuild/fail_reference_field.rs:3:12
+  |
+3 |     value: &'static str,
+  |            ^

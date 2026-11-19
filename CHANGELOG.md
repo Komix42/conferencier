@@ -21,6 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Breaking:** `set_string` accepts `impl Into<String>`, and vector setters accept iterators instead of requiring owned vectors. Calls using `.into()` without a concrete target type may need adjustment; see RFC-0011 S1–S3 ([RFC-0011](docs/devel-0.1.x/RFC-0011_api_polish_before_0.1.md)).
 - **Breaking:** `ConfigStore`'s `Debug` output now lists top-level keys without configuration values, and reports when it cannot read keys because the store is locked ([RFC-0011](docs/devel-0.1.x/RFC-0011_api_polish_before_0.1.md) D1–D2).
 - **Breaking:** the normal Tokio dependency now enables only `sync`, `rt` and `fs`; applications that relied on other Tokio features being enabled transitively must enable them directly ([RFC-0011](docs/devel-0.1.x/RFC-0011_api_polish_before_0.1.md) T1–T2).
+- Derive-generated code now uses fully qualified `core` and `std` paths so caller names cannot shadow generated code. Unsupported-field diagnostics explain type-alias limitations, references and nested vectors ([AUDIT-001 B1, B5](docs/devel-0.0.x/AUDIT-001_quality_0.0.8.md)).
 
 ## [0.0.8] - 2026-11-17
 

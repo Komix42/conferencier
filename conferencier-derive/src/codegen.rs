@@ -117,7 +117,7 @@ pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
                 #unknown_key_check
                 #( #load_statements )*
                 let #value = Self { #(#struct_fields),* };
-                Ok(#crate_private::new_shared_scope(#value))
+                ::core::result::Result::Ok(#crate_private::new_shared_scope(#value))
             }
 
             async fn load(#scope: &#shared_scope, #store: &#store_type) -> #result_type<()> {
@@ -126,7 +126,7 @@ pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
                 #unknown_key_check
                 #( #load_statements )*
                 #assign
-                Ok(())
+                ::core::result::Result::Ok(())
             }
 
             async fn save(#scope: &#shared_scope, #store: &#store_type) -> #result_type<()> {
@@ -208,10 +208,10 @@ pub fn generate_table(scope: Scope, crate_path: syn::Path) -> Result<TokenStream
         quote! {
             let mut #table = #table_type::new();
             #( #store_statements )*
-            Ok(#table)
+            ::core::result::Result::Ok(#table)
         }
     } else {
-        quote! { Ok(#table_type::new()) }
+        quote! { ::core::result::Result::Ok(#table_type::new()) }
     };
 
     Ok(quote! {
@@ -220,7 +220,7 @@ pub fn generate_table(scope: Scope, crate_path: syn::Path) -> Result<TokenStream
                 #section_check
                 #unknown_key_check
                 #( #load_statements )*
-                Ok(Self { #(#struct_fields),* })
+                ::core::result::Result::Ok(Self { #(#struct_fields),* })
             }
 
             fn to_table(&self, #to_path: &str) -> #result_type<#table_type> {
@@ -574,7 +574,12 @@ fn absent_value(
     match (optional, fallback) {
         (_, Some(fallback)) => quote! { #fallback },
         (true, None) => quote! { ::core::option::Option::None },
-        (false, None) => quote! { return Err(#crate_path::Error::missing_key_error(#path, #key)) },
+        (false, None) => quote! {
+            return ::core::result::Result::Err(#crate_path::Error::missing_key_error(
+                #path,
+                #key,
+            ))
+        },
     }
 }
 
@@ -623,7 +628,9 @@ fn scalar_to_value(
             quote! { #value_type::Integer(#raw) }
         }
         ScalarKind::Float(FloatKind::F64) => quote! { #value_type::Float(*#value) },
-        ScalarKind::Float(FloatKind::F32) => quote! { #value_type::Float(f64::from(*#value)) },
+        ScalarKind::Float(FloatKind::F32) => {
+            quote! { #value_type::Float(::core::primitive::f64::from(*#value)) }
+        }
     }
 }
 
@@ -691,10 +698,17 @@ fn integer_from_store(
     let value = generated_local("value");
     let v = generated_local("v");
     quote! {
-        match <#ty as ::core::convert::TryFrom<i64>>::try_from(#value) {
-            Ok(#v) => #v,
-            Err(_) => {
-                return Err(#err::value_parse_error(#path, #key, format!("value out of range for {}", stringify!(#ty))));
+        match <#ty as ::core::convert::TryFrom<::core::primitive::i64>>::try_from(#value) {
+            ::core::result::Result::Ok(#v) => #v,
+            ::core::result::Result::Err(_) => {
+                return ::core::result::Result::Err(#err::value_parse_error(
+                    #path,
+                    #key,
+                    ::std::format!(
+                        "value out of range for {}",
+                        ::core::stringify!(#ty)
+                    ),
+                ));
             }
         }
     }
@@ -716,10 +730,17 @@ fn float_from_store(
             quote! {
                 {
                     let #raw = #value;
-                    if #raw.is_finite() && (#raw < f32::MIN as f64 || #raw > f32::MAX as f64) {
-                        return Err(#err::value_parse_error(#path, #key, String::from("value out of range for f32")));
+                    if #raw.is_finite()
+                        && (#raw < ::core::primitive::f32::MIN as ::core::primitive::f64
+                            || #raw > ::core::primitive::f32::MAX as ::core::primitive::f64)
+                    {
+                        return ::core::result::Result::Err(#err::value_parse_error(
+                            #path,
+                            #key,
+                            ::std::string::String::from("value out of range for f32"),
+                        ));
                     }
-                    #raw as f32
+                    #raw as ::core::primitive::f32
                 }
             }
         }
@@ -742,12 +763,20 @@ fn integer_vec_from_store(
     let v = generated_local("v");
     quote! {
         {
-            let mut #out = Vec::with_capacity(#value.len());
+            let mut #out = ::std::vec::Vec::with_capacity(#value.len());
             for (#index, #raw) in #value.into_iter().enumerate() {
-                match <#scalar as ::core::convert::TryFrom<i64>>::try_from(#raw) {
-                    Ok(#v) => #out.push(#v),
-                    Err(_) => {
-                        return Err(#err::value_parse_error(#path, #key, format!("value out of range for {} (at index {})", stringify!(#scalar), #index)));
+                match <#scalar as ::core::convert::TryFrom<::core::primitive::i64>>::try_from(#raw) {
+                    ::core::result::Result::Ok(#v) => #out.push(#v),
+                    ::core::result::Result::Err(_) => {
+                        return ::core::result::Result::Err(#err::value_parse_error(
+                            #path,
+                            #key,
+                            ::std::format!(
+                                "value out of range for {} (at index {})",
+                                ::core::stringify!(#scalar),
+                                #index
+                            ),
+                        ));
                     }
                 }
             }
@@ -773,12 +802,22 @@ fn float_vec_from_store(
             let err = quote! { #crate_path::Error };
             quote! {
                 {
-                    let mut #out = Vec::with_capacity(#value.len());
+                    let mut #out = ::std::vec::Vec::with_capacity(#value.len());
                     for (#index, #raw) in #value.into_iter().enumerate() {
-                        if #raw.is_finite() && (#raw < f32::MIN as f64 || #raw > f32::MAX as f64) {
-                            return Err(#err::value_parse_error(#path, #key, format!("value out of range for f32 (at index {})", #index)));
+                        if #raw.is_finite()
+                            && (#raw < ::core::primitive::f32::MIN as ::core::primitive::f64
+                                || #raw > ::core::primitive::f32::MAX as ::core::primitive::f64)
+                        {
+                            return ::core::result::Result::Err(#err::value_parse_error(
+                                #path,
+                                #key,
+                                ::std::format!(
+                                    "value out of range for f32 (at index {})",
+                                    #index
+                                ),
+                            ));
                         }
-                        #out.push(#raw as f32);
+                        #out.push(#raw as ::core::primitive::f32);
                     }
                     #out
                 }
@@ -799,25 +838,35 @@ fn integer_to_store(
     let err = quote! { #crate_path::Error };
     let raw = generated_local("raw");
     match kind {
-        IntegerKind::I64 | IntegerKind::Isize => quote! { #value as i64 },
-        IntegerKind::I8 | IntegerKind::I16 | IntegerKind::I32 => quote! { i64::from(#value) },
-        IntegerKind::U8 | IntegerKind::U16 | IntegerKind::U32 => quote! { #value as i64 },
+        IntegerKind::I64 | IntegerKind::Isize => {
+            quote! { #value as ::core::primitive::i64 }
+        }
+        IntegerKind::I8 | IntegerKind::I16 | IntegerKind::I32 => {
+            quote! { ::core::primitive::i64::from(#value) }
+        }
+        IntegerKind::U8 | IntegerKind::U16 | IntegerKind::U32 => {
+            quote! { #value as ::core::primitive::i64 }
+        }
         IntegerKind::U64 | IntegerKind::Usize => {
             let error_message = match index {
                 Some(index) => quote! {
-                    format!("value out of range for TOML integer (at index {})", #index)
+                    ::std::format!("value out of range for TOML integer (at index {})", #index)
                 },
                 None => quote! {
-                    String::from("value out of range for TOML integer")
+                    ::std::string::String::from("value out of range for TOML integer")
                 },
             };
             quote! {
                 {
-                    let #raw = #value as u64;
-                    if #raw > i64::MAX as u64 {
-                        return Err(#err::value_parse_error(#path, #key, #error_message));
+                    let #raw = #value as ::core::primitive::u64;
+                    if #raw > ::core::primitive::i64::MAX as ::core::primitive::u64 {
+                        return ::core::result::Result::Err(#err::value_parse_error(
+                            #path,
+                            #key,
+                            #error_message,
+                        ));
                     }
-                    #raw as i64
+                    #raw as ::core::primitive::i64
                 }
             }
         }

@@ -1,4 +1,4 @@
-error: unsupported field type `MaybePort`; nested structs require #[confer(table)] on the field and #[derive(ConfigTable)] on the type
+error: unsupported field type `MaybePort`; supported types are recognized by their final path segment and type aliases are opaque. Nested table fields require #[confer(table)] and an implementation of ConfigTable
  --> tests/trybuild/fail_default_aliases.rs:6:11
   |
 6 |     port: MaybePort,
