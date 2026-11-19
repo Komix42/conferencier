@@ -75,6 +75,12 @@ use crate::value_conversion;
 /// panic ever poisons the lock, later calls continue with the data, which every write
 /// leaves consistent.
 ///
+/// Typed setters finish all input conversions and iterator consumption and build the
+/// complete TOML value before acquiring the write lock. They then validate the section
+/// and replace the value in one update. Input preparation therefore runs even when the
+/// section is invalid, but caller-provided code never runs under the lock and readers
+/// never observe a partially built array.
+///
 /// Individual calls are synchronized, not sequences of calls: a read followed by
 /// a write is not a transaction, and another task may change the document between them.
 /// The [guide](https://docs.rs/conferencier/latest/conferencier/guide/concepts/index.html#locking)
@@ -530,16 +536,17 @@ impl ConfigStore {
 
     /// Stores a string at `section.key`, creating the section if needed.
     ///
-    /// Replaces the key's previous value. Section validation and errors are the
-    /// same as [`set_value`](Self::set_value); other keys are unchanged.
+    /// Converts `value` with [`Into<String>`] before validating the section or acquiring
+    /// the write lock. Replaces the key's previous value; other keys are unchanged.
+    /// Section validation and errors are the same as [`set_value`](Self::set_value).
     ///
     /// # Errors
     ///
     /// Returns [`Error::TypeMismatch`] if the top-level entry named `section` is not a
     /// table, leaving the document unchanged. The error has an empty `path` and uses
     /// `section` as its `key`.
-    pub fn set_string(&self, section: &str, key: &str, value: String) -> Result<()> {
-        self.set_value(section, key, Value::String(value))
+    pub fn set_string(&self, section: &str, key: &str, value: impl Into<String>) -> Result<()> {
+        self.set_value(section, key, Value::String(value.into()))
     }
 
     /// Stores an integer at `section.key`, creating the section if needed.
@@ -596,71 +603,110 @@ impl ConfigStore {
 
     /// Stores a string array at `section.key`, creating the section if needed.
     ///
-    /// Replaces the complete array; an empty vector is written as `[]`, not removed.
-    /// Section validation and errors follow [`set_value`](Self::set_value).
+    /// Accepts any iterator whose items convert into [`String`], including arrays of
+    /// `&str`, vectors of `String`, and a borrowed `Vec<String>`. For a borrowed slice
+    /// of `&str`, pass `values.iter().copied()`. A typed empty vector is stored as `[]`,
+    /// not removed.
+    ///
+    /// The iterator is consumed and each item converted before validating the section
+    /// or acquiring the write lock. Section validation and errors follow
+    /// [`set_value`](Self::set_value).
     ///
     /// # Errors
     ///
     /// Returns [`Error::TypeMismatch`] if the top-level entry named `section` is not a
     /// table, leaving the document unchanged.
-    pub fn set_string_vec(&self, section: &str, key: &str, value: Vec<String>) -> Result<()> {
-        let array = value.into_iter().map(Value::String).collect();
+    pub fn set_string_vec(
+        &self,
+        section: &str,
+        key: &str,
+        values: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Result<()> {
+        let array = values
+            .into_iter()
+            .map(|value| Value::String(value.into()))
+            .collect();
         self.set_value(section, key, Value::Array(array))
     }
 
     /// Stores an integer array at `section.key`, creating the section if needed.
     ///
-    /// Replaces the complete array with TOML signed 64-bit integers. An empty vector
-    /// is written as `[]`. Section validation and errors follow [`set_value`](Self::set_value).
+    /// Accepts any iterator of TOML signed 64-bit integers, including borrowed slices
+    /// passed with `.iter().copied()`. An empty iterator is written as `[]`.
+    /// Section validation and errors follow [`set_value`](Self::set_value).
     ///
     /// # Errors
     ///
     /// Returns [`Error::TypeMismatch`] if the top-level entry named `section` is not a
     /// table, leaving the document unchanged.
-    pub fn set_integer_vec(&self, section: &str, key: &str, value: Vec<i64>) -> Result<()> {
-        let array = value.into_iter().map(Value::Integer).collect();
+    pub fn set_integer_vec(
+        &self,
+        section: &str,
+        key: &str,
+        values: impl IntoIterator<Item = i64>,
+    ) -> Result<()> {
+        let array = values.into_iter().map(Value::Integer).collect();
         self.set_value(section, key, Value::Array(array))
     }
 
     /// Stores a floating-point array at `section.key`, creating the section if needed.
     ///
-    /// Replaces the complete array with TOML floats; an empty vector is written as `[]`.
+    /// Accepts any iterator of TOML floating-point numbers, including borrowed slices
+    /// passed with `.iter().copied()`. An empty iterator is written as `[]`.
     /// Section validation and errors follow [`set_value`](Self::set_value).
     ///
     /// # Errors
     ///
     /// Returns [`Error::TypeMismatch`] if the top-level entry named `section` is not a
     /// table, leaving the document unchanged.
-    pub fn set_float_vec(&self, section: &str, key: &str, value: Vec<f64>) -> Result<()> {
-        let array = value.into_iter().map(Value::Float).collect();
+    pub fn set_float_vec(
+        &self,
+        section: &str,
+        key: &str,
+        values: impl IntoIterator<Item = f64>,
+    ) -> Result<()> {
+        let array = values.into_iter().map(Value::Float).collect();
         self.set_value(section, key, Value::Array(array))
     }
 
     /// Stores a boolean array at `section.key`, creating the section if needed.
     ///
-    /// Replaces the complete array; an empty vector is written as `[]`, not removed.
+    /// Accepts any iterator of booleans, including borrowed slices passed with
+    /// `.iter().copied()`. An empty iterator is written as `[]`, not removed.
     /// Section validation and errors follow [`set_value`](Self::set_value).
     ///
     /// # Errors
     ///
     /// Returns [`Error::TypeMismatch`] if the top-level entry named `section` is not a
     /// table, leaving the document unchanged.
-    pub fn set_boolean_vec(&self, section: &str, key: &str, value: Vec<bool>) -> Result<()> {
-        let array = value.into_iter().map(Value::Boolean).collect();
+    pub fn set_boolean_vec(
+        &self,
+        section: &str,
+        key: &str,
+        values: impl IntoIterator<Item = bool>,
+    ) -> Result<()> {
+        let array = values.into_iter().map(Value::Boolean).collect();
         self.set_value(section, key, Value::Array(array))
     }
 
     /// Stores a [`Datetime`] array at `section.key`, creating the section if needed.
     ///
-    /// Writes datetime values, not quoted strings. An empty vector is written as `[]`.
+    /// Accepts any iterator of [`Datetime`] values, including borrowed slices passed
+    /// with `.iter().copied()`. Writes datetime values, not quoted strings. An empty
+    /// iterator is written as `[]`.
     /// Section validation and errors follow [`set_value`](Self::set_value).
     ///
     /// # Errors
     ///
     /// Returns [`Error::TypeMismatch`] if the top-level entry named `section` is not a
     /// table, leaving the document unchanged.
-    pub fn set_datetime_vec(&self, section: &str, key: &str, value: Vec<Datetime>) -> Result<()> {
-        let array = value.into_iter().map(Value::Datetime).collect();
+    pub fn set_datetime_vec(
+        &self,
+        section: &str,
+        key: &str,
+        values: impl IntoIterator<Item = Datetime>,
+    ) -> Result<()> {
+        let array = values.into_iter().map(Value::Datetime).collect();
         self.set_value(section, key, Value::Array(array))
     }
 
@@ -949,12 +995,24 @@ mod save_tests;
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
     use std::error::Error as _;
+    use std::sync::mpsc::sync_channel;
+    use std::time::Duration;
 
     use super::*;
     use crate::error::{Error, Result};
 
     use tempfile::NamedTempFile;
+
+    struct StoreReadingString(ConfigStore);
+
+    impl From<StoreReadingString> for String {
+        fn from(value: StoreReadingString) -> Self {
+            assert_eq!(value.0.get_integer("App", "answer").unwrap(), 42);
+            String::from("converted")
+        }
+    }
 
     #[test]
     fn new_store_is_empty() {
@@ -1123,7 +1181,7 @@ mod tests {
     #[test]
     fn set_and_get_string_roundtrip() -> Result<()> {
         let store = ConfigStore::new();
-        store.set_string("App", "name", "demo".into())?;
+        store.set_string("App", "name", "demo")?;
         assert_eq!(store.get_string("App", "name")?, "demo");
         assert_eq!(
             store.get_value("App", "name"),
@@ -1133,9 +1191,137 @@ mod tests {
     }
 
     #[test]
+    fn typed_setters_accept_into_and_iterable_inputs() -> Result<()> {
+        let store = ConfigStore::new();
+
+        store.set_string("App", "borrowed", "text")?;
+        store.set_string("App", "owned", String::from("text"))?;
+
+        store.set_string_vec("App", "array", ["array", "values"])?;
+        store.set_string_vec(
+            "App",
+            "owned_vec",
+            vec![String::from("owned"), String::from("values")],
+        )?;
+        let borrowed_vec = vec![String::from("borrowed"), String::from("values")];
+        store.set_string_vec("App", "borrowed_vec", &borrowed_vec)?;
+        let borrowed_slice = ["slice", "values"];
+        store.set_string_vec("App", "borrowed_slice", borrowed_slice.iter().copied())?;
+        store.set_string_vec(
+            "App",
+            "mapped",
+            (0..2).map(|index| format!("mapped-{index}")),
+        )?;
+
+        let integers = [1, 2];
+        store.set_integer_vec("App", "integers", integers.iter().copied())?;
+        let floats = [1.5, 2.5];
+        store.set_float_vec("App", "floats", floats.iter().copied())?;
+        let booleans = [true, false];
+        store.set_boolean_vec("App", "booleans", booleans.iter().copied())?;
+        let date: Datetime = "2024-01-01".parse().expect("valid TOML date");
+        let dates = [date, date];
+        store.set_datetime_vec("App", "dates", dates.iter().copied())?;
+
+        store.set_integer_vec("App", "empty_integers", vec![])?;
+        store.set_string_vec("App", "empty_strings", Vec::<String>::new())?;
+
+        assert_eq!(store.get_string("App", "borrowed")?, "text");
+        assert_eq!(store.get_string("App", "owned")?, "text");
+        assert_eq!(
+            store.get_string_vec("App", "array")?,
+            vec![String::from("array"), String::from("values")]
+        );
+        assert_eq!(
+            store.get_string_vec("App", "owned_vec")?,
+            vec![String::from("owned"), String::from("values")]
+        );
+        assert_eq!(
+            store.get_string_vec("App", "borrowed_vec")?,
+            vec![String::from("borrowed"), String::from("values")]
+        );
+        assert_eq!(
+            store.get_string_vec("App", "borrowed_slice")?,
+            vec![String::from("slice"), String::from("values")]
+        );
+        assert_eq!(
+            store.get_string_vec("App", "mapped")?,
+            vec![String::from("mapped-0"), String::from("mapped-1")]
+        );
+        assert_eq!(store.get_integer_vec("App", "integers")?, integers);
+        assert_eq!(store.get_float_vec("App", "floats")?, floats);
+        assert_eq!(store.get_boolean_vec("App", "booleans")?, booleans);
+        assert_eq!(store.get_datetime_vec("App", "dates")?, dates);
+        assert!(store.get_integer_vec("App", "empty_integers")?.is_empty());
+        assert!(store.get_string_vec("App", "empty_strings")?.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn setter_inputs_can_read_the_same_store_without_deadlocking() -> Result<()> {
+        let store = ConfigStore::from_str("[App]\nanswer = 42")?;
+        let (sender, receiver) = sync_channel(1);
+        let conversion_store = store.clone();
+        std::thread::spawn(move || {
+            let result = conversion_store.set_string(
+                "App",
+                "converted",
+                StoreReadingString(conversion_store.clone()),
+            );
+            let _ = sender.send(result);
+        });
+        receiver
+            .recv_timeout(Duration::from_secs(5))
+            .expect("custom string conversion should finish outside the write lock")?;
+        assert_eq!(store.get_string("App", "converted")?, "converted");
+
+        let (sender, receiver) = sync_channel(1);
+        let iterator_store = store.clone();
+        std::thread::spawn(move || {
+            let values = (0..2).map(|index| {
+                assert_eq!(iterator_store.get_integer("App", "answer").unwrap(), 42);
+                format!("item-{index}")
+            });
+            let result = iterator_store.set_string_vec("App", "items", values);
+            let _ = sender.send(result);
+        });
+        receiver
+            .recv_timeout(Duration::from_secs(5))
+            .expect("iterator should finish outside the write lock")?;
+        assert_eq!(
+            store.get_string_vec("App", "items")?,
+            vec![String::from("item-0"), String::from("item-1")]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn typed_setters_consume_inputs_before_rejecting_invalid_sections() -> Result<()> {
+        let store = ConfigStore::from_str("App = 7\n[Other]\nkeep = true")?;
+        let before = store.save_str()?;
+        let consumed = Cell::new(0);
+        let values = (0_i64..3).inspect(|_| consumed.set(consumed.get() + 1));
+
+        let error = store.set_integer_vec("App", "values", values).unwrap_err();
+        assert!(matches!(
+            error,
+            Error::TypeMismatch {
+                ref table_path,
+                ref key,
+                expected: "table",
+                found: "integer",
+                ..
+            } if table_path.is_empty() && key == "App"
+        ));
+        assert_eq!(consumed.get(), 3);
+        assert_eq!(store.save_str()?, before);
+        Ok(())
+    }
+
+    #[test]
     fn datetime_fallback_from_string() -> Result<()> {
         let store = ConfigStore::new();
-        store.set_string("Build", "time", "2024-01-01T00:00:00Z".into())?;
+        store.set_string("Build", "time", "2024-01-01T00:00:00Z")?;
         let dt = store.get_datetime("Build", "time")?;
         assert_eq!(dt.to_string(), "2024-01-01T00:00:00Z");
         Ok(())
@@ -1190,7 +1376,7 @@ mod tests {
     #[test]
     fn load_str_replaces_content() -> Result<()> {
         let store = ConfigStore::new();
-        store.set_string("App", "name", "demo".into())?;
+        store.set_string("App", "name", "demo")?;
         store.load_str("[Srv]\nport = 8080\n")?;
 
         assert!(store.get_value("App", "name").is_none());
@@ -1227,7 +1413,7 @@ mod tests {
     #[tokio::test]
     async fn save_and_load_file_roundtrip() -> Result<()> {
         let store = ConfigStore::new();
-        store.set_string("App", "name", "demo".into())?;
+        store.set_string("App", "name", "demo")?;
         store.set_integer("App", "port", 3000)?;
 
         let temp = NamedTempFile::new().expect("temp file");

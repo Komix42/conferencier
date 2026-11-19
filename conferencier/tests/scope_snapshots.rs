@@ -67,7 +67,7 @@ async fn failing_load_leaves_the_module_unchanged() -> Result<()> {
     let module = App::from_store(&store)?;
     module.write().await.state = 42;
 
-    store.set_string("App", "name", "second".into())?;
+    store.set_string("App", "name", "second")?;
     store.set_integer("App", "port", 70_000)?;
     let error = error_of(App::load(&module, &store).await);
     assert_eq!(

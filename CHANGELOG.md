@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `conferencier` depends on the exactly matching `conferencier-derive` version (`=0.1.0-beta.1`), so Cargo cannot pair the library with a different derive release ([RFC-0011](docs/devel-0.1.x/RFC-0011_api_polish_before_0.1.md), audit finding A8).
 - Non-finite `f32` values, including infinities and NaNs, now load in scalar and vector fields and round-trip; NaN sign and payload are not preserved ([RFC-0011](docs/devel-0.1.x/RFC-0011_api_polish_before_0.1.md) F1).
 - Save-time `u64` and `usize` range errors no longer include the raw value; vector errors continue to include the element index ([RFC-0011](docs/devel-0.1.x/RFC-0011_api_polish_before_0.1.md) E7).
+- **Breaking:** `set_string` accepts `impl Into<String>`, and vector setters accept iterators instead of requiring owned vectors. Calls using `.into()` without a concrete target type may need adjustment; see RFC-0011 S1–S3 ([RFC-0011](docs/devel-0.1.x/RFC-0011_api_polish_before_0.1.md)).
 
 ## [0.0.8] - 2026-11-17
 

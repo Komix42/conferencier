@@ -7,7 +7,7 @@ async fn load_and_save_roundtrip() -> Result<()> {
     assert_eq!(store.get_string("App", "name")?, "demo");
 
     store.set_integer("App", "port", 8080)?;
-    store.set_string_vec("App", "langs", vec!["en".into(), "de".into()])?;
+    store.set_string_vec("App", "langs", ["en", "de"])?;
 
     let output = store.save_str()?;
     assert!(output.contains("name = \"demo\""));
