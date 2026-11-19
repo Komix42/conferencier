@@ -1076,6 +1076,19 @@ mod tests {
         future.poll(&mut context)
     }
 
+    #[test]
+    fn store_and_file_futures_are_send() {
+        fn assert_store<T: Send + Sync + 'static>() {}
+        fn assert_send<T: Send>(_: &T) {}
+
+        assert_store::<ConfigStore>();
+        let store = ConfigStore::new();
+        // The futures are never polled, so no runtime or file is needed.
+        assert_send(&ConfigStore::from_file("app.toml"));
+        assert_send(&store.load_file("app.toml"));
+        assert_send(&store.save_file("app.toml"));
+    }
+
     struct StoreReadingString(ConfigStore);
 
     impl From<StoreReadingString> for String {
