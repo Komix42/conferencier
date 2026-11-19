@@ -32,14 +32,15 @@ dependencies resolve to that precise derive release rather than a later beta.
      with both locked and fresh dependency resolutions, dependency audit,
      packaged doctests and publish dry-runs. Record any checks that cannot be
      reproduced locally and the platforms not tested.
-   - Audit both crates against 0.0.8 with `cargo-semver-checks` and
-     `--release-type minor`, including `conferencier` with and without default
-     features, using the commands in
+   - Audit `conferencier` against 0.0.8 with `cargo-semver-checks` and
+     `--release-type minor`, with and without default features, using the
+     commands in
      [CONTRIBUTING.md](../CONTRIBUTING.md#01x-compatibility-and-release-checks).
      Review every reported break against the compatibility and migration
      documentation; intentional breaks are expected. Separately review
      behavior, derive inputs and generated code, and matching `__private`
-     support, which the checker does not cover.
+     support, which the checker does not cover; it cannot check the
+     proc-macro crate `conferencier-derive` at all.
    - On Rust 1.85, build all three external consumers described in
      [CONTRIBUTING.md](../CONTRIBUTING.md#01x-compatibility-and-release-checks)
      against the actual candidate `.crate` archives for both crates. Verify the
@@ -69,7 +70,7 @@ The section-name migration guard stays until 0.2.0.
 
 ## Technical debt
 
-- **Semver CI after beta.1.** Before the first release after `0.1.0-beta.1`, add `cargo-semver-checks` to CI for both crates, checking `conferencier` with and without default features. Compare each candidate against the immediately preceding published 0.1.x tag, including pre-releases, with `--release-type minor`, and advance the baseline after each release. Origin: [RFC-0011](./devel-0.1.x/RFC-0011_api_polish_before_0.1.md).
+- **Semver CI after beta.1.** Before the first release after `0.1.0-beta.1`, add `cargo-semver-checks` to CI, checking `conferencier` with and without default features; the proc-macro crate `conferencier-derive` cannot be checked by it. Compare each candidate against the immediately preceding published 0.1.x tag, including pre-releases, with `--release-type minor`, and advance the baseline after each release. Origin: [RFC-0011](./devel-0.1.x/RFC-0011_api_polish_before_0.1.md).
 - **Temporary section-name migration guard.** Following [RFC-0005](./devel-0.0.x/RFC-0005_api_redesign.md), `ConfigScope` derives in 0.0.5 and later 0.0.x and 0.1.x releases whose implicit section was affected by the old `Confer` prefix rule require an explicit section. Remove the guard in 0.2.0, and warn in its migration notes that a direct upgrade from 0.0.4 bypasses the guard. Origin: RFC-0005 N7.
 
 ## Ideas

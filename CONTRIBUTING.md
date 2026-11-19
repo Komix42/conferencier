@@ -49,16 +49,20 @@ with `cargo-semver-checks`, using `--release-type minor` explicitly:
 ```powershell
 cargo semver-checks --package conferencier --baseline-version 0.0.8 --release-type minor --default-features
 cargo semver-checks --package conferencier --baseline-version 0.0.8 --release-type minor --only-explicit-features
-cargo semver-checks --package conferencier-derive --baseline-version 0.0.8 --release-type minor
 ```
 
 This is a reviewed audit, not a requirement that the transition have no
 reported breaks. Reconcile every break with the compatibility and migration
 documentation. After the beta.1 tag exists, compare each candidate with the
 immediately preceding 0.1.x tag using `--baseline-rev <tag>` and
-`--release-type minor`, using the same two `conferencier` feature
-configurations and one `conferencier-derive` check shown above. The baseline
-includes pre-releases and advances after each publication.
+`--release-type minor`, using the same two feature configurations shown above.
+The baseline includes pre-releases and advances after each publication.
+
+`cargo-semver-checks` cannot check `conferencier-derive`: a proc-macro crate
+has no library API for it to compare. The derive's compatibility is covered by
+the trybuild pass and fail tests, the packaged-consumer builds below, the exact
+version requirement in `conferencier`, and a manual review of accepted derive
+inputs, generated code and the matching `__private` support.
 
 Before every 0.1.x pre-release or release, also build three downstream
 consumers on Rust 1.85 against the actual packaged `.crate` archives for both
