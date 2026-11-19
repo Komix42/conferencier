@@ -429,10 +429,14 @@ fn classify_scalar(ty: &Type, derive: DeriveKind) -> Result<ScalarKind> {
         "f32" => Ok(ScalarKind::Float(FloatKind::F32)),
         "f64" => Ok(ScalarKind::Float(FloatKind::F64)),
         "Datetime" => Ok(ScalarKind::Datetime),
+        "Vec" if match_outer_type(ty, "Vec").is_some() => Err(syn::Error::new(
+            ty.span(),
+            "nested vectors are not supported; for arrays of nested TOML tables, use #[confer(table)] with an element type that implements ConfigTable",
+        )),
         other => Err(syn::Error::new(
             ty.span(),
             format!(
-                "unsupported field type `{}`; nested structs require #[confer(table)] on the field and #[derive(ConfigTable)] on the type",
+                "unsupported field type `{}`; supported types are recognized by their final path segment and type aliases are opaque. Nested table fields require #[confer(table)] and an implementation of ConfigTable",
                 other
             ),
         )),
@@ -451,7 +455,13 @@ fn type_ident(ty: &Type, derive: DeriveKind) -> Result<String> {
                 .ident;
             Ok(ident.to_string())
         }
-        Type::Reference(reference) => type_ident(&reference.elem, derive),
+        Type::Reference(_) => Err(syn::Error::new(
+            ty.span(),
+            format!(
+                "references are not supported as field types for #[derive({})]; use an owned supported type",
+                derive.name()
+            ),
+        )),
         _ => Err(syn::Error::new(
             ty.span(),
             format!("unsupported field type for #[derive({})]", derive.name()),

@@ -5,6 +5,7 @@ Status: Implemented
 Author: Komix42 <komix[at]ignore.cz>
 Target release: 0.0.6
 Amends: [RFC-0001](./RFC-0001_baseline_architecture.md)
+Amended by: [RFC-0011](../devel-0.1.x/RFC-0011_api_polish_before_0.1.md)
 Related: [RFC-0010](./RFC-0010_save_file_permissions.md)
 
 ## Document Scope

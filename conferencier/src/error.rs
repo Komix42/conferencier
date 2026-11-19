@@ -2,7 +2,7 @@
 
 use std::fmt;
 use std::io::ErrorKind;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Result type returned by conferencier operations.
 ///
@@ -10,80 +10,144 @@ use std::path::PathBuf;
 /// and manual trait implementations can use this alias to propagate errors with `?`.
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// The high-level file-operation phase that failed.
+///
+/// These variants identify phases rather than individual system calls. A phase
+/// such as preparing the temporary file may perform no system call on a platform
+/// that does not need it. Existing operations retain their meanings throughout
+/// 0.1.x. This enum is non-exhaustive; matches outside this crate must allow for
+/// future operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum IoOperation {
+    /// Read a configuration file.
+    Read,
+    /// Inspect and validate the save destination before writing.
+    InspectTarget,
+    /// Create a new temporary file for the save.
+    CreateTemporary,
+    /// Prepare the temporary file before writing, if the platform requires it.
+    PrepareTemporary,
+    /// Write the serialized configuration to the temporary file.
+    WriteTemporary,
+    /// Replace the save destination with the completed temporary file.
+    ReplaceTarget,
+}
+
+impl IoOperation {
+    fn description(self) -> &'static str {
+        match self {
+            Self::Read => "read file",
+            Self::InspectTarget => "inspect save target",
+            Self::CreateTemporary => "create temporary file",
+            Self::PrepareTemporary => "prepare temporary file",
+            Self::WriteTemporary => "write temporary file",
+            Self::ReplaceTarget => "replace target file",
+        }
+    }
+}
+
 /// Errors returned by [`ConfigStore`](crate::ConfigStore) and by derived
 /// [`ConfigScope`](crate::ConfigScope) and [`ConfigTable`](crate::ConfigTable)
 /// implementations.
 ///
-/// `path` holds the formatted path of the table containing the key, such as
-/// `App.upstream[1]`. For errors about a top-level entry that is not a table,
-/// `path` is empty and `key` is the entry name.
+/// In key errors, `table_path` holds the formatted path of the table containing
+/// the key, such as `App.upstream[1]`. For errors about a top-level entry that is
+/// not a table, `table_path` is empty and `key` is the entry name.
+///
+/// `Error` is `Send + Sync + 'static` throughout the 0.1.x series.
 ///
 /// # Inspecting errors
 ///
 /// This enum is non-exhaustive: match the variants relevant to your application
-/// and keep a fallback arm for future variants. [`std::error::Error::source`]
-/// exposes the underlying I/O, TOML parsing or serialization error; field errors
-/// and [`UnknownKey`](Self::UnknownKey) carry their diagnostic context directly.
+/// and keep a fallback arm for future variants. Every variant is also
+/// individually non-exhaustive: patterns outside this crate must include `..`.
+/// Use public constructors such as [`Error::missing_key_error`] to create errors.
+/// [`std::error::Error::source`] exposes wrapped errors without duplicating them
+/// in this error's `Display`; field errors and [`UnknownKey`](Self::UnknownKey)
+/// carry their diagnostic context directly.
 /// For [`SaveFileCleanup`](Self::SaveFileCleanup), the source is the original
-/// save error; the cleanup error and temporary path are available as fields.
+/// save error; `Display` includes the secondary cleanup error. Both paths and the
+/// cleanup error are also available as fields.
+///
+/// `Display` provides diagnostic context, but its wording and formatting are not
+/// stable. Inspect variants, fields and sources instead of parsing messages.
 ///
 /// ```
 /// use conferencier::{ConfigStore, Error};
 ///
 /// let error = ConfigStore::new().get_integer("App", "port").unwrap_err();
 /// match error {
-///     Error::MissingKey { path, key } => {
-///         assert_eq!((path.as_str(), key.as_str()), ("App", "port"));
+///     Error::MissingKey { table_path, key, .. } => {
+///         assert_eq!((table_path.as_str(), key.as_str()), ("App", "port"));
 ///     }
 ///     other => panic!("unexpected error: {other}"),
 /// }
 /// ```
 ///
 /// When saving and cleanup both fail, inspect the original error through
-/// `save_error`; its I/O kind and optional OS code remain available:
+/// `save_error`; its I/O kind and optional OS code remain available. Such errors
+/// are produced by `save_file`; callers cannot construct them directly.
 ///
 /// ```
 /// use conferencier::Error;
-/// use std::io::{Error as IoError, ErrorKind};
 ///
-/// let error = Error::SaveFileCleanup {
-///     save_error: Box::new(Error::Io {
-///         path: Some("config.toml".into()),
-///         source: IoError::new(ErrorKind::PermissionDenied, "save failed"),
-///     }),
-///     temporary_path: ".conferencier.123.0.tmp".into(),
-///     cleanup_error: IoError::new(ErrorKind::PermissionDenied, "cleanup failed"),
-/// };
-///
-/// if let Error::SaveFileCleanup { save_error, .. } = error {
-///     if let Error::Io { source, .. } = save_error.as_ref() {
-///         assert_eq!(source.kind(), ErrorKind::PermissionDenied);
-///         if let Some(code) = source.raw_os_error() {
-///             eprintln!("save failed with OS error {code}");
+/// fn report_save_failure(error: &Error) {
+///     if let Error::SaveFileCleanup { save_error, .. } = error {
+///         if let Error::Io { source, .. } = save_error.as_ref() {
+///             eprintln!(
+///                 "save failed: kind {:?}, OS code {:?}; {error}",
+///                 source.kind(),
+///                 source.raw_os_error(),
+///             );
 ///         }
 ///     }
 /// }
 /// ```
 ///
-/// File methods attach the relevant path to [`Error::Io`]. Converting a plain
-/// [`std::io::Error`] with `?` or `Error::from` leaves `path` as `None`; construct
-/// the public `Io` variant to attach a path, as shown in the
-/// [guide](https://docs.rs/conferencier/latest/conferencier/guide/concepts/index.html#reading-a-file-before-the-runtime-starts).
+/// File methods attach operation and path context to [`Error::Io`]. Converting a
+/// plain [`std::io::Error`] with `?` or `Error::from` leaves `path`, `operation`
+/// and `target_path` unset. Callers may update these public context fields after
+/// conversion, or use [`Error::io_error`] or [`Error::io_error_with_operation`]
+/// to supply context, as shown in the
+/// [guide](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/concepts/index.html#reading-a-file-before-the-runtime-starts).
+///
+/// # Sensitive diagnostics
+///
+/// File paths in `Display` are escaped but may be rendered lossily. Other
+/// diagnostic text and error sources are not sanitized or generally redacted.
+/// `Display`, `Debug` and source chains may reveal configuration values, key
+/// names or file paths. A TOML parser source can include the offending input line.
+/// Derived save-time `u64` and `usize` range errors omit the numeric value and
+/// identify the index for a vector, but this does not redact other diagnostics.
+/// Decide whether it is safe to show or log errors and their sources.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Error {
     /// Reading or writing a file failed.
+    #[non_exhaustive]
     Io {
-        /// The file involved, if known.
+        /// The filesystem path directly involved in the failed operation, if known.
+        /// Callers may change this diagnostic context.
         path: Option<PathBuf>,
+        /// The phase of the file operation, if known. Callers may change it.
+        operation: Option<IoOperation>,
+        /// The destination passed to `save_file`, if this error came from it.
+        /// Callers may change this diagnostic context.
+        target_path: Option<PathBuf>,
         /// The underlying I/O error.
         source: std::io::Error,
     },
     /// Saving failed and removing its temporary file also failed.
     ///
     /// The original save failure remains the error source. The cleanup failure
-    /// and temporary path are available separately.
+    /// is shown in this error's `Display`, not in the source chain; the temporary
+    /// path and cleanup error are also available separately. This variant is
+    /// created by `save_file`; callers can inspect but cannot construct it.
+    #[non_exhaustive]
     SaveFileCleanup {
+        /// The destination path passed to `save_file`.
+        target_path: PathBuf,
         /// The original save failure, including its path and underlying cause.
         save_error: Box<Error>,
         /// The temporary file path that cleanup attempted to remove.
@@ -94,22 +158,49 @@ pub enum Error {
     /// The input is not a valid TOML document.
     ///
     /// The source contains the parser's location and diagnostic details.
-    Parse(toml::de::Error),
+    #[non_exhaustive]
+    Parse {
+        /// The filesystem path of the parsed file, if known. Callers may change
+        /// it after parsing a string read from a file.
+        path: Option<PathBuf>,
+        /// The parser's diagnostic, with its location in the document.
+        source: toml::de::Error,
+    },
     /// The in-memory document could not be serialized to TOML.
     ///
     /// Serialization happens before file writes; this error leaves the file untouched.
-    Serialize(toml::ser::Error),
+    #[non_exhaustive]
+    Serialize {
+        /// The save destination, if known; `save_file` supplies its input path.
+        target_path: Option<PathBuf>,
+        /// The serializer's error.
+        source: toml::ser::Error,
+    },
+    /// The Tokio blocking task for a save could not be joined.
+    ///
+    /// This variant is created by `save_file`; callers can inspect but cannot
+    /// construct it. The target may have changed and a temporary file may remain.
+    /// Inspect the filesystem if recovery depends on their state.
+    #[non_exhaustive]
+    SaveFileTaskJoin {
+        /// The destination path passed to `save_file`.
+        target_path: PathBuf,
+        /// The failure to join the Tokio blocking task.
+        source: tokio::task::JoinError,
+    },
     /// A required key is absent.
+    #[non_exhaustive]
     MissingKey {
         /// Formatted path of the table containing the key.
-        path: String,
+        table_path: String,
         /// The missing key, without path formatting.
         key: String,
     },
     /// A value has a different TOML type than the field expects.
+    #[non_exhaustive]
     TypeMismatch {
         /// Formatted path of the table containing the key.
-        path: String,
+        table_path: String,
         /// The key holding the value, without path formatting.
         key: String,
         /// Expected TOML type, such as `integer` or `table`.
@@ -120,30 +211,245 @@ pub enum Error {
     /// A value has an acceptable TOML type but cannot be converted, for example an
     /// integer out of range for the field type, an invalid datetime string or an
     /// array element of the wrong type.
+    #[non_exhaustive]
     ValueParse {
         /// Formatted path of the table containing the key.
-        path: String,
+        table_path: String,
         /// The key holding the value, without path formatting.
         key: String,
         /// Description of the problem.
         message: String,
     },
     /// A strict struct found a key that no loaded field maps.
+    #[non_exhaustive]
     UnknownKey {
         /// Formatted path of the table containing the key.
-        path: String,
+        table_path: String,
         /// The unknown TOML key, without formatting.
         key: String,
     },
 }
 
+#[cfg(doctest)]
+/// Each non-exhaustive variant rejects external construction and full patterns.
+///
+/// ```compile_fail
+/// # fn construct(source: std::io::Error) {
+/// let _ = conferencier::Error::Io {
+///     path: None,
+///     operation: None,
+///     target_path: None,
+///     source,
+/// };
+/// # }
+/// ```
+///
+/// ```compile_fail
+/// # fn inspect(error: conferencier::Error) {
+/// if let conferencier::Error::Io { path, operation, target_path, source } = error {}
+/// # }
+/// ```
+///
+/// ```compile_fail
+/// # fn construct(save_error: conferencier::Error, cleanup_error: std::io::Error) {
+/// let _ = conferencier::Error::SaveFileCleanup {
+///     target_path: "config.toml".into(),
+///     save_error: Box::new(save_error),
+///     temporary_path: "temp.toml".into(),
+///     cleanup_error,
+/// };
+/// # }
+/// ```
+///
+/// ```compile_fail
+/// # fn inspect(error: conferencier::Error) {
+/// if let conferencier::Error::SaveFileCleanup {
+///     target_path, save_error, temporary_path, cleanup_error
+/// } = error {}
+/// # }
+/// ```
+///
+/// ```compile_fail
+/// # fn construct(source: conferencier::toml::de::Error) {
+/// let _ = conferencier::Error::Parse { path: None, source };
+/// # }
+/// ```
+///
+/// ```compile_fail
+/// # fn inspect(error: conferencier::Error) {
+/// if let conferencier::Error::Parse { path, source } = error {}
+/// # }
+/// ```
+///
+/// ```compile_fail
+/// # fn construct(source: conferencier::toml::ser::Error) {
+/// let _ = conferencier::Error::Serialize { target_path: None, source };
+/// # }
+/// ```
+///
+/// ```compile_fail
+/// # fn inspect(error: conferencier::Error) {
+/// if let conferencier::Error::Serialize { target_path, source } = error {}
+/// # }
+/// ```
+///
+/// ```compile_fail
+/// # fn construct(source: tokio::task::JoinError) {
+/// let _ = conferencier::Error::SaveFileTaskJoin {
+///     target_path: "config.toml".into(),
+///     source,
+/// };
+/// # }
+/// ```
+///
+/// ```compile_fail
+/// # fn inspect(error: conferencier::Error) {
+/// if let conferencier::Error::SaveFileTaskJoin { target_path, source } = error {}
+/// # }
+/// ```
+///
+/// ```compile_fail
+/// let _ = conferencier::Error::MissingKey {
+///     table_path: "App".into(),
+///     key: "port".into(),
+/// };
+/// ```
+///
+/// ```compile_fail
+/// # fn inspect(error: conferencier::Error) {
+/// if let conferencier::Error::MissingKey { table_path, key } = error {}
+/// # }
+/// ```
+///
+/// ```compile_fail
+/// let _ = conferencier::Error::TypeMismatch {
+///     table_path: "App".into(),
+///     key: "port".into(),
+///     expected: "integer",
+///     found: "string",
+/// };
+/// ```
+///
+/// ```compile_fail
+/// # fn inspect(error: conferencier::Error) {
+/// if let conferencier::Error::TypeMismatch { table_path, key, expected, found } = error {}
+/// # }
+/// ```
+///
+/// ```compile_fail
+/// let _ = conferencier::Error::ValueParse {
+///     table_path: "App".into(),
+///     key: "port".into(),
+///     message: "out of range".into(),
+/// };
+/// ```
+///
+/// ```compile_fail
+/// # fn inspect(error: conferencier::Error) {
+/// if let conferencier::Error::ValueParse { table_path, key, message } = error {}
+/// # }
+/// ```
+///
+/// ```compile_fail
+/// let _ = conferencier::Error::UnknownKey {
+///     table_path: "App".into(),
+///     key: "port".into(),
+/// };
+/// ```
+///
+/// ```compile_fail
+/// # fn inspect(error: conferencier::Error) {
+/// if let conferencier::Error::UnknownKey { table_path, key } = error {}
+/// # }
+/// ```
+struct ErrorVariantExtensibilityDoctests;
+
 impl Error {
-    /// Creates a [`Error::Io`] with the provided optional path context.
-    pub(crate) fn io_error(path: Option<PathBuf>, source: std::io::Error) -> Self {
-        Self::Io { path, source }
+    /// Creates an I/O error with optional path context and no operation.
+    ///
+    /// `target_path` is unset; adjust the public fields if additional context is needed.
+    pub fn io_error(path: Option<PathBuf>, source: std::io::Error) -> Self {
+        Self::Io {
+            path,
+            operation: None,
+            target_path: None,
+            source,
+        }
+    }
+
+    /// Creates an I/O error with an operation and optional path context.
+    ///
+    /// `target_path` is unset; adjust the public fields if additional context is needed.
+    pub fn io_error_with_operation(
+        path: Option<PathBuf>,
+        operation: IoOperation,
+        source: std::io::Error,
+    ) -> Self {
+        Self::Io {
+            path,
+            operation: Some(operation),
+            target_path: None,
+            source,
+        }
+    }
+
+    /// Creates a TOML parse error with optional file context.
+    pub fn parse_error(path: Option<PathBuf>, source: toml::de::Error) -> Self {
+        Self::Parse { path, source }
+    }
+
+    /// Creates a TOML serialization error with optional save-target context.
+    pub fn serialize_error(target_path: Option<PathBuf>, source: toml::ser::Error) -> Self {
+        Self::Serialize {
+            target_path,
+            source,
+        }
+    }
+
+    pub(crate) fn with_save_target(self, path: &Path) -> Self {
+        match self {
+            Self::Io {
+                path: file_path,
+                operation,
+                source,
+                ..
+            } => Self::Io {
+                path: file_path,
+                operation,
+                target_path: Some(path.to_path_buf()),
+                source,
+            },
+            Self::Serialize { source, .. } => Self::Serialize {
+                target_path: Some(path.to_path_buf()),
+                source,
+            },
+            Self::SaveFileCleanup {
+                save_error,
+                temporary_path,
+                cleanup_error,
+                ..
+            } => Self::SaveFileCleanup {
+                target_path: path.to_path_buf(),
+                save_error: Box::new(save_error.with_save_target(path)),
+                temporary_path,
+                cleanup_error,
+            },
+            other => other,
+        }
+    }
+
+    pub(crate) fn with_parse_path(mut self, path: &Path) -> Self {
+        if let Self::Parse {
+            path: error_path, ..
+        } = &mut self
+        {
+            *error_path = Some(path.to_path_buf());
+        }
+        self
     }
 
     pub(crate) fn with_save_file_cleanup(
+        target_path: PathBuf,
         save_error: Self,
         temporary_path: PathBuf,
         cleanup_result: std::io::Result<()>,
@@ -152,6 +458,7 @@ impl Error {
             Ok(()) => save_error,
             Err(error) if error.kind() == ErrorKind::NotFound => save_error,
             Err(cleanup_error) => Self::SaveFileCleanup {
+                target_path,
                 save_error: Box::new(save_error),
                 temporary_path,
                 cleanup_error,
@@ -159,14 +466,14 @@ impl Error {
         }
     }
 
-    /// Reports that `key` is required but absent from the table at `path`.
+    /// Reports that `key` is required but absent from the table at `table_path`.
     ///
     /// Pass an already formatted diagnostic path, such as `App.server`. For a
-    /// top-level entry itself, use an empty path and its name as the key. This
+    /// top-level entry itself, use an empty table path and its name as the key. This
     /// constructs an error; it does not look in a store.
-    pub fn missing_key(path: impl Into<String>, key: impl Into<String>) -> Self {
+    pub fn missing_key_error(table_path: impl Into<String>, key: impl Into<String>) -> Self {
         Self::MissingKey {
-            path: path.into(),
+            table_path: table_path.into(),
             key: key.into(),
         }
     }
@@ -175,15 +482,15 @@ impl Error {
     ///
     /// `expected` and `found` are type labels such as `"integer"` or `"string"`;
     /// [`toml::Value::type_str`] supplies the latter. Pass a nested table's
-    /// diagnostic path as `path` when appropriate.
-    pub fn type_mismatch(
-        path: impl Into<String>,
+    /// diagnostic path as `table_path` when appropriate.
+    pub fn type_mismatch_error(
+        table_path: impl Into<String>,
         key: impl Into<String>,
         expected: &'static str,
         found: &'static str,
     ) -> Self {
         Self::TypeMismatch {
-            path: path.into(),
+            table_path: table_path.into(),
             key: key.into(),
             expected,
             found,
@@ -193,15 +500,15 @@ impl Error {
     /// Reports a value that cannot be converted despite having an acceptable TOML type.
     ///
     /// Use `message` to explain the reason, for example `"value out of range for u16"`.
-    /// Both borrowed and owned strings are accepted for `path`, `key` and `message`;
-    /// the path must already be formatted.
-    pub fn value_parse(
-        path: impl Into<String>,
+    /// Both borrowed and owned strings are accepted for `table_path`, `key` and
+    /// `message`; the table path must already be formatted.
+    pub fn value_parse_error(
+        table_path: impl Into<String>,
         key: impl Into<String>,
         message: impl Into<String>,
     ) -> Self {
         Self::ValueParse {
-            path: path.into(),
+            table_path: table_path.into(),
             key: key.into(),
             message: message.into(),
         }
@@ -211,50 +518,151 @@ impl Error {
     ///
     /// Pass an already formatted diagnostic path and the raw TOML key. This
     /// constructs an error; it does not inspect a table.
-    pub fn unknown_key(path: impl Into<String>, key: impl Into<String>) -> Self {
+    pub fn unknown_key_error(table_path: impl Into<String>, key: impl Into<String>) -> Self {
         Self::UnknownKey {
-            path: path.into(),
+            table_path: table_path.into(),
             key: key.into(),
         }
     }
 }
 
-fn display_key(path: &str, key: &str) -> String {
-    crate::table_path::child_path(path, key)
+fn escaped_path(path: &Path) -> String {
+    let mut escaped = String::new();
+    for character in path.to_string_lossy().chars() {
+        match character {
+            '"' => escaped.push_str("\\\""),
+            '\\' => escaped.push_str("\\\\"),
+            '\u{2028}' => escaped.push_str("\\u{2028}"),
+            '\u{2029}' => escaped.push_str("\\u{2029}"),
+            character if character.is_control() => escaped.extend(character.escape_debug()),
+            character => escaped.push(character),
+        }
+    }
+    escaped
+}
+
+fn write_quoted_path(f: &mut fmt::Formatter<'_>, path: &Path) -> fmt::Result {
+    write!(f, "\"{}\"", escaped_path(path))
+}
+
+fn display_io(
+    f: &mut fmt::Formatter<'_>,
+    path: Option<&Path>,
+    operation: Option<IoOperation>,
+    target_path: Option<&Path>,
+) -> fmt::Result {
+    if let Some(operation) = operation {
+        let description = operation.description();
+        if let Some(path) = path {
+            write!(f, "failed to {description} ")?;
+            write_quoted_path(f, path)?;
+        } else if matches!(
+            operation,
+            IoOperation::InspectTarget | IoOperation::ReplaceTarget
+        ) {
+            if let Some(target_path) = target_path {
+                write!(f, "failed to {description} ")?;
+                write_quoted_path(f, target_path)?;
+            } else {
+                write!(f, "failed to {description}")?;
+            }
+        } else {
+            write!(f, "failed to {description}")?;
+        }
+        if matches!(
+            operation,
+            IoOperation::CreateTemporary
+                | IoOperation::PrepareTemporary
+                | IoOperation::WriteTemporary
+        ) {
+            if let Some(target_path) = target_path {
+                write!(f, " for ")?;
+                write_quoted_path(f, target_path)?;
+            }
+        }
+        return Ok(());
+    }
+
+    if let Some(target_path) = target_path {
+        f.write_str("failed to save ")?;
+        write_quoted_path(f, target_path)
+    } else if let Some(path) = path {
+        f.write_str("I/O error on ")?;
+        write_quoted_path(f, path)
+    } else {
+        f.write_str("I/O error")
+    }
+}
+
+fn display_key(table_path: &str, key: &str) -> String {
+    crate::table_path::child_path(table_path, key)
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Io { path, source } => write!(f, "I/O error (path: {path:?}): {source}"),
+            Self::Io {
+                path,
+                operation,
+                target_path,
+                ..
+            } => display_io(f, path.as_deref(), *operation, target_path.as_deref()),
             Self::SaveFileCleanup {
-                save_error,
+                target_path,
                 temporary_path,
                 cleanup_error,
-            } => write!(
-                f,
-                "failed to save file: {save_error}; failed to remove temporary file {temporary_path:?}: {cleanup_error}"
-            ),
-            Self::Parse(source) => write!(f, "failed to parse TOML: {source}"),
-            Self::Serialize(source) => write!(f, "failed to serialize TOML: {source}"),
-            Self::MissingKey { path, key } => {
-                write!(f, "missing key {}", display_key(path, key))
+                ..
+            } => {
+                f.write_str("failed to save ")?;
+                write_quoted_path(f, target_path)?;
+                f.write_str("; removing temporary file ")?;
+                write_quoted_path(f, temporary_path)?;
+                write!(f, " also failed ({cleanup_error})")
+            }
+            Self::SaveFileTaskJoin { target_path, .. } => {
+                write!(f, "failed to save ")?;
+                write_quoted_path(f, target_path)
+            }
+            Self::Parse { path, .. } => match path {
+                Some(path) => {
+                    write!(f, "failed to parse TOML file ")?;
+                    write_quoted_path(f, path)
+                }
+                None => f.write_str("failed to parse TOML"),
+            },
+            Self::Serialize { target_path, .. } => match target_path {
+                Some(path) => {
+                    write!(f, "failed to serialize TOML for ")?;
+                    write_quoted_path(f, path)
+                }
+                None => f.write_str("failed to serialize TOML"),
+            },
+            Self::MissingKey { table_path, key } => {
+                write!(f, "missing key {}", display_key(table_path, key))
             }
             Self::TypeMismatch {
-                path,
+                table_path,
                 key,
                 expected,
                 found,
             } => write!(
                 f,
                 "expected {expected} at {} but found {found}",
-                display_key(path, key)
+                display_key(table_path, key)
             ),
-            Self::ValueParse { path, key, message } => {
-                write!(f, "invalid value at {}: {message}", display_key(path, key))
+            Self::ValueParse {
+                table_path,
+                key,
+                message,
+            } => {
+                write!(
+                    f,
+                    "invalid value at {}: {message}",
+                    display_key(table_path, key)
+                )
             }
-            Self::UnknownKey { path, key } => {
-                write!(f, "unknown key {}", display_key(path, key))
+            Self::UnknownKey { table_path, key } => {
+                write!(f, "unknown key {}", display_key(table_path, key))
             }
         }
     }
@@ -265,8 +673,9 @@ impl std::error::Error for Error {
         match self {
             Self::Io { source, .. } => Some(source),
             Self::SaveFileCleanup { save_error, .. } => Some(save_error.as_ref()),
-            Self::Parse(source) => Some(source),
-            Self::Serialize(source) => Some(source),
+            Self::SaveFileTaskJoin { source, .. } => Some(source),
+            Self::Parse { source, .. } => Some(source),
+            Self::Serialize { source, .. } => Some(source),
             Self::MissingKey { .. }
             | Self::TypeMismatch { .. }
             | Self::ValueParse { .. }
@@ -278,19 +687,19 @@ impl std::error::Error for Error {
 impl From<std::io::Error> for Error {
     /// Converts a plain [`std::io::Error`] into [`Error::Io`] without path context.
     fn from(source: std::io::Error) -> Self {
-        Self::Io { path: None, source }
+        Self::io_error(None, source)
     }
 }
 
 impl From<toml::de::Error> for Error {
     fn from(source: toml::de::Error) -> Self {
-        Self::Parse(source)
+        Self::parse_error(None, source)
     }
 }
 
 impl From<toml::ser::Error> for Error {
     fn from(source: toml::ser::Error) -> Self {
-        Self::Serialize(source)
+        Self::serialize_error(None, source)
     }
 }
 
@@ -301,17 +710,37 @@ mod tests {
 
     use super::*;
 
+    fn assert_display_without_source(error: &Error, expected: &str) {
+        let display = error.to_string();
+        assert_eq!(display, expected);
+        let source = error.source().expect("wrapping errors have a source");
+        assert!(!display.contains(&source.to_string()));
+    }
+
+    #[test]
+    fn error_is_send_sync_and_static() {
+        fn assert_traits<T: Send + Sync + 'static>() {}
+        assert_traits::<Error>();
+    }
+
     #[test]
     fn value_errors_preserve_messages_and_have_no_source() {
         let cases = [
-            (Error::missing_key("App", "port"), "missing key App.port"),
             (
-                Error::type_mismatch("App", "port", "integer", "string"),
+                Error::missing_key_error("App", "port"),
+                "missing key App.port",
+            ),
+            (
+                Error::type_mismatch_error("App", "port", "integer", "string"),
                 "expected integer at App.port but found string",
             ),
             (
-                Error::value_parse("App", "port", "out of range"),
+                Error::value_parse_error("App", "port", "out of range"),
                 "invalid value at App.port: out of range",
+            ),
+            (
+                Error::unknown_key_error("App", "port"),
+                "unknown key App.port",
             ),
         ];
 
@@ -324,49 +753,127 @@ mod tests {
     #[test]
     fn diagnostics_quote_final_keys_and_root_entries() {
         assert_eq!(
-            Error::missing_key("App", "a.b").to_string(),
+            Error::missing_key_error("App", "a.b").to_string(),
             "missing key App.\"a.b\""
         );
         assert_eq!(
-            Error::type_mismatch("", "App.server", "table", "integer").to_string(),
+            Error::type_mismatch_error("", "App.server", "table", "integer").to_string(),
             "expected table at \"App.server\" but found integer"
         );
-        assert_eq!(Error::missing_key("", "").to_string(), "missing key \"\"");
         assert_eq!(
-            Error::unknown_key("App", "a.b").to_string(),
+            Error::missing_key_error("", "").to_string(),
+            "missing key \"\""
+        );
+        assert_eq!(
+            Error::unknown_key_error("App", "a.b").to_string(),
             "unknown key App.\"a.b\""
         );
     }
 
     #[test]
-    fn io_errors_preserve_path_and_source() {
+    fn io_error_constructors_preserve_context_and_source() {
         for path in [None, Some(PathBuf::from("config.toml"))] {
             let source = IoError::new(ErrorKind::NotFound, "missing config");
-            let expected = format!("I/O error (path: {path:?}): missing config");
-            let error = match path {
-                Some(path) => Error::io_error(Some(path), source),
-                None => Error::from(source),
-            };
-
-            assert_eq!(error.to_string(), expected);
+            let error = Error::io_error(path.clone(), source);
+            assert_eq!(
+                error.to_string(),
+                match path.as_deref() {
+                    Some(path) => format!("I/O error on \"{}\"", escaped_path(path)),
+                    None => "I/O error".to_owned(),
+                }
+            );
+            assert!(matches!(
+                &error,
+                Error::Io {
+                    path: error_path,
+                    operation: None,
+                    target_path: None,
+                    ..
+                } if error_path == &path
+            ));
             let source = error.source().unwrap().downcast_ref::<IoError>().unwrap();
             assert_eq!(source.kind(), ErrorKind::NotFound);
             assert_eq!(source.to_string(), "missing config");
+            let Error::Io { source: stored, .. } = &error else {
+                unreachable!("the constructor returns an I/O error");
+            };
+            assert!(std::ptr::eq(source, stored));
         }
+
+        let path = PathBuf::from("temp.toml");
+        let error = Error::io_error_with_operation(
+            Some(path.clone()),
+            IoOperation::WriteTemporary,
+            IoError::new(ErrorKind::WriteZero, "write failed"),
+        );
+        assert_eq!(
+            error.to_string(),
+            "failed to write temporary file \"temp.toml\""
+        );
+        assert!(matches!(
+            &error,
+            Error::Io {
+                path: Some(error_path),
+                operation: Some(IoOperation::WriteTemporary),
+                target_path: None,
+                source,
+                ..
+            } if error_path == &path
+                && source.kind() == ErrorKind::WriteZero
+                && source.to_string() == "write failed"
+        ));
+        let source = error.source().unwrap().downcast_ref::<IoError>().unwrap();
+        assert_eq!(source.kind(), ErrorKind::WriteZero);
+        assert_eq!(source.to_string(), "write failed");
+        let Error::Io { source: stored, .. } = &error else {
+            unreachable!("the constructor returns an I/O error");
+        };
+        assert!(std::ptr::eq(source, stored));
+    }
+
+    #[test]
+    fn io_error_conversion_leaves_context_unset() {
+        let error = Error::from(IoError::new(ErrorKind::NotFound, "missing config"));
+        assert!(matches!(
+            &error,
+            Error::Io {
+                path: None,
+                operation: None,
+                target_path: None,
+                source,
+                ..
+            } if source.kind() == ErrorKind::NotFound && source.to_string() == "missing config"
+        ));
+        let source = error.source().unwrap().downcast_ref::<IoError>().unwrap();
+        assert_eq!(source.kind(), ErrorKind::NotFound);
+        assert_eq!(source.to_string(), "missing config");
     }
 
     #[test]
     fn successful_save_file_cleanup_returns_original_error() {
-        let error = Error::io_error(
+        let error = Error::io_error_with_operation(
             Some(PathBuf::from("config.toml")),
+            IoOperation::ReplaceTarget,
             IoError::new(ErrorKind::PermissionDenied, "save failed"),
+        )
+        .with_save_target(Path::new("config.toml"));
+        let error = Error::with_save_file_cleanup(
+            PathBuf::from("config.toml"),
+            error,
+            PathBuf::from(".conferencier.123.0.tmp"),
+            Ok(()),
         );
-        let error =
-            Error::with_save_file_cleanup(error, PathBuf::from(".conferencier.123.0.tmp"), Ok(()));
 
         match error {
-            Error::Io { path, source } => {
+            Error::Io {
+                path,
+                operation: Some(IoOperation::ReplaceTarget),
+                target_path: Some(target_path),
+                source,
+                ..
+            } => {
                 assert_eq!(path, Some(PathBuf::from("config.toml")));
+                assert_eq!(target_path, PathBuf::from("config.toml"));
                 assert_eq!(source.kind(), ErrorKind::PermissionDenied);
                 assert_eq!(source.to_string(), "save failed");
             }
@@ -376,19 +883,29 @@ mod tests {
 
     #[test]
     fn missing_save_file_cleanup_returns_original_error() {
-        let error = Error::io_error(
+        let error = Error::io_error_with_operation(
             Some(PathBuf::from("config.toml")),
+            IoOperation::ReplaceTarget,
             IoError::new(ErrorKind::WriteZero, "save failed"),
-        );
+        )
+        .with_save_target(Path::new("config.toml"));
         let error = Error::with_save_file_cleanup(
+            PathBuf::from("config.toml"),
             error,
             PathBuf::from(".conferencier.123.0.tmp"),
             Err(IoError::new(ErrorKind::NotFound, "already removed")),
         );
 
         match error {
-            Error::Io { path, source } => {
+            Error::Io {
+                path,
+                operation: Some(IoOperation::ReplaceTarget),
+                target_path: Some(target_path),
+                source,
+                ..
+            } => {
                 assert_eq!(path, Some(PathBuf::from("config.toml")));
+                assert_eq!(target_path, PathBuf::from("config.toml"));
                 assert_eq!(source.kind(), ErrorKind::WriteZero);
                 assert_eq!(source.to_string(), "save failed");
             }
@@ -398,32 +915,47 @@ mod tests {
 
     #[test]
     fn failed_save_file_cleanup_preserves_both_errors() {
-        let error = Error::io_error(
-            Some(PathBuf::from("config.toml")),
+        let error = Error::io_error_with_operation(
+            Some(PathBuf::from(".conferencier.123.0.tmp")),
+            IoOperation::WriteTemporary,
             IoError::new(ErrorKind::PermissionDenied, "save failed"),
-        );
+        )
+        .with_save_target(Path::new("config.toml"));
         let error = Error::with_save_file_cleanup(
+            PathBuf::from("config.toml"),
             error,
             PathBuf::from(".conferencier.123.0.tmp"),
             Err(IoError::new(ErrorKind::PermissionDenied, "cleanup failed")),
         );
 
-        assert!(error.to_string().contains("config.toml"));
-        assert!(error.to_string().contains("save failed"));
-        assert!(error.to_string().contains(".conferencier.123.0.tmp"));
-        assert!(error.to_string().contains("cleanup failed"));
+        assert_eq!(
+            error.to_string(),
+            "failed to save \"config.toml\"; removing temporary file \".conferencier.123.0.tmp\" also failed (cleanup failed)"
+        );
 
         match &error {
             Error::SaveFileCleanup {
+                target_path,
                 save_error,
                 temporary_path,
                 cleanup_error,
+                ..
             } => {
+                assert_eq!(target_path, &PathBuf::from("config.toml"));
                 assert_eq!(temporary_path, &PathBuf::from(".conferencier.123.0.tmp"));
                 assert_eq!(cleanup_error.kind(), ErrorKind::PermissionDenied);
+                let reported_source = error.source().unwrap().downcast_ref::<Error>().unwrap();
+                assert!(std::ptr::eq(save_error.as_ref(), reported_source));
                 match save_error.as_ref() {
-                    Error::Io { path, source } => {
-                        assert_eq!(path.as_deref(), Some(std::path::Path::new("config.toml")));
+                    Error::Io {
+                        path: Some(path),
+                        operation: Some(IoOperation::WriteTemporary),
+                        target_path: Some(nested_target),
+                        source,
+                        ..
+                    } => {
+                        assert_eq!(path, temporary_path);
+                        assert_eq!(nested_target, target_path);
                         assert_eq!(source.kind(), ErrorKind::PermissionDenied);
                         assert_eq!(source.to_string(), "save failed");
                     }
@@ -433,22 +965,27 @@ mod tests {
             other => panic!("unexpected error: {other}"),
         }
 
-        let expected_source = match &error {
-            Error::SaveFileCleanup { save_error, .. } => save_error.to_string(),
-            other => panic!("unexpected error: {other}"),
-        };
         let source = error.source().expect("save error is the error source");
         assert!(source.downcast_ref::<Error>().is_some());
-        assert_eq!(source.to_string(), expected_source);
+        assert_eq!(
+            source.to_string(),
+            "failed to write temporary file \".conferencier.123.0.tmp\" for \"config.toml\""
+        );
+        assert!(!error.to_string().contains(&source.to_string()));
+        assert!(!source.to_string().contains("cleanup failed"));
+        let io_source = source.source().unwrap().downcast_ref::<IoError>().unwrap();
+        assert_eq!(io_source.to_string(), "save failed");
     }
 
     #[test]
     fn failed_save_file_cleanup_preserves_raw_os_code() {
         let error = Error::with_save_file_cleanup(
+            PathBuf::from("config.toml"),
             Error::io_error(
                 Some(PathBuf::from("config.toml")),
                 IoError::from_raw_os_error(123),
-            ),
+            )
+            .with_save_target(Path::new("config.toml")),
             PathBuf::from(".conferencier.123.0.tmp"),
             Err(IoError::new(ErrorKind::PermissionDenied, "cleanup failed")),
         );
@@ -468,11 +1005,8 @@ mod tests {
         let message = source.to_string();
         let error = Error::from(source);
 
-        assert!(matches!(error, Error::Parse(_)));
-        assert_eq!(
-            error.to_string(),
-            format!("failed to parse TOML: {message}")
-        );
+        assert!(matches!(error, Error::Parse { path: None, .. }));
+        assert_eq!(error.to_string(), "failed to parse TOML");
         assert_eq!(error.source().unwrap().to_string(), message);
     }
 
@@ -482,11 +1016,275 @@ mod tests {
         let message = source.to_string();
         let error = Error::from(source);
 
-        assert!(matches!(error, Error::Serialize(_)));
-        assert_eq!(
-            error.to_string(),
-            format!("failed to serialize TOML: {message}")
-        );
+        assert!(matches!(
+            error,
+            Error::Serialize {
+                target_path: None,
+                ..
+            }
+        ));
+        assert_eq!(error.to_string(), "failed to serialize TOML");
         assert_eq!(error.source().unwrap().to_string(), message);
+    }
+
+    #[test]
+    fn parse_and_serialize_constructors_keep_source_out_of_display() {
+        let path = PathBuf::from("config.toml");
+        let parse_source = toml::from_str::<toml::Table>("[broken").unwrap_err();
+        let parse_error = Error::parse_error(Some(path.clone()), parse_source);
+        assert_eq!(
+            parse_error.to_string(),
+            "failed to parse TOML file \"config.toml\""
+        );
+        match &parse_error {
+            Error::Parse {
+                path: Some(error_path),
+                source,
+                ..
+            } => {
+                assert_eq!(error_path, &path);
+                let reported_source = parse_error
+                    .source()
+                    .unwrap()
+                    .downcast_ref::<toml::de::Error>()
+                    .unwrap();
+                assert!(std::ptr::eq(source, reported_source));
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+
+        let serialize_source = toml::to_string(&"not a table").unwrap_err();
+        let serialize_error = Error::serialize_error(Some(path.clone()), serialize_source);
+        assert_eq!(
+            serialize_error.to_string(),
+            "failed to serialize TOML for \"config.toml\""
+        );
+        match &serialize_error {
+            Error::Serialize {
+                target_path: Some(target_path),
+                source,
+                ..
+            } => {
+                assert_eq!(target_path, &path);
+                let reported_source = serialize_error
+                    .source()
+                    .unwrap()
+                    .downcast_ref::<toml::ser::Error>()
+                    .unwrap();
+                assert!(std::ptr::eq(source, reported_source));
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
+    fn io_display_uses_operation_and_path_precedence() {
+        let cases = [
+            (
+                IoOperation::Read,
+                "failed to read file",
+                "failed to read file \"affected.toml\"",
+                "failed to read file",
+                "failed to read file \"affected.toml\"",
+            ),
+            (
+                IoOperation::InspectTarget,
+                "failed to inspect save target",
+                "failed to inspect save target \"affected.toml\"",
+                "failed to inspect save target \"target.toml\"",
+                "failed to inspect save target \"affected.toml\"",
+            ),
+            (
+                IoOperation::CreateTemporary,
+                "failed to create temporary file",
+                "failed to create temporary file \"affected.toml\"",
+                "failed to create temporary file for \"target.toml\"",
+                "failed to create temporary file \"affected.toml\" for \"target.toml\"",
+            ),
+            (
+                IoOperation::PrepareTemporary,
+                "failed to prepare temporary file",
+                "failed to prepare temporary file \"affected.toml\"",
+                "failed to prepare temporary file for \"target.toml\"",
+                "failed to prepare temporary file \"affected.toml\" for \"target.toml\"",
+            ),
+            (
+                IoOperation::WriteTemporary,
+                "failed to write temporary file",
+                "failed to write temporary file \"affected.toml\"",
+                "failed to write temporary file for \"target.toml\"",
+                "failed to write temporary file \"affected.toml\" for \"target.toml\"",
+            ),
+            (
+                IoOperation::ReplaceTarget,
+                "failed to replace target file",
+                "failed to replace target file \"affected.toml\"",
+                "failed to replace target file \"target.toml\"",
+                "failed to replace target file \"affected.toml\"",
+            ),
+        ];
+
+        for (operation, pathless, with_path, target_only, with_both) in cases {
+            for (path, target_path, expected) in [
+                (None, None, pathless),
+                (Some("affected.toml"), None, with_path),
+                (None, Some("target.toml"), target_only),
+                (Some("affected.toml"), Some("target.toml"), with_both),
+            ] {
+                let error = Error::Io {
+                    path: path.map(PathBuf::from),
+                    operation: Some(operation),
+                    target_path: target_path.map(PathBuf::from),
+                    source: IoError::other("distinct I/O source"),
+                };
+                assert_eq!(
+                    error.to_string(),
+                    expected,
+                    "{operation:?}, {path:?}, {target_path:?}"
+                );
+            }
+        }
+
+        for (path, target_path, expected) in [
+            (None, None, "I/O error"),
+            (
+                Some("affected.toml"),
+                None,
+                "I/O error on \"affected.toml\"",
+            ),
+            (None, Some("target.toml"), "failed to save \"target.toml\""),
+            (
+                Some("affected.toml"),
+                Some("target.toml"),
+                "failed to save \"target.toml\"",
+            ),
+        ] {
+            let error = Error::Io {
+                path: path.map(PathBuf::from),
+                operation: None,
+                target_path: target_path.map(PathBuf::from),
+                source: IoError::other("distinct I/O source"),
+            };
+            assert_eq!(error.to_string(), expected, "{path:?}, {target_path:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn file_error_displays_escape_paths_without_repeating_sources() {
+        let fragment = "name\"\\\n\r\u{1b}\u{2028}\u{2029}";
+        let escaped = r#"name\"\\\n\r\u{1b}\u{2028}\u{2029}"#;
+        let temporary_path = PathBuf::from(format!("temp-{fragment}"));
+        let target_path = PathBuf::from(format!("target-{fragment}"));
+        let temporary_display = format!("temp-{escaped}");
+        let target_display = format!("target-{escaped}");
+
+        let io_error = Error::io_error_with_operation(
+            Some(temporary_path.clone()),
+            IoOperation::WriteTemporary,
+            IoError::other("primary I/O failure"),
+        )
+        .with_save_target(&target_path);
+        assert_display_without_source(
+            &io_error,
+            &format!(
+                "failed to write temporary file \"{temporary_display}\" for \"{target_display}\""
+            ),
+        );
+        assert!(matches!(
+            &io_error,
+            Error::Io { path: Some(path), target_path: Some(target), .. }
+                if path == &temporary_path && target == &target_path
+        ));
+        assert!(
+            io_error
+                .source()
+                .unwrap()
+                .downcast_ref::<IoError>()
+                .is_some()
+        );
+
+        let parse_source = toml::from_str::<toml::Table>("[broken").unwrap_err();
+        let parse_error = Error::parse_error(Some(temporary_path.clone()), parse_source);
+        assert_display_without_source(
+            &parse_error,
+            &format!("failed to parse TOML file \"{temporary_display}\""),
+        );
+        assert!(matches!(
+            &parse_error,
+            Error::Parse { path: Some(path), .. } if path == &temporary_path
+        ));
+        assert!(
+            parse_error
+                .source()
+                .unwrap()
+                .downcast_ref::<toml::de::Error>()
+                .is_some()
+        );
+
+        let serialize_source = toml::to_string(&"not a table").unwrap_err();
+        let serialize_error = Error::serialize_error(Some(target_path.clone()), serialize_source);
+        assert_display_without_source(
+            &serialize_error,
+            &format!("failed to serialize TOML for \"{target_display}\""),
+        );
+        assert!(matches!(
+            &serialize_error,
+            Error::Serialize { target_path: Some(target), .. } if target == &target_path
+        ));
+        assert!(
+            serialize_error
+                .source()
+                .unwrap()
+                .downcast_ref::<toml::ser::Error>()
+                .is_some()
+        );
+
+        let task = tokio::spawn(std::future::pending::<()>());
+        task.abort();
+        let source = task.await.unwrap_err();
+        let join_error = Error::SaveFileTaskJoin {
+            target_path: target_path.clone(),
+            source,
+        };
+        assert_display_without_source(&join_error, &format!("failed to save \"{target_display}\""));
+        assert!(matches!(
+            &join_error,
+            Error::SaveFileTaskJoin { target_path: target, .. } if target == &target_path
+        ));
+        assert!(
+            join_error
+                .source()
+                .unwrap()
+                .downcast_ref::<tokio::task::JoinError>()
+                .is_some()
+        );
+
+        let cleanup_error = Error::SaveFileCleanup {
+            target_path: target_path.clone(),
+            save_error: Box::new(io_error),
+            temporary_path: temporary_path.clone(),
+            cleanup_error: IoError::other("secondary cleanup failure"),
+        };
+        assert_display_without_source(
+            &cleanup_error,
+            &format!(
+                "failed to save \"{target_display}\"; removing temporary file \"{temporary_display}\" also failed (secondary cleanup failure)"
+            ),
+        );
+        assert!(matches!(
+            &cleanup_error,
+            Error::SaveFileCleanup {
+                target_path: target,
+                temporary_path: temporary,
+                ..
+            } if target == &target_path && temporary == &temporary_path
+        ));
+        assert!(
+            cleanup_error
+                .source()
+                .unwrap()
+                .downcast_ref::<Error>()
+                .is_some()
+        );
     }
 }

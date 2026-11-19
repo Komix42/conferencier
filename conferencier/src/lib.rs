@@ -12,15 +12,23 @@ implementations remain available:
   [`SharedScope<T>`]. Loading and saving explicitly copy data to and from a store.
 - [`ConfigTable`] converts plain values to and from nested TOML tables.
 - [`table_path`] formats diagnostic paths for manual implementations.
-- [`Error`] and [`Result`] carry file, TOML and field-conversion errors.
+- [`Error`] and [`Result`] carry file, TOML and field-conversion errors;
+  [`IoOperation`] identifies the phase of a file operation that failed.
 - [`toml`] and [`Datetime`] re-export the TOML types used by the public API.
+
+The library enables only Tokio's `sync`, `rt` and `fs` features; enable runtime
+features such as `macros` and `rt-multi-thread` in your own dependency. Invalid
+input handled by the library returns an error rather than panicking, except for
+caller-supplied code, file operations polled without a Tokio runtime, and stack
+overflows from deeply nested values built in code or parsed with `toml/unbounded`.
+See the [0.1.x migration guide](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/migration/index.html)
+and [runtime requirements](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/concepts/index.html#reading-a-file-before-the-runtime-starts)
+and [nesting limits](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/concepts/index.html#nesting-limits).
 
 Enable the default `derive` feature for `#[derive(ConfigScope)]`,
 `#[derive(ConfigTable)]` and the full
-[attribute reference](https://docs.rs/conferencier/latest/conferencier/guide/derive/index.html)."#
+[attribute reference](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/derive/index.html)."#
 )]
-#![cfg_attr(docsrs, feature(doc_cfg))]
-
 mod error;
 #[cfg(feature = "derive")]
 pub mod guide;
@@ -30,7 +38,7 @@ mod table;
 pub mod table_path;
 mod value_conversion;
 
-pub use crate::error::{Error, Result};
+pub use crate::error::{Error, IoOperation, Result};
 pub use crate::scope::ConfigScope;
 pub use crate::scope::SharedScope;
 pub use crate::store::ConfigStore;
@@ -46,7 +54,7 @@ pub use toml;
 ///
 /// This re-exports [`toml::value::Datetime`]. Its `Time::second` and
 /// `Time::nanosecond` are optional, because TOML 1.1 permits times with omitted
-/// seconds; see the [guide](https://docs.rs/conferencier/latest/conferencier/guide/derive/index.html#toml-compatibility).
+/// seconds; see the [guide](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/derive/index.html#toml-compatibility).
 pub use toml::value::Datetime;
 
 // The derive macros share the traits' names but live in the macro namespace, so
@@ -78,13 +86,17 @@ pub mod __private {
     }
 
     /// Rejects the first key not present in the struct's loaded field names.
-    pub fn deny_unknown_keys(path: &str, table: &toml::Table, known: &[&str]) -> crate::Result<()> {
+    pub fn deny_unknown_keys(
+        table_path: &str,
+        table: &toml::Table,
+        known: &[&str],
+    ) -> crate::Result<()> {
         match table
             .keys()
             .filter(|key| !known.contains(&key.as_str()))
             .min()
         {
-            Some(key) => Err(crate::Error::unknown_key(path, key.clone())),
+            Some(key) => Err(crate::Error::unknown_key_error(table_path, key.clone())),
             None => Ok(()),
         }
     }

@@ -19,7 +19,7 @@ use crate::store::ConfigStore;
 /// reentrant: drop every guard before calling [`ConfigScope::load`] or
 /// [`ConfigScope::save`] on this handle in the same task. A held read guard can
 /// also block `save` when a writer is queued, because Tokio's lock is fair.
-/// The [guide](https://docs.rs/conferencier/latest/conferencier/guide/concepts/index.html#locking)
+/// The [guide](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/concepts/index.html#locking)
 /// compares this lock with the store's.
 ///
 /// # Example
@@ -60,11 +60,19 @@ pub type SharedScope<T> = Arc<RwLock<T>>;
 /// a scope does not change the store until `save` is called. None of these
 /// functions reads or writes a file.
 ///
+/// The library does not start a Tokio runtime or choose its flavor. Derived
+/// `from_store`, `load` and `save` need no runtime unless caller-supplied defaults,
+/// ignore expressions, or manual implementations require one.
+///
 /// # Implementations
 ///
 /// With the default `derive` feature, `#[derive(ConfigScope)]` implements this
-/// trait for named-field structs; the [derive guide](https://docs.rs/conferencier/latest/conferencier/guide/derive/index.html)
+/// trait for named-field structs; the [derive guide](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/derive/index.html)
 /// describes how its attributes select the section and map fields.
+///
+/// Manual implementations remain supported throughout 0.1.x. Their required
+/// signatures, bounds and documented behavior are stable, and neither this
+/// trait nor `ConfigTable` gains methods during that series.
 ///
 /// Manual implementations can write `async fn load` and `async fn save`; the compiler
 /// checks that the returned futures are `Send`, so generic code can spawn them on Tokio tasks.
@@ -114,7 +122,7 @@ pub trait ConfigScope: Send + Sync + Sized + 'static {
     /// A missing section is loaded as an empty table, so field defaults apply.
     /// A missing key uses its field's fallback, `None` for an `Option`, or returns
     /// [`Error::MissingKey`](crate::Error::MissingKey); the
-    /// [derive guide](https://docs.rs/conferencier/latest/conferencier/guide/derive/index.html)
+    /// [derive guide](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/derive/index.html)
     /// describes the fallbacks and unknown-key checks of derived scopes.
     /// Ignored fields are initialized once, in declaration order, after all
     /// loaded fields convert successfully.
@@ -170,7 +178,7 @@ pub trait ConfigScope: Send + Sync + Sized + 'static {
     ///
     /// This updates only the in-memory store. [`ConfigStore::save_file`] persists
     /// the store separately. A later scope mutation is not part of the saved snapshot.
-    /// The [guide](https://docs.rs/conferencier/latest/conferencier/guide/files/index.html)
+    /// The [guide](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/files/index.html)
     /// describes what saving does to a configuration file.
     ///
     /// # Locking

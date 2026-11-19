@@ -46,22 +46,60 @@ assert_eq!(app.read().await.port, 7070);
 
 ## Reading a file before the runtime starts
 
-All in-memory work, including [`ConfigScope::from_store`](crate::ConfigScope::from_store), runs without a Tokio runtime, but `ConfigStore::from_file` is async and has no blocking variant. To read the configuration before the runtime starts, combine [`std::fs::read_to_string`] with `ConfigStore::from_str`. The standard library's error does not carry the path; attach it through [`Error::Io`](crate::Error::Io) if needed:
+Conferencier does not start a Tokio runtime or choose its flavor; applications enable the Tokio features they need, such as `macros` and `rt-multi-thread`. The file methods work on any Tokio runtime, including a current-thread runtime. `ConfigStore::from_file` and `load_file` panic if polled without a runtime when they reach the Tokio file read. `save_file` serializes first, so a serialization error is returned without a runtime; a successful serialization requires a runtime when file I/O starts.
 
-```rust,no_run
-use conferencier::{ConfigStore, Error};
+Conferencier's own in-memory operations, including a derived [`ConfigScope::from_store`](crate::ConfigScope::from_store), do not require a Tokio runtime. Caller-supplied defaults, ignore expressions, conversions, iterators and manual implementations may require one.
 
-# fn main() -> conferencier::Result<()> {
-let path = std::path::Path::new("config.toml");
-let source = std::fs::read_to_string(path).map_err(|source| Error::Io {
-    path: Some(path.to_path_buf()),
-    source,
-})?;
-let store = ConfigStore::from_str(&source)?;
-# let _ = store;
-# Ok(())
+To read a configuration file before the runtime starts, combine [`std::fs::read_to_string`] with `ConfigStore::from_str`. Attach the file path to a read error with [`Error::io_error_with_operation`](crate::Error::io_error_with_operation), and to a parse error by updating its public `path` field. The parser source remains available:
+
+```rust
+use std::path::Path;
+use conferencier::{ConfigStore, Error, IoOperation};
+
+fn load_before_runtime(path: &Path) -> conferencier::Result<ConfigStore> {
+    let source = std::fs::read_to_string(path).map_err(|source| {
+        Error::io_error_with_operation(Some(path.to_path_buf()), IoOperation::Read, source)
+    })?;
+    ConfigStore::from_str(&source).map_err(|mut error| {
+        if let Error::Parse { path: error_path, .. } = &mut error {
+            *error_path = Some(path.to_path_buf());
+        }
+        error
+    })
+}
+# let dir = tempfile::tempdir().unwrap();
+# let path = dir.path().join("config.toml");
+# std::fs::write(&path, "[App]\nport = 8080").unwrap();
+# assert_eq!(load_before_runtime(&path).unwrap().get_integer("App", "port").unwrap(), 8080);
+# let invalid = "[App\nport = 8080";
+# let original = ConfigStore::from_str(invalid).unwrap_err();
+# let original_source = std::error::Error::source(&original).unwrap().to_string();
+# std::fs::write(&path, invalid).unwrap();
+# let error = load_before_runtime(&path).unwrap_err();
+# let source = std::error::Error::source(&error).unwrap()
+#     .downcast_ref::<conferencier::toml::de::Error>().unwrap();
+# assert_eq!(source.to_string(), original_source);
+# match &error {
+#     Error::Parse { path: Some(reported), source: stored, .. } => {
+#         assert_eq!(reported, &path);
+#         assert!(std::ptr::eq(stored, source));
+#     }
+#     other => panic!("unexpected error: {other}"),
 # }
+# let missing = dir.path().join("missing.toml");
+# assert!(matches!(
+#     load_before_runtime(&missing),
+#     Err(Error::Io {
+#         path: Some(reported), operation: Some(IoOperation::Read), target_path: None, ..
+#     }) if reported == missing
+# ));
 ```
+
+## Nesting limits
+
+Parsing uses the default recursion limit of `toml` (currently 80 levels with `toml` 1.2); that exact limit is not part of conferencier's API. Deeper arrays, inline tables, dotted keys and table headers return a parse error. Conferencier does not enable `toml/unbounded`, but Cargo features are additive, so another dependency can remove this limit. Applications loading untrusted TOML should check the feature graph with `cargo tree -e features -i toml`.
+
+Values created in code and inserted with [`ConfigStore::set_value`](crate::ConfigStore::set_value) or [`ConfigStore::set_section`](crate::ConfigStore::set_section) are not subject to the parser's limit. Very deeply nested values can overflow the stack when serialized, cloned or dropped; a stack overflow aborts the process.
 
 ## Reloading configuration
 
@@ -126,6 +164,74 @@ async fn main() -> conferencier::Result<()> {
 ```
 
 Keep state that must survive reloads directly in the scope: ignored fields inside `ConfigTable` values are initialized again on every load (see [Nested tables](crate::guide::tables)).
+
+## Reading a scope as a plain value
+
+`from_store` always returns a shared `SharedScope<T>`. Tests, validation steps or
+one-shot tools that want a plain value can also derive
+[`ConfigTable`](crate::ConfigTable) on the scope struct and convert its section
+directly:
+
+```rust
+use conferencier::{ConfigScope, ConfigStore, ConfigTable};
+
+#[derive(ConfigScope, ConfigTable)]
+#[confer(section = "App")]
+struct AppConfig {
+    port: u16,
+}
+
+let store = ConfigStore::from_str("[App]\nport = 8080")?;
+let section = store.get_section("App").unwrap_or_default();
+let app = AppConfig::from_table("App", section)?;
+assert_eq!(app.port, 8080);
+# Ok::<(), conferencier::Error>(())
+```
+
+The section name is repeated in the call. Ignored fields are initialized as in
+`from_store`. Unlike `from_store`, `get_section` returns `None` for a top-level
+entry that is not a table, so this code loads it as an empty section instead of
+reporting a type mismatch.
+
+## Debugging scope values
+
+The application controls `Debug` on its scope types. Implement it explicitly to
+hide fields that must not appear in debug output:
+
+```rust
+use std::fmt;
+use conferencier::ConfigScope;
+
+#[derive(ConfigScope)]
+#[confer(section = "Database")]
+struct DatabaseConfig {
+    host: String,
+    password: String,
+}
+
+impl fmt::Debug for DatabaseConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DatabaseConfig")
+            .field("host", &self.host)
+            .field("password", &"[REDACTED]")
+            .finish()
+    }
+}
+
+let config = DatabaseConfig {
+    host: "localhost".into(),
+    password: "example-secret".into(),
+};
+let output = format!("{config:?}");
+assert!(!output.contains("example-secret"));
+# assert_eq!(config.password, "example-secret");
+# assert!(output.contains("localhost"));
+# assert!(output.contains("[REDACTED]"));
+```
+
+This only changes formatting of this scope; it does not redact raw TOML, errors
+or their sources, including parser diagnostics produced before the scope exists.
+Other fields, such as `host` in this example, remain visible.
 
 ## Locking
 

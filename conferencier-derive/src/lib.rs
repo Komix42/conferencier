@@ -5,6 +5,11 @@
 //! with its default `derive` feature. The generated code calls into `conferencier`,
 //! so it is always a dependency. The attribute reference is in the `conferencier`
 //! documentation.
+//!
+//! The generated code names the crate by an absolute path, such as `::conferencier`,
+//! taken from the dependency in `Cargo.toml`, including a renamed one. Items named
+//! `conferencier` in the deriving module therefore do not affect it. Only if no such
+//! dependency is found does the code use the relative path `conferencier`.
 
 mod codegen;
 mod crate_path;
@@ -28,7 +33,7 @@ use crate::model::DeriveKind;
 /// `#[confer(...)]`, short for *conferencier*, accepts `section = "Name"` and
 /// `deny_unknown_keys` on the struct, and `rename = "key"`, `default`,
 /// `default = <expr>`, `ignore`, `ignore = <expr>`, `table` and `field_defaults`
-/// on fields. The [attribute reference](https://docs.rs/conferencier/latest/conferencier/guide/derive/index.html)
+/// on fields. The [attribute reference](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/derive/index.html)
 /// describes their semantics and the supported field types.
 ///
 /// # Compile-time checks
@@ -37,7 +42,7 @@ use crate::model::DeriveKind;
 /// loaded keys produce compile errors. The struct must satisfy the trait's
 /// `Send + Sync + 'static` bounds. Through 0.1.x, a name such as `ConferApp`
 /// also requires an explicit `section`; see the
-/// [migration guide](https://docs.rs/conferencier/latest/conferencier/guide/migration/index.html#from-004-to-005).
+/// [migration guide](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/migration/index.html#from-004-to-005).
 ///
 /// # Example
 ///
@@ -76,7 +81,7 @@ pub fn scope_derive(input: TokenStream) -> TokenStream {
 /// Fields accept the same `#[confer(...)]` attributes as [`ConfigScope`]. The struct
 /// accepts `deny_unknown_keys`, which applies only to this type, and rejects
 /// `section` unless it also derives `ConfigScope`. The
-/// [nested tables guide](https://docs.rs/conferencier/latest/conferencier/guide/tables/index.html)
+/// [nested tables guide](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/tables/index.html)
 /// describes table fields and how tables behave on reload.
 ///
 /// # Example

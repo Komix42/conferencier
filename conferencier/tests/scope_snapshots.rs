@@ -47,8 +47,8 @@ fn assert_not_a_table(error: &Error, expected_section: &str) {
     assert!(
         matches!(
             error,
-            Error::TypeMismatch { path, key, expected: "table", found: "integer" }
-                if path.is_empty() && key == expected_section
+            Error::TypeMismatch { table_path, key, expected: "table", found: "integer", .. }
+                if table_path.is_empty() && key == expected_section
         ),
         "unexpected error: {error:?}"
     );
@@ -67,7 +67,7 @@ async fn failing_load_leaves_the_module_unchanged() -> Result<()> {
     let module = App::from_store(&store)?;
     module.write().await.state = 42;
 
-    store.set_string("App", "name", "second".into())?;
+    store.set_string("App", "name", "second")?;
     store.set_integer("App", "port", 70_000)?;
     let error = error_of(App::load(&module, &store).await);
     assert_eq!(
@@ -96,14 +96,11 @@ async fn failing_save_leaves_the_store_unchanged() -> Result<()> {
     let error = error_of(Counters::save(&module, &store).await);
     assert!(matches!(
         &error,
-        Error::ValueParse { path, key, .. } if path == "Counters" && key == "total"
+        Error::ValueParse { table_path, key, .. } if table_path == "Counters" && key == "total"
     ));
     assert_eq!(
         error.to_string(),
-        format!(
-            "invalid value at Counters.total: value `{}` out of range for TOML integer",
-            u64::MAX
-        )
+        "invalid value at Counters.total: value out of range for TOML integer"
     );
     assert_eq!(store.save_str()?, before);
     Ok(())

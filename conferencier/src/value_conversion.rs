@@ -24,7 +24,12 @@ pub fn describe(value: &Value) -> &'static str {
 pub fn string(path: &str, key: &str, value: Value) -> Result<String> {
     match value {
         Value::String(s) => Ok(s),
-        other => Err(Error::type_mismatch(path, key, "string", describe(&other))),
+        other => Err(Error::type_mismatch_error(
+            path,
+            key,
+            "string",
+            describe(&other),
+        )),
     }
 }
 
@@ -32,7 +37,12 @@ pub fn string(path: &str, key: &str, value: Value) -> Result<String> {
 pub fn integer(path: &str, key: &str, value: Value) -> Result<i64> {
     match value {
         Value::Integer(v) => Ok(v),
-        other => Err(Error::type_mismatch(path, key, "integer", describe(&other))),
+        other => Err(Error::type_mismatch_error(
+            path,
+            key,
+            "integer",
+            describe(&other),
+        )),
     }
 }
 
@@ -41,7 +51,12 @@ pub fn float(path: &str, key: &str, value: Value) -> Result<f64> {
     match value {
         Value::Float(v) => Ok(v),
         Value::Integer(v) => Ok(v as f64),
-        other => Err(Error::type_mismatch(path, key, "float", describe(&other))),
+        other => Err(Error::type_mismatch_error(
+            path,
+            key,
+            "float",
+            describe(&other),
+        )),
     }
 }
 
@@ -49,7 +64,12 @@ pub fn float(path: &str, key: &str, value: Value) -> Result<f64> {
 pub fn boolean(path: &str, key: &str, value: Value) -> Result<bool> {
     match value {
         Value::Boolean(v) => Ok(v),
-        other => Err(Error::type_mismatch(path, key, "boolean", describe(&other))),
+        other => Err(Error::type_mismatch_error(
+            path,
+            key,
+            "boolean",
+            describe(&other),
+        )),
     }
 }
 
@@ -58,7 +78,7 @@ pub fn datetime(path: &str, key: &str, value: Value) -> Result<Datetime> {
     match value {
         Value::Datetime(dt) => Ok(dt),
         Value::String(s) => parse_datetime(path, key, &s),
-        other => Err(Error::type_mismatch(
+        other => Err(Error::type_mismatch_error(
             path,
             key,
             "datetime",
@@ -71,7 +91,12 @@ pub fn datetime(path: &str, key: &str, value: Value) -> Result<Datetime> {
 pub fn table(path: &str, key: &str, value: Value) -> Result<Table> {
     match value {
         Value::Table(table) => Ok(table),
-        other => Err(Error::type_mismatch(path, key, "table", describe(&other))),
+        other => Err(Error::type_mismatch_error(
+            path,
+            key,
+            "table",
+            describe(&other),
+        )),
     }
 }
 
@@ -79,7 +104,12 @@ pub fn table(path: &str, key: &str, value: Value) -> Result<Table> {
 pub fn array(path: &str, key: &str, value: Value) -> Result<Vec<Value>> {
     match value {
         Value::Array(items) => Ok(items),
-        other => Err(Error::type_mismatch(path, key, "array", describe(&other))),
+        other => Err(Error::type_mismatch_error(
+            path,
+            key,
+            "array",
+            describe(&other),
+        )),
     }
 }
 
@@ -138,8 +168,9 @@ pub fn datetime_vec(path: &str, key: &str, value: Value) -> Result<Vec<Datetime>
 
 /// Parses a TOML datetime from `raw`, annotating errors with path/key context.
 fn parse_datetime(path: &str, key: &str, raw: &str) -> Result<Datetime> {
-    Datetime::from_str(raw)
-        .map_err(|err| Error::value_parse(path, key, format!("failed to parse datetime: {err}")))
+    Datetime::from_str(raw).map_err(|err| {
+        Error::value_parse_error(path, key, format!("failed to parse datetime: {err}"))
+    })
 }
 
 /// Converts a TOML array to `Vec<T>` using the provided element conversion callback.
@@ -154,24 +185,24 @@ where
                 match convert(path, key, item) {
                     Ok(v) => out.push(v),
                     Err(err) => {
-                        return Err(match err {
-                            Error::TypeMismatch { .. } | Error::ValueParse { .. } => {
-                                annotate_with_index(err, index)
-                            }
-                            other => other,
-                        });
+                        return Err(annotate_with_index(err, index));
                     }
                 }
             }
             Ok(out)
         }
-        other => Err(Error::type_mismatch(path, key, "array", describe(&other))),
+        other => Err(Error::type_mismatch_error(
+            path,
+            key,
+            "array",
+            describe(&other),
+        )),
     }
 }
 
 /// Builds a [`Error::ValueParse`] describing an invalid array element type.
 fn element_mismatch(path: &str, key: &str, expected: &'static str, value: &Value) -> Error {
-    Error::value_parse(
+    Error::value_parse_error(
         path,
         key,
         format!(
@@ -184,21 +215,14 @@ fn element_mismatch(path: &str, key: &str, expected: &'static str, value: &Value
 /// Adds index context to element-related errors to aid debugging.
 fn annotate_with_index(error: Error, index: usize) -> Error {
     match error {
-        Error::ValueParse { path, key, message } => Error::ValueParse {
-            path,
+        Error::ValueParse {
+            table_path,
+            key,
+            message,
+        } => Error::ValueParse {
+            table_path,
             key,
             message: format!("{message} (at index {index})"),
-        },
-        Error::TypeMismatch {
-            path,
-            key,
-            expected,
-            found,
-        } => Error::TypeMismatch {
-            path,
-            key,
-            expected,
-            found,
         },
         other => other,
     }

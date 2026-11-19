@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.1.0-beta.1] - 2026-11-19
+
+### Added
+- Added the public `IoOperation` enum and `Error::SaveFileTaskJoin` for failures to join the blocking save task. Added `Error::io_error`, `io_error_with_operation`, `parse_error` and `serialize_error` constructors; the library-created save-specific variants have no public constructors ([RFC-0011](docs/devel-0.1.x/RFC-0011_api_polish_before_0.1.md) E2, E5).
+
+### Changed
+- **Breaking:** `Error::Io` is now non-exhaustive and includes `operation` and `target_path`; use its public constructors rather than constructing the variant. File-method errors identify their operation and `save_file` destination. `Display` now describes the operation, escapes paths and omits the wrapped source ([RFC-0011](docs/devel-0.1.x/RFC-0011_api_polish_before_0.1.md) E1–E3, E5, E6).
+- **Breaking:** `Error::Parse` and `Error::Serialize` are now non-exhaustive struct variants with optional file and save-target paths, respectively. Their `Display` messages no longer repeat the wrapped source; inspect `source()` for parser and serializer diagnostics ([RFC-0011](docs/devel-0.1.x/RFC-0011_api_polish_before_0.1.md) E1, E3, E4, E5, E6).
+- **Breaking:** `Error::SaveFileCleanup` is non-exhaustive and includes `target_path`. Its `Display` includes the cleanup error but not the original save error; its source remains the original save error. A blocking-task join failure is reported separately as `SaveFileTaskJoin` ([RFC-0011](docs/devel-0.1.x/RFC-0011_api_polish_before_0.1.md) E1–E6).
+- **Breaking:** The key-error constructors are renamed with an `_error` suffix: `Error::missing_key_error`, `type_mismatch_error`, `value_parse_error` and `unknown_key_error`. Their argument types and order are unchanged; the old names are removed without aliases ([RFC-0011](docs/devel-0.1.x/RFC-0011_api_polish_before_0.1.md) E5).
+- **Breaking:** `Error::MissingKey`, `TypeMismatch`, `ValueParse` and `UnknownKey` store the formatted table path in `table_path` instead of `path`, and each variant is `#[non_exhaustive]`: patterns outside the crate must include `..`, and the constructors create these variants. The `ConfigTable` method parameter is documented as `table_path`; existing implementations keep compiling ([RFC-0011](docs/devel-0.1.x/RFC-0011_api_polish_before_0.1.md) E5).
+- `conferencier` depends on the exactly matching `conferencier-derive` version (`=0.1.0-beta.1`), so Cargo cannot pair the library with a different derive release ([RFC-0011](docs/devel-0.1.x/RFC-0011_api_polish_before_0.1.md), audit finding A8).
+- Non-finite `f32` values, including infinities and NaNs, now load in scalar and vector fields and round-trip; NaN sign and payload are not preserved ([RFC-0011](docs/devel-0.1.x/RFC-0011_api_polish_before_0.1.md) F1).
+- Save-time `u64` and `usize` range errors no longer include the raw value; vector errors continue to include the element index ([RFC-0011](docs/devel-0.1.x/RFC-0011_api_polish_before_0.1.md) E7).
+- **Breaking:** `set_string` accepts `impl Into<String>`, and vector setters accept iterators instead of requiring owned vectors. Calls using `.into()` without a concrete target type may need adjustment; see RFC-0011 S1–S3 ([RFC-0011](docs/devel-0.1.x/RFC-0011_api_polish_before_0.1.md)).
+- **Breaking:** `ConfigStore`'s `Debug` output now lists top-level keys without configuration values, and reports when it cannot read keys because the store is locked ([RFC-0011](docs/devel-0.1.x/RFC-0011_api_polish_before_0.1.md) D1–D2).
+- **Breaking:** the normal Tokio dependency now enables only `sync`, `rt` and `fs`; applications that relied on other Tokio features being enabled transitively must enable them directly ([RFC-0011](docs/devel-0.1.x/RFC-0011_api_polish_before_0.1.md) T1–T2).
+- Derive-generated code now uses fully qualified `core` and `std` paths so caller names cannot shadow generated code. Unsupported-field diagnostics explain type-alias limitations, references and nested vectors ([AUDIT-001 B1, B5](docs/devel-0.0.x/AUDIT-001_quality_0.0.8.md)).
+- Derive-generated code names the `conferencier` dependency with an absolute path, such as `::conferencier`, so a local item named `conferencier` no longer breaks or redirects it. The relative path is used only when no `conferencier` dependency is found ([AUDIT-002 A1](docs/devel-0.1.x/AUDIT-002_quality_0.1.0-beta.1.md)).
+
+### Fixed
+- Corrected the beta installation command and completed error-handling and runtime guidance, including examples for synchronous loading, error sources and selective scope `Debug`.
+
+See the [migration guide from 0.0.8](conferencier/guide/migration.md#from-008-to-010-beta1).
+
 ## [0.0.8] - 2026-11-17
 
 ### Added
@@ -18,7 +43,7 @@ See the [migration guide from 0.0.7](conferencier/guide/migration.md#from-007-to
 ## [0.0.7] - 2026-11-16
 
 ### Added
-- A [rustdoc guide](https://docs.rs/conferencier/latest/conferencier/guide/) covering concepts, derive attributes and value conversion, nested tables, saving files, troubleshooting and migration from earlier releases. It is included with the default `derive` feature.
+- A [rustdoc guide](https://docs.rs/conferencier/0.0.7/conferencier/guide/) covering concepts, derive attributes and value conversion, nested tables, saving files, troubleshooting and migration from earlier releases. It is included with the default `derive` feature.
 - Doctests for the shared README and a CI check that runs the guide's doctests from the packaged crate outside the workspace.
 
 ### Changed

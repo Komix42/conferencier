@@ -1,4 +1,6 @@
+use std::future::Future;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::task::{Context, Poll, Waker};
 
 use conferencier::{ConfigScope, ConfigStore, Datetime, Error, Result, SharedScope};
 
@@ -37,6 +39,13 @@ struct Ports {
 #[confer(section = "App")]
 struct WidePorts {
     ports: Vec<u64>,
+}
+
+#[derive(ConfigScope)]
+#[confer(section = "Sizes")]
+struct WideSizes {
+    scalar: usize,
+    values: Vec<usize>,
 }
 
 #[derive(Debug, ConfigScope)]
@@ -142,14 +151,39 @@ async fn generic_code_can_spawn_load() -> Result<()> {
 }
 
 #[test]
-fn store_and_from_store_work_without_a_runtime() -> Result<()> {
+fn derived_scope_construction_load_and_save_work_without_a_runtime() -> Result<()> {
     let store: ConfigStore = "[Srv]\np = 8080".parse()?;
     store.set_string("Srv", "host", String::from("localhost"))?;
 
     let module = Server::from_store(&store)?;
-    let guard = module.try_read().expect("no other guard exists");
-    assert_eq!(guard.port, 8080);
-    assert_eq!(guard.host, "localhost");
+    {
+        let guard = module.try_read().expect("no other guard exists");
+        assert_eq!(guard.port, 8080);
+        assert_eq!(guard.host, "localhost");
+    }
+
+    let mut context = Context::from_waker(Waker::noop());
+    store.set_string("Srv", "host", "loaded")?;
+    let mut load = Box::pin(Server::load(&module, &store));
+    assert!(matches!(
+        load.as_mut().poll(&mut context),
+        Poll::Ready(Ok(()))
+    ));
+    assert_eq!(
+        module
+            .try_read()
+            .expect("load released the scope lock")
+            .host,
+        "loaded"
+    );
+
+    module.try_write().expect("no other guard exists").host = "saved".into();
+    let mut save = Box::pin(Server::save(&module, &store));
+    assert!(matches!(
+        save.as_mut().poll(&mut context),
+        Poll::Ready(Ok(()))
+    ));
+    assert_eq!(store.get_string("Srv", "host")?, "saved");
     Ok(())
 }
 
@@ -158,8 +192,8 @@ fn derived_scope_diagnostics_format_the_literal_top_level_section() -> Result<()
     let error = DottedSection::from_store(&ConfigStore::new()).unwrap_err();
     assert!(matches!(
         error,
-        Error::MissingKey { ref path, ref key }
-            if path == "\"App.server\"" && key == "port"
+        Error::MissingKey { ref table_path, ref key, .. }
+            if table_path == "\"App.server\"" && key == "port"
     ));
     assert_eq!(error.to_string(), "missing key \"App.server\".port");
     let store = ConfigStore::from_str("[\"App.server\"]\nport = 80")?;
@@ -179,8 +213,8 @@ async fn scalar_array_range_errors_include_the_element_index() -> Result<()> {
     let error = Ports::from_store(&store).unwrap_err();
     assert!(matches!(
         error,
-        Error::ValueParse { ref path, ref key, ref message }
-            if path == "Ports"
+        Error::ValueParse { ref table_path, ref key, ref message, .. }
+            if table_path == "Ports"
                 && key == "ports"
                 && message == "value out of range for u8 (at index 1)"
     ));
@@ -201,16 +235,12 @@ async fn scalar_array_range_errors_include_the_element_index() -> Result<()> {
     scope.write().await.ports = vec![0, u64::MAX];
     let before = store.save_str()?;
     let error = WidePorts::save(&scope, &store).await.unwrap_err();
-    let expected_message = format!(
-        "value `{}` out of range for TOML integer (at index 1)",
-        u64::MAX
-    );
     assert!(matches!(
         error,
-        Error::ValueParse { ref path, ref key, message }
-            if path == "App"
+        Error::ValueParse { ref table_path, ref key, message, .. }
+            if table_path == "App"
                 && key == "ports"
-                && message == expected_message
+                && message == "value out of range for TOML integer (at index 1)"
     ));
     assert_eq!(store.save_str()?, before);
 
@@ -218,8 +248,8 @@ async fn scalar_array_range_errors_include_the_element_index() -> Result<()> {
     let error = Ratios::from_store(&store).unwrap_err();
     assert!(matches!(
         error,
-        Error::ValueParse { ref path, ref key, ref message }
-            if path == "Ratios"
+        Error::ValueParse { ref table_path, ref key, ref message, .. }
+            if table_path == "Ratios"
                 && key == "ratios"
                 && message == "value out of range for f32 (at index 1)"
     ));
@@ -234,21 +264,118 @@ async fn scalar_array_range_errors_include_the_element_index() -> Result<()> {
 }
 
 #[tokio::test]
+async fn non_finite_f32_arrays_load_and_roundtrip() -> Result<()> {
+    let store = ConfigStore::from_str("[Ratios]\nratios = [inf, +inf, -inf, nan, +nan, -nan]")?;
+    let scope = Ratios::from_store(&store)?;
+    let values = scope.read().await.ratios.clone();
+    assert_eq!(values.len(), 6);
+    assert!(values[0].is_infinite() && values[0].is_sign_positive());
+    assert!(values[1].is_infinite() && values[1].is_sign_positive());
+    assert!(values[2].is_infinite() && values[2].is_sign_negative());
+    assert!(values[3].is_nan());
+    assert!(values[4].is_nan());
+    assert!(values[5].is_nan());
+
+    Ratios::save(&scope, &store).await?;
+    let restored = ConfigStore::from_str(&store.save_str()?)?;
+    let values = Ratios::from_store(&restored)?.read().await.ratios.clone();
+    assert!(values[0].is_infinite() && values[0].is_sign_positive());
+    assert!(values[1].is_infinite() && values[1].is_sign_positive());
+    assert!(values[2].is_infinite() && values[2].is_sign_negative());
+    assert!(values[3].is_nan());
+    assert!(values[4].is_nan());
+    assert!(values[5].is_nan());
+    Ok(())
+}
+
+#[cfg(target_pointer_width = "64")]
+#[tokio::test]
+async fn usize_range_errors_omit_values_and_keep_vector_indices() -> Result<()> {
+    let store = ConfigStore::from_str("[Sizes]\nscalar = 0\nvalues = [0]")?;
+    let scope = WideSizes::from_store(&store)?;
+    scope.write().await.scalar = usize::MAX;
+    let error = WideSizes::save(&scope, &store).await.unwrap_err();
+    assert!(matches!(
+        &error,
+        Error::ValueParse { message, .. }
+            if message == "value out of range for TOML integer"
+    ));
+    assert_eq!(
+        error.to_string(),
+        "invalid value at Sizes.scalar: value out of range for TOML integer"
+    );
+    assert!(!error.to_string().contains(&usize::MAX.to_string()));
+
+    scope.write().await.scalar = 0;
+    scope.write().await.values = vec![0, usize::MAX];
+    let error = WideSizes::save(&scope, &store).await.unwrap_err();
+    assert!(matches!(
+        &error,
+        Error::ValueParse { message, .. }
+            if message == "value out of range for TOML integer (at index 1)"
+    ));
+    assert_eq!(
+        error.to_string(),
+        "invalid value at Sizes.values: value out of range for TOML integer (at index 1)"
+    );
+    assert!(!error.to_string().contains(&usize::MAX.to_string()));
+    Ok(())
+}
+
+#[tokio::test]
+async fn finite_f32_vector_endpoints_are_inclusive_and_roundtrip() -> Result<()> {
+    use conferencier::toml::Value;
+
+    let store = ConfigStore::new();
+    store.set_value(
+        "Ratios",
+        "ratios",
+        Value::Array(vec![
+            Value::Float(f32::MIN as f64),
+            Value::Float(f32::MAX as f64),
+        ]),
+    )?;
+    let scope = Ratios::from_store(&store)?;
+    assert_eq!(scope.read().await.ratios, [f32::MIN, f32::MAX]);
+    Ratios::save(&scope, &store).await?;
+    let restored = ConfigStore::from_str(&store.save_str()?)?;
+    assert_eq!(
+        Ratios::from_store(&restored)?.read().await.ratios,
+        [f32::MIN, f32::MAX]
+    );
+
+    let below_min = f64::from_bits((f32::MIN as f64).to_bits() + 1);
+    let above_max = f64::from_bits((f32::MAX as f64).to_bits() + 1);
+    for value in [below_min, above_max] {
+        assert!(value.is_finite());
+        let store = ConfigStore::new();
+        store.set_value("Ratios", "ratios", Value::Array(vec![Value::Float(value)]))?;
+        let error = Ratios::from_store(&store).unwrap_err();
+        assert!(matches!(
+            error,
+            Error::ValueParse { ref message, .. }
+                if message == "value out of range for f32 (at index 0)"
+        ));
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn strict_scope_checks_known_keys_before_conversion_and_keeps_failed_load_atomic()
 -> Result<()> {
     let error = StrictScope::from_store(&ConfigStore::from_str("StrictScope = 7")?).unwrap_err();
     assert!(matches!(
         error,
-        Error::TypeMismatch { ref path, ref key, expected: "table", found: "integer" }
-            if path.is_empty() && key == "StrictScope"
+        Error::TypeMismatch { ref table_path, ref key, expected: "table", found: "integer", .. }
+            if table_path.is_empty() && key == "StrictScope"
     ));
 
     let store = ConfigStore::from_str("[StrictScope]\nzeta = 1\nalpha = 2")?;
     let error = StrictScope::from_store(&store).unwrap_err();
     assert!(matches!(
         error,
-        Error::UnknownKey { ref path, ref key }
-            if path == "StrictScope" && key == "alpha"
+        Error::UnknownKey { ref table_path, ref key, .. }
+            if table_path == "StrictScope" && key == "alpha"
     ));
     assert_eq!(error.to_string(), "unknown key StrictScope.alpha");
 
@@ -260,8 +387,8 @@ async fn strict_scope_checks_known_keys_before_conversion_and_keeps_failed_load_
     let error = StrictScope::load(&scope, &store).await.unwrap_err();
     assert!(matches!(
         error,
-        Error::UnknownKey { ref path, ref key }
-            if path == "StrictScope" && key == "extra"
+        Error::UnknownKey { ref table_path, ref key, .. }
+            if table_path == "StrictScope" && key == "extra"
     ));
     assert_eq!(scope.read().await.name, "unchanged");
     StrictScope::save(&scope, &store).await?;
@@ -281,8 +408,8 @@ async fn strict_scope_checks_known_keys_before_conversion_and_keeps_failed_load_
         .unwrap_err();
     assert!(matches!(
         error,
-        Error::UnknownKey { ref path, ref key }
-            if path == "StrictEmpty" && key == "extra"
+        Error::UnknownKey { ref table_path, ref key, .. }
+            if table_path == "StrictEmpty" && key == "extra"
     ));
     assert!(
         StrictEmpty::from_store(&ConfigStore::new())?
@@ -314,8 +441,8 @@ fn strict_scope_reports_smallest_unknown_key_with_preserved_order() -> Result<()
     let error = StrictScope::from_store(&store).unwrap_err();
     assert!(matches!(
         error,
-        Error::UnknownKey { ref path, ref key }
-            if path == "StrictScope" && key == "alpha"
+        Error::UnknownKey { ref table_path, ref key, .. }
+            if table_path == "StrictScope" && key == "alpha"
     ));
     assert_eq!(error.to_string(), "unknown key StrictScope.alpha");
     Ok(())
@@ -792,16 +919,62 @@ mod default_expressions {
     }
 
     #[tokio::test]
-    async fn non_finite_default_can_be_saved_but_not_reloaded() -> Result<()> {
-        let config_store = ConfigStore::new();
-        let instance = NonFinite::from_store(&config_store)?;
-        assert!(instance.read().await.number.is_nan());
-        NonFinite::save(&instance, &config_store).await?;
-        let restored = ConfigStore::from_str(&config_store.save_str()?)?;
-        assert!(matches!(
-            NonFinite::from_store(&restored).unwrap_err(),
-            Error::ValueParse { .. }
-        ));
+    async fn non_finite_f32_literals_load_and_roundtrip() -> Result<()> {
+        for literal in ["inf", "+inf", "-inf", "nan", "+nan", "-nan"] {
+            let source = format!("[NonFinite]\nnumber = {literal}");
+            let config_store = ConfigStore::from_str(&source)?;
+            let instance = NonFinite::from_store(&config_store)?;
+            let number = instance.read().await.number;
+            if literal.contains("nan") {
+                assert!(number.is_nan(), "literal {literal}");
+            } else {
+                assert!(number.is_infinite(), "literal {literal}");
+                assert_eq!(number.is_sign_positive(), literal != "-inf");
+            }
+
+            NonFinite::save(&instance, &config_store).await?;
+            let restored = ConfigStore::from_str(&config_store.save_str()?)?;
+            let reloaded = NonFinite::from_store(&restored)?;
+            let number = reloaded.read().await.number;
+            if literal.contains("nan") {
+                assert!(number.is_nan(), "roundtrip of {literal}");
+            } else {
+                assert!(number.is_infinite(), "roundtrip of {literal}");
+                assert_eq!(number.is_sign_positive(), literal != "-inf");
+            }
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn finite_f32_endpoints_are_inclusive_and_outside_values_fail() -> Result<()> {
+        for (raw, expected) in [(f32::MIN as f64, f32::MIN), (f32::MAX as f64, f32::MAX)] {
+            let config_store = ConfigStore::new();
+            config_store.set_float("NonFinite", "number", raw)?;
+            let instance = NonFinite::from_store(&config_store)?;
+            assert_eq!(instance.read().await.number, expected);
+
+            NonFinite::save(&instance, &config_store).await?;
+            let restored = ConfigStore::from_str(&config_store.save_str()?)?;
+            assert_eq!(
+                NonFinite::from_store(&restored)?.read().await.number,
+                expected
+            );
+        }
+
+        let below_min = f64::from_bits((f32::MIN as f64).to_bits() + 1);
+        let above_max = f64::from_bits((f32::MAX as f64).to_bits() + 1);
+        for raw in [below_min, above_max] {
+            assert!(raw.is_finite());
+            let config_store = ConfigStore::new();
+            config_store.set_float("NonFinite", "number", raw)?;
+            let error = NonFinite::from_store(&config_store).unwrap_err();
+            assert!(matches!(
+                error,
+                Error::ValueParse { ref message, .. }
+                    if message == "value out of range for f32"
+            ));
+        }
         Ok(())
     }
 }
@@ -935,7 +1108,7 @@ async fn required_datetime_without_default_reports_missing_key() -> Result<()> {
         .expect("a missing required key must fail");
 
     assert!(
-        matches!(&err, Error::MissingKey { path, key } if path == "Clock" && key == "started_at"),
+        matches!(&err, Error::MissingKey { table_path, key, .. } if table_path == "Clock" && key == "started_at"),
         "unexpected error: {err}"
     );
 

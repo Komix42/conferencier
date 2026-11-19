@@ -2,6 +2,7 @@
 fn trybuild_suite() {
     let t = trybuild::TestCases::new();
     t.pass("tests/trybuild/pass_basic.rs");
+    t.pass("tests/trybuild/pass_generated_hygiene.rs");
     t.pass("tests/trybuild/pass_datetime_defaults.rs");
     t.pass("tests/trybuild/pass_required_datetime.rs");
     t.pass("tests/trybuild/pass_ignore_expr.rs");
@@ -14,6 +15,9 @@ fn trybuild_suite() {
     t.pass("tests/trybuild/pass_deny_unknown_keys.rs");
     t.compile_fail("tests/trybuild/fail_duplicate_keys.rs");
     t.compile_fail("tests/trybuild/fail_unsupported_type.rs");
+    t.compile_fail("tests/trybuild/fail_nested_vec.rs");
+    t.compile_fail("tests/trybuild/fail_reference_field.rs");
+    t.compile_fail("tests/trybuild/fail_type_alias.rs");
     t.compile_fail("tests/trybuild/fail_conflicting_attrs.rs");
     t.compile_fail("tests/trybuild/fail_default_types.rs");
     t.compile_fail("tests/trybuild/fail_default_options.rs");

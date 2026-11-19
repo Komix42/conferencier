@@ -49,19 +49,18 @@ Both expression forms use a synchronous closure returning the field's type. They
 - Containers: plain `T`, `Vec<T>`, `Option<T>`, `Option<Vec<T>>`.
 - Nested tables: `T`, `Option<T>` and `Vec<T>` where `T` implements `ConfigTable`, with `#[confer(table)]`.
 
-If a type falls outside this set, the derive emits a compile error with a friendly message.
-Type aliases are opaque: scalar aliases are unsupported, and table aliases are treated as single table types that must implement `ConfigTable`, even if they name an `Option`.
+The derive classifies field types by their final path segment; it cannot resolve types. Fully qualified paths to supported types work, but a custom type named `String` or `Datetime` is treated as the corresponding built-in type. Type aliases are opaque: scalar aliases are unsupported, and table aliases are treated as single table types that must implement `ConfigTable`, even if they name an `Option`. References and nested vectors such as `Vec<Vec<T>>` are unsupported. For nested TOML tables, use `#[confer(table)]` with `T`, `Option<T>` or `Vec<T>`, where `T` implements `ConfigTable`.
 
 ## Value conversion
 
 These rules apply to loaded scalar fields and their vector elements, both in scopes and in derived tables:
 
 - Integer fields accept TOML integers, which are signed 64-bit values. Loading checks the range of the Rust field type; saving a `u64` or `usize` greater than `i64::MAX` returns an error.
-- Float fields accept TOML floats and integers, but integer-to-float conversion and conversion to `f32` can lose precision. Loading `f32` rejects non-finite values and values outside its range; `f64` accepts non-finite values.
+- Float fields accept TOML floats and integers, but integer-to-float conversion and conversion to `f32` can lose precision. Loading `f32` accepts infinities and NaNs, and rejects finite values outside its range; `f64` accepts non-finite values.
 - `Datetime` accepts a TOML date, time or datetime, or a string parsed as a TOML datetime. Other strings are not coerced into numbers or booleans.
 - A vector requires an array with compatible elements. A conversion error identifies the zero-based index of the failing element.
 
-Saving a non-finite `f32` is allowed, but that value cannot be loaded back into an `f32` field.
+Non-finite `f32` values can be saved and loaded back; NaN sign and payload are not preserved.
 
 ## TOML compatibility
 

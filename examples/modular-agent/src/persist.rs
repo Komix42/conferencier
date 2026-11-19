@@ -49,14 +49,21 @@ pub async fn run(
         match message {
             PersistMessage::Changed => {
                 if let Err(error) = store.save_file(&path).await {
-                    eprintln!("cannot save {}: {error}", path.display());
+                    eprintln!(
+                        "cannot save {}: {}",
+                        path.display(),
+                        crate::display_error_chain(&error)
+                    );
                 }
             }
             PersistMessage::Flush(reply) => {
-                let result = store
-                    .save_file(&path)
-                    .await
-                    .map_err(|error| format!("cannot save {}: {error}", path.display()));
+                let result = store.save_file(&path).await.map_err(|error| {
+                    format!(
+                        "cannot save {}: {}",
+                        path.display(),
+                        crate::display_error_chain(&error)
+                    )
+                });
                 let _ = reply.send(result);
             }
         }

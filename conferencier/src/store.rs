@@ -1,14 +1,15 @@
+use std::fmt;
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockError};
 
 use tokio::fs;
 use toml::value::Datetime;
 use toml::{Table, Value};
 
-use crate::error::{Error, Result};
+use crate::error::{Error, IoOperation, Result};
 use crate::value_conversion;
 
 /// Shared handle to an in-memory TOML configuration document.
@@ -27,7 +28,9 @@ use crate::value_conversion;
 /// and [`save_file`](Self::save_file) run their file operations on Tokio's blocking thread
 /// pool. Every other method works only on
 /// the in-memory document and is synchronous, so it can also be called before the runtime
-/// starts or from synchronous code on a runtime thread.
+/// starts or from synchronous code on a runtime thread. Conferencier does not start a
+/// Tokio runtime or choose its flavor; applications enable the Tokio features they need.
+/// The file methods work on any Tokio runtime, including a current-thread runtime.
 ///
 /// # Absence of sections and keys
 ///
@@ -75,13 +78,58 @@ use crate::value_conversion;
 /// panic ever poisons the lock, later calls continue with the data, which every write
 /// leaves consistent.
 ///
+/// Typed setters finish all input conversions and iterator consumption and build the
+/// complete TOML value before acquiring the write lock. They then validate the section
+/// and replace the value in one update. Input preparation therefore runs even when the
+/// section is invalid, but caller-provided code never runs under the lock and readers
+/// never observe a partially built array.
+///
 /// Individual calls are synchronized, not sequences of calls: a read followed by
 /// a write is not a transaction, and another task may change the document between them.
-/// The [guide](https://docs.rs/conferencier/latest/conferencier/guide/concepts/index.html#locking)
+/// The [guide](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/concepts/index.html#locking)
 /// explains the design assumptions behind this lock.
-#[derive(Clone, Debug, Default)]
+///
+/// # Debug output
+///
+/// The `Debug` implementation lists top-level key names only and never displays
+/// configuration values. If the lock is unavailable, it reports that the keys could not
+/// be read rather than waiting. Key names may themselves be sensitive, and the output
+/// format is not stable or intended for parsing.
+///
+/// # Nesting depth
+///
+/// Parsing uses `toml`'s default recursion limit. Cargo features are additive, so
+/// another dependency can enable `toml/unbounded` and remove that limit. Deeply
+/// nested input without the limit can overflow the stack during parsing. Values
+/// built in code are not limited and can overflow the stack when serialized,
+/// cloned or dropped. A stack overflow aborts the process. See the
+/// [guide](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/concepts/index.html#nesting-limits).
+#[derive(Clone, Default)]
 pub struct ConfigStore {
     table: Arc<RwLock<Table>>,
+}
+
+impl fmt::Debug for ConfigStore {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let keys = match self.table.try_read() {
+            Ok(table) => Some(table.keys().cloned().collect::<Vec<_>>()),
+            Err(TryLockError::WouldBlock) => None,
+            Err(TryLockError::Poisoned(error)) => {
+                Some(error.into_inner().keys().cloned().collect::<Vec<_>>())
+            }
+        };
+
+        let mut debug_struct = f.debug_struct("ConfigStore");
+        match keys {
+            Some(keys) => {
+                debug_struct.field("keys", &keys);
+            }
+            None => {
+                debug_struct.field("keys", &"<unavailable: locked>");
+            }
+        }
+        debug_struct.finish_non_exhaustive()
+    }
 }
 
 impl ConfigStore {
@@ -108,19 +156,25 @@ impl ConfigStore {
 
     /// Reads a TOML file asynchronously and builds a store from it.
     ///
-    /// A failed read returns [`Error::Io`] carrying `path`.
+    /// A failed read returns [`Error::Io`] with [`IoOperation::Read`] and `path`.
     /// This uses [`tokio::fs`] and must run within a Tokio runtime. There is no
-    /// blocking variant; the [guide](https://docs.rs/conferencier/latest/conferencier/guide/concepts/index.html#reading-a-file-before-the-runtime-starts)
+    /// blocking variant; the [guide](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/concepts/index.html#reading-a-file-before-the-runtime-starts)
     /// shows how to read a file before the runtime starts.
     ///
     /// # Errors
     ///
     /// Returns [`Error::Io`] if the file cannot be read as UTF-8, or [`Error::Parse`]
-    /// if its contents are not valid TOML. Parse errors carry parser diagnostics,
-    /// not a separate file path.
+    /// if its contents are not valid TOML. Parse errors carry parser diagnostics
+    /// and the file path.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this future is polled without an active Tokio runtime when it reaches
+    /// the Tokio file read.
     pub async fn from_file(path: impl AsRef<Path> + Send + Sync) -> Result<Self> {
-        let contents = read_file(path.as_ref()).await?;
-        Self::from_str(&contents)
+        let path = path.as_ref().to_path_buf();
+        let contents = read_file(&path).await?;
+        Self::from_str(&contents).map_err(|error| error.with_parse_path(&path))
     }
 
     /// Replaces the in-memory document with the contents of the provided TOML string.
@@ -146,11 +200,18 @@ impl ConfigStore {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Io`] carrying `path` if reading fails, or [`Error::Parse`]
-    /// for invalid TOML.
+    /// Returns [`Error::Io`] with [`IoOperation::Read`] and `path` if reading
+    /// fails, or [`Error::Parse`] with `path` for invalid TOML.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this future is polled without an active Tokio runtime when it reaches
+    /// the Tokio file read.
     pub async fn load_file(&self, path: impl AsRef<Path> + Send + Sync) -> Result<()> {
-        let contents = read_file(path.as_ref()).await?;
+        let path = path.as_ref().to_path_buf();
+        let contents = read_file(&path).await?;
         self.load_str(&contents)
+            .map_err(|error| error.with_parse_path(&path))
     }
 
     /// Serializes the current document to a TOML string.
@@ -162,6 +223,7 @@ impl ConfigStore {
     /// # Errors
     ///
     /// Returns [`Error::Serialize`] if the in-memory values cannot be encoded as TOML.
+    /// The error's `target_path` is `None`.
     pub fn save_str(&self) -> Result<String> {
         toml::to_string(&*self.read()).map_err(Error::from)
     }
@@ -190,24 +252,35 @@ impl ConfigStore {
     /// targets. On Unix, an existing target's `rwx` mode bits are preserved;
     /// ownership, ACLs, Windows access settings and other metadata are not.
     ///
-    /// The [guide](https://docs.rs/conferencier/latest/conferencier/guide/files/index.html)
+    /// The [guide](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/files/index.html)
     /// describes the replacement, cancellation, temporary files with all reserved
     /// names, accepted targets and preserved permissions in detail, including how to
     /// create a private configuration file.
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Serialize`] before any file is written if serialization fails.
-    /// Unsupported targets return [`Error::Io`] with [`ErrorKind::InvalidInput`],
-    /// the target path and a reason, before creating a temporary file. Metadata,
-    /// permission, write or replacement failures return [`Error::Io`] with the relevant
-    /// target or temporary path; metadata and permission failures stop before writing
-    /// data. If removing a temporary file also fails, returns
-    /// [`Error::SaveFileCleanup`] with the original error, temporary path and cleanup
-    /// error. An I/O failure does not change the in-memory store.
+    /// Returns [`Error::Serialize`] with `target_path` before any file is written
+    /// if serialization fails. Unsupported targets return [`Error::Io`] with
+    /// [`IoOperation::InspectTarget`], [`ErrorKind::InvalidInput`], and the target
+    /// path before creating a temporary file. Other file-operation errors carry
+    /// their [`IoOperation`], the relevant file in `path`, and the save destination
+    /// in `target_path`. If the blocking task cannot be joined, returns
+    /// [`Error::SaveFileTaskJoin`]. If removing a temporary file also fails,
+    /// returns [`Error::SaveFileCleanup`] with the target path, original error,
+    /// temporary path and cleanup error. An I/O failure does not change the
+    /// in-memory store.
+    ///
+    /// # Panics
+    ///
+    /// Panics if serialization succeeds and this future is polled without an active Tokio
+    /// runtime when it starts the blocking file operation. A serialization error is
+    /// returned before a runtime is needed.
     pub async fn save_file(&self, path: impl AsRef<Path> + Send + Sync) -> Result<()> {
-        let serialized = self.save_str()?;
-        write_atomic(path.as_ref(), serialized).await
+        let path = path.as_ref();
+        let serialized = self
+            .save_str()
+            .map_err(|error| error.with_save_target(path))?;
+        write_atomic(path, serialized, write_atomic_blocking).await
     }
 
     /// Returns an owned snapshot of the raw TOML value at `section` and `key`.
@@ -247,7 +320,7 @@ impl ConfigStore {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::TypeMismatch`] with an empty `path` and the section name
+    /// Returns [`Error::TypeMismatch`] with an empty `table_path` and the section name
     /// as `key` when the entry is not a table.
     pub fn set_section(&self, section: &str, table: Table) -> Result<()> {
         let mut guard = self.write();
@@ -521,16 +594,17 @@ impl ConfigStore {
 
     /// Stores a string at `section.key`, creating the section if needed.
     ///
-    /// Replaces the key's previous value. Section validation and errors are the
-    /// same as [`set_value`](Self::set_value); other keys are unchanged.
+    /// Converts `value` with [`Into<String>`] before validating the section or acquiring
+    /// the write lock. Replaces the key's previous value; other keys are unchanged.
+    /// Section validation and errors are the same as [`set_value`](Self::set_value).
     ///
     /// # Errors
     ///
     /// Returns [`Error::TypeMismatch`] if the top-level entry named `section` is not a
-    /// table, leaving the document unchanged. The error has an empty `path` and uses
+    /// table, leaving the document unchanged. The error has an empty `table_path` and uses
     /// `section` as its `key`.
-    pub fn set_string(&self, section: &str, key: &str, value: String) -> Result<()> {
-        self.set_value(section, key, Value::String(value))
+    pub fn set_string(&self, section: &str, key: &str, value: impl Into<String>) -> Result<()> {
+        self.set_value(section, key, Value::String(value.into()))
     }
 
     /// Stores an integer at `section.key`, creating the section if needed.
@@ -587,71 +661,110 @@ impl ConfigStore {
 
     /// Stores a string array at `section.key`, creating the section if needed.
     ///
-    /// Replaces the complete array; an empty vector is written as `[]`, not removed.
-    /// Section validation and errors follow [`set_value`](Self::set_value).
+    /// Accepts any iterator whose items convert into [`String`], including arrays of
+    /// `&str`, vectors of `String`, and a borrowed `Vec<String>`. For a borrowed slice
+    /// of `&str`, pass `values.iter().copied()`. A typed empty vector is stored as `[]`,
+    /// not removed.
+    ///
+    /// The iterator is consumed and each item converted before validating the section
+    /// or acquiring the write lock. Section validation and errors follow
+    /// [`set_value`](Self::set_value).
     ///
     /// # Errors
     ///
     /// Returns [`Error::TypeMismatch`] if the top-level entry named `section` is not a
     /// table, leaving the document unchanged.
-    pub fn set_string_vec(&self, section: &str, key: &str, value: Vec<String>) -> Result<()> {
-        let array = value.into_iter().map(Value::String).collect();
+    pub fn set_string_vec(
+        &self,
+        section: &str,
+        key: &str,
+        values: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Result<()> {
+        let array = values
+            .into_iter()
+            .map(|value| Value::String(value.into()))
+            .collect();
         self.set_value(section, key, Value::Array(array))
     }
 
     /// Stores an integer array at `section.key`, creating the section if needed.
     ///
-    /// Replaces the complete array with TOML signed 64-bit integers. An empty vector
-    /// is written as `[]`. Section validation and errors follow [`set_value`](Self::set_value).
+    /// Accepts any iterator of TOML signed 64-bit integers, including borrowed slices
+    /// passed with `.iter().copied()`. An empty iterator is written as `[]`.
+    /// Section validation and errors follow [`set_value`](Self::set_value).
     ///
     /// # Errors
     ///
     /// Returns [`Error::TypeMismatch`] if the top-level entry named `section` is not a
     /// table, leaving the document unchanged.
-    pub fn set_integer_vec(&self, section: &str, key: &str, value: Vec<i64>) -> Result<()> {
-        let array = value.into_iter().map(Value::Integer).collect();
+    pub fn set_integer_vec(
+        &self,
+        section: &str,
+        key: &str,
+        values: impl IntoIterator<Item = i64>,
+    ) -> Result<()> {
+        let array = values.into_iter().map(Value::Integer).collect();
         self.set_value(section, key, Value::Array(array))
     }
 
     /// Stores a floating-point array at `section.key`, creating the section if needed.
     ///
-    /// Replaces the complete array with TOML floats; an empty vector is written as `[]`.
+    /// Accepts any iterator of TOML floating-point numbers, including borrowed slices
+    /// passed with `.iter().copied()`. An empty iterator is written as `[]`.
     /// Section validation and errors follow [`set_value`](Self::set_value).
     ///
     /// # Errors
     ///
     /// Returns [`Error::TypeMismatch`] if the top-level entry named `section` is not a
     /// table, leaving the document unchanged.
-    pub fn set_float_vec(&self, section: &str, key: &str, value: Vec<f64>) -> Result<()> {
-        let array = value.into_iter().map(Value::Float).collect();
+    pub fn set_float_vec(
+        &self,
+        section: &str,
+        key: &str,
+        values: impl IntoIterator<Item = f64>,
+    ) -> Result<()> {
+        let array = values.into_iter().map(Value::Float).collect();
         self.set_value(section, key, Value::Array(array))
     }
 
     /// Stores a boolean array at `section.key`, creating the section if needed.
     ///
-    /// Replaces the complete array; an empty vector is written as `[]`, not removed.
+    /// Accepts any iterator of booleans, including borrowed slices passed with
+    /// `.iter().copied()`. An empty iterator is written as `[]`, not removed.
     /// Section validation and errors follow [`set_value`](Self::set_value).
     ///
     /// # Errors
     ///
     /// Returns [`Error::TypeMismatch`] if the top-level entry named `section` is not a
     /// table, leaving the document unchanged.
-    pub fn set_boolean_vec(&self, section: &str, key: &str, value: Vec<bool>) -> Result<()> {
-        let array = value.into_iter().map(Value::Boolean).collect();
+    pub fn set_boolean_vec(
+        &self,
+        section: &str,
+        key: &str,
+        values: impl IntoIterator<Item = bool>,
+    ) -> Result<()> {
+        let array = values.into_iter().map(Value::Boolean).collect();
         self.set_value(section, key, Value::Array(array))
     }
 
     /// Stores a [`Datetime`] array at `section.key`, creating the section if needed.
     ///
-    /// Writes datetime values, not quoted strings. An empty vector is written as `[]`.
+    /// Accepts any iterator of [`Datetime`] values, including borrowed slices passed
+    /// with `.iter().copied()`. Writes datetime values, not quoted strings. An empty
+    /// iterator is written as `[]`.
     /// Section validation and errors follow [`set_value`](Self::set_value).
     ///
     /// # Errors
     ///
     /// Returns [`Error::TypeMismatch`] if the top-level entry named `section` is not a
     /// table, leaving the document unchanged.
-    pub fn set_datetime_vec(&self, section: &str, key: &str, value: Vec<Datetime>) -> Result<()> {
-        let array = value.into_iter().map(Value::Datetime).collect();
+    pub fn set_datetime_vec(
+        &self,
+        section: &str,
+        key: &str,
+        values: impl IntoIterator<Item = Datetime>,
+    ) -> Result<()> {
+        let array = values.into_iter().map(Value::Datetime).collect();
         self.set_value(section, key, Value::Array(array))
     }
 
@@ -661,14 +774,14 @@ impl ConfigStore {
         let guard = self.read();
         let section_value = guard
             .get(section)
-            .ok_or_else(|| Error::missing_key(&path, key))?;
+            .ok_or_else(|| Error::missing_key_error(&path, key))?;
         let table = section_value
             .as_table()
             .ok_or_else(|| section_mismatch(section, section_value))?;
         table
             .get(key)
             .cloned()
-            .ok_or_else(|| Error::missing_key(&path, key))
+            .ok_or_else(|| Error::missing_key_error(&path, key))
     }
 
     fn from_table(table: Table) -> Self {
@@ -709,14 +822,14 @@ fn section_table<'a>(root: &'a Table, section: &str) -> Option<&'a Table> {
 
 /// The error for a top-level entry `section` that is not a table.
 fn section_mismatch(section: &str, found: &Value) -> Error {
-    Error::type_mismatch("", section, "table", value_conversion::describe(found))
+    Error::type_mismatch_error("", section, "table", value_conversion::describe(found))
 }
 
 /// Reads the file at `path`, attaching the path to I/O errors.
 async fn read_file(path: &Path) -> Result<String> {
-    fs::read_to_string(path)
-        .await
-        .map_err(|err| Error::io_error(Some(path.to_path_buf()), err))
+    fs::read_to_string(path).await.map_err(|err| {
+        Error::io_error_with_operation(Some(path.to_path_buf()), IoOperation::Read, err)
+    })
 }
 
 /// Persists `contents` to `path` through a temporary sibling and a rename
@@ -725,11 +838,19 @@ async fn read_file(path: &Path) -> Result<String> {
 /// Every call writes its own temporary sibling, so concurrent saves to the same path never
 /// share a temporary file; on error cleanup is attempted. The blocking file
 /// operations run on Tokio's blocking pool, like those of [`tokio::fs`].
-async fn write_atomic(path: &Path, contents: String) -> Result<()> {
-    let path = path.to_path_buf();
-    tokio::task::spawn_blocking(move || write_atomic_blocking(&path, contents.as_bytes()))
+async fn write_atomic(
+    path: &Path,
+    contents: String,
+    run_save: impl FnOnce(&Path, &[u8]) -> Result<()> + Send + 'static,
+) -> Result<()> {
+    let target_path = path.to_path_buf();
+    let task_path = target_path.clone();
+    tokio::task::spawn_blocking(move || run_save(&task_path, contents.as_bytes()))
         .await
-        .map_err(|err| Error::from(std::io::Error::other(err)))?
+        .map_err(|source| Error::SaveFileTaskJoin {
+            target_path,
+            source,
+        })?
 }
 
 fn write_atomic_blocking(path: &Path, contents: &[u8]) -> Result<()> {
@@ -751,20 +872,36 @@ fn write_atomic_blocking_with(
     write: impl FnOnce(&mut std::fs::File, &[u8]) -> std::io::Result<()>,
     mut rename: impl FnMut(&Path, &Path) -> std::io::Result<()>,
 ) -> Result<()> {
-    let metadata = validate_target_metadata(path, metadata)?;
-    let (tmp_path, mut file) = create_temporary(metadata.as_ref(), || temporary_path(path))?;
+    let metadata =
+        validate_target_metadata(path, metadata).map_err(|error| error.with_save_target(path))?;
+    let (tmp_path, mut file) = create_temporary(metadata.as_ref(), || temporary_path(path))
+        .map_err(|error| error.with_save_target(path))?;
     let result = (|| {
-        let temporary_error = |err| Error::io_error(Some(tmp_path.clone()), err);
-        prepare(&file, metadata.as_ref()).map_err(temporary_error)?;
-        write(&mut file, contents).map_err(temporary_error)?;
+        prepare(&file, metadata.as_ref()).map_err(|err| {
+            Error::io_error_with_operation(
+                Some(tmp_path.clone()),
+                IoOperation::PrepareTemporary,
+                err,
+            )
+        })?;
+        write(&mut file, contents).map_err(|err| {
+            Error::io_error_with_operation(Some(tmp_path.clone()), IoOperation::WriteTemporary, err)
+        })?;
         // Close the handle before the rename, which Windows requires.
         drop(file);
-        rename(&tmp_path, path).map_err(|err| Error::io_error(Some(path.to_path_buf()), err))
+        rename(&tmp_path, path).map_err(|err| {
+            Error::io_error_with_operation(
+                Some(path.to_path_buf()),
+                IoOperation::ReplaceTarget,
+                err,
+            )
+        })
     })();
     match result {
         Ok(()) => Ok(()),
         Err(save_error) => Err(Error::with_save_file_cleanup(
-            save_error,
+            path.to_path_buf(),
+            save_error.with_save_target(path),
             tmp_path.clone(),
             std::fs::remove_file(&tmp_path),
         )),
@@ -778,7 +915,13 @@ fn validate_target_metadata(
     let metadata = match metadata {
         Ok(metadata) => metadata,
         Err(err) if err.kind() == ErrorKind::NotFound => return Ok(None),
-        Err(err) => return Err(Error::io_error(Some(path.to_path_buf()), err)),
+        Err(err) => {
+            return Err(Error::io_error_with_operation(
+                Some(path.to_path_buf()),
+                IoOperation::InspectTarget,
+                err,
+            ));
+        }
     };
     #[cfg(windows)]
     {
@@ -821,8 +964,9 @@ fn validate_target_metadata(
 }
 
 fn unsupported_target(path: &Path, kind: &str) -> Error {
-    Error::io_error(
+    Error::io_error_with_operation(
         Some(path.to_path_buf()),
+        IoOperation::InspectTarget,
         std::io::Error::new(
             ErrorKind::InvalidInput,
             format!("unsupported save target: {kind}"),
@@ -864,7 +1008,13 @@ fn create_temporary(
             Err(err) if err.kind() == ErrorKind::AlreadyExists && attempt < ATTEMPTS => {
                 attempt += 1;
             }
-            Err(err) => return Err(Error::io_error(Some(tmp_path), err)),
+            Err(err) => {
+                return Err(Error::io_error_with_operation(
+                    Some(tmp_path),
+                    IoOperation::CreateTemporary,
+                    err,
+                ));
+            }
         }
     }
 }
@@ -907,10 +1057,46 @@ mod save_tests;
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+    use std::error::Error as _;
+    use std::future::Future;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use std::pin::Pin;
+    use std::sync::mpsc::sync_channel;
+    use std::task::{Context, Poll, Waker};
+    use std::time::Duration;
+
     use super::*;
     use crate::error::{Error, Result};
 
     use tempfile::NamedTempFile;
+
+    fn poll_without_runtime<F: Future>(future: Pin<&mut F>) -> Poll<F::Output> {
+        let mut context = Context::from_waker(Waker::noop());
+        future.poll(&mut context)
+    }
+
+    #[test]
+    fn store_and_file_futures_are_send() {
+        fn assert_store<T: Send + Sync + 'static>() {}
+        fn assert_send<T: Send>(_: &T) {}
+
+        assert_store::<ConfigStore>();
+        let store = ConfigStore::new();
+        // The futures are never polled, so no runtime or file is needed.
+        assert_send(&ConfigStore::from_file("app.toml"));
+        assert_send(&store.load_file("app.toml"));
+        assert_send(&store.save_file("app.toml"));
+    }
+
+    struct StoreReadingString(ConfigStore);
+
+    impl From<StoreReadingString> for String {
+        fn from(value: StoreReadingString) -> Self {
+            assert_eq!(value.0.get_integer("App", "answer").unwrap(), 42);
+            String::from("converted")
+        }
+    }
 
     #[test]
     fn new_store_is_empty() {
@@ -934,32 +1120,178 @@ mod tests {
     #[test]
     fn from_str_and_parse_agree() -> Result<()> {
         let source = "[App]\nport = 8080\n";
-        let inherent = ConfigStore::from_str(source)?;
+        let store = ConfigStore::from_str(source)?;
         let parsed: ConfigStore = source.parse()?;
-        assert_eq!(inherent.save_str()?, parsed.save_str()?);
+        assert_eq!(store.save_str()?, parsed.save_str()?);
 
         let invalid = "[App\nport = 8080";
         let inherent = ConfigStore::from_str(invalid).unwrap_err();
         let parsed = invalid.parse::<ConfigStore>().unwrap_err();
-        assert!(matches!(inherent, Error::Parse(_)));
+        assert!(matches!(&inherent, Error::Parse { path: None, .. }));
+        assert!(matches!(&parsed, Error::Parse { path: None, .. }));
         assert_eq!(inherent.to_string(), parsed.to_string());
+
+        let error = store.load_str(invalid).unwrap_err();
+        assert!(matches!(&error, Error::Parse { path: None, .. }));
+        assert_eq!(error.to_string(), "failed to parse TOML");
+        assert!(
+            error
+                .source()
+                .unwrap()
+                .downcast_ref::<toml::de::Error>()
+                .is_some()
+        );
+        assert_eq!(store.get_integer("App", "port")?, 8080);
         Ok(())
     }
 
     #[tokio::test]
-    async fn from_file_reports_missing_path() {
+    async fn file_reads_report_missing_path() {
         let dir = tempfile::tempdir().expect("temp dir");
         let path = dir.path().join("missing.toml");
+        let store = ConfigStore::from_str("[App]\nport = 8080").unwrap();
+        for error in [
+            ConfigStore::from_file(&path).await.unwrap_err(),
+            store.load_file(&path).await.unwrap_err(),
+        ] {
+            assert!(matches!(
+                &error,
+                Error::Io {
+                    path: Some(reported),
+                    operation: Some(IoOperation::Read),
+                    target_path: None,
+                    ..
+                } if reported == &path
+            ));
+            assert_eq!(error.to_string(), format!("failed to read file {path:?}"));
+            let source = error
+                .source()
+                .unwrap()
+                .downcast_ref::<std::io::Error>()
+                .unwrap();
+            assert_eq!(source.kind(), ErrorKind::NotFound);
+        }
+        assert_eq!(store.get_integer("App", "port").unwrap(), 8080);
+    }
+
+    #[tokio::test]
+    async fn blocking_save_panic_preserves_join_error_and_target() {
+        let path = Path::new("config.toml");
+        let error = write_atomic(path, String::new(), |_, _| {
+            panic!("injected blocking save panic")
+        })
+        .await
+        .unwrap_err();
+        assert_eq!(error.to_string(), format!("failed to save {path:?}"));
+
+        match &error {
+            Error::SaveFileTaskJoin {
+                target_path,
+                source,
+                ..
+            } => {
+                assert_eq!(target_path, path);
+                assert!(source.is_panic());
+                let reported_source = error
+                    .source()
+                    .unwrap()
+                    .downcast_ref::<tokio::task::JoinError>()
+                    .unwrap();
+                assert!(std::ptr::eq(source, reported_source));
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
+    fn file_reads_panic_without_a_tokio_runtime() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[App]\nport = 80")?;
+
+        let mut from_file = Box::pin(ConfigStore::from_file(&path));
+        assert!(
+            catch_unwind(AssertUnwindSafe(|| poll_without_runtime(
+                from_file.as_mut()
+            )))
+            .is_err()
+        );
+
+        let store = ConfigStore::new();
+        let mut load_file = Box::pin(store.load_file(&path));
+        assert!(
+            catch_unwind(AssertUnwindSafe(|| poll_without_runtime(
+                load_file.as_mut()
+            )))
+            .is_err()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn file_parse_errors_keep_the_file_path_and_load_is_atomic() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("invalid.toml");
+        std::fs::write(&path, "[broken")?;
+
         let error = ConfigStore::from_file(&path).await.unwrap_err();
         assert!(matches!(
-            error,
-            Error::Io { path: Some(ref reported), .. } if *reported == path
+            &error,
+            Error::Parse {
+                path: Some(error_path),
+                ..
+            } if error_path == &path
         ));
+        assert_eq!(
+            error.to_string(),
+            format!("failed to parse TOML file {path:?}")
+        );
+        assert!(error.source().is_some());
+
+        let store = ConfigStore::from_str("[App]\nport = 8080")?;
+        let error = store.load_file(&path).await.unwrap_err();
+        assert!(matches!(
+            error,
+            Error::Parse {
+                path: Some(error_path),
+                ..
+            } if error_path == path
+        ));
+        assert_eq!(store.get_integer("App", "port")?, 8080);
+        Ok(())
+    }
+
+    #[test]
+    fn nesting_beyond_tomls_default_limit_returns_parse_errors() -> Result<()> {
+        let depth = 128;
+        let dotted_path = vec!["a"; depth].join(".");
+        let inputs = [
+            format!("value = {}0{}", "[".repeat(depth), "]".repeat(depth)),
+            format!(
+                "value = {}0{}",
+                "{ value = ".repeat(depth),
+                " }".repeat(depth)
+            ),
+            format!("{dotted_path}.value = 0"),
+            format!("[{dotted_path}]\nvalue = 0"),
+        ];
+        let store = ConfigStore::from_str("[Existing]\nkeep = 1")?;
+        let before = store.save_str()?;
+
+        for source in inputs {
+            let error = ConfigStore::from_str(&source).unwrap_err();
+            assert!(matches!(error, Error::Parse { .. }));
+
+            let error = store.load_str(&source).unwrap_err();
+            assert!(matches!(error, Error::Parse { .. }));
+            assert_eq!(store.save_str()?, before);
+        }
+        Ok(())
     }
 
     #[test]
     fn poisoned_lock_keeps_working() -> Result<()> {
-        let store = ConfigStore::from_str("[App]\nport = 1")?;
+        let store = ConfigStore::from_str("[App]\nport = 718293")?;
         let shared = store.clone();
         let _ = std::thread::spawn(move || {
             let _guard = shared.write();
@@ -968,8 +1300,49 @@ mod tests {
         .join();
         assert!(store.table.is_poisoned());
 
+        let debug = format!("{store:?}");
+        assert!(debug.contains("App"));
+        assert!(!debug.contains("718293"));
         store.set_integer("App", "port", 2)?;
         assert_eq!(store.get_integer("App", "port")?, 2);
+        Ok(())
+    }
+
+    #[test]
+    fn debug_lists_top_level_keys_without_values() -> Result<()> {
+        let store = ConfigStore::from_str(
+            "App = { password = \"sensitive_value_marker\" }\nMode = \"secret_mode_marker\"\nCounter = 92837465",
+        )?;
+
+        for debug in [format!("{store:?}"), format!("{store:#?}")] {
+            assert!(debug.contains("App"));
+            assert!(debug.contains("Mode"));
+            assert!(debug.contains("Counter"));
+            assert!(!debug.contains("sensitive_value_marker"));
+            assert!(!debug.contains("secret_mode_marker"));
+            assert!(!debug.contains("92837465"));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn debug_does_not_wait_for_a_locked_store() -> Result<()> {
+        let store = ConfigStore::from_str("[App]\nport = 80")?;
+        let guard = store.write();
+        let debug_store = store.clone();
+        let (sender, receiver) = sync_channel(1);
+
+        let debug_thread = std::thread::spawn(move || {
+            let _ = sender.send(format!("{debug_store:?}"));
+        });
+
+        let result = receiver.recv_timeout(Duration::from_secs(5));
+        drop(guard);
+        let debug = result.expect("Debug should not wait for the store lock");
+        debug_thread
+            .join()
+            .expect("formatting the store should not panic");
+        assert!(debug.contains("locked"));
         Ok(())
     }
 
@@ -1006,8 +1379,8 @@ mod tests {
         ] {
             assert!(matches!(
                 &error,
-                Error::TypeMismatch { path, key, expected: "table", found: "integer" }
-                    if path.is_empty() && key == "App"
+                Error::TypeMismatch { table_path, key, expected: "table", found: "integer" }
+                    if table_path.is_empty() && key == "App"
             ));
             assert_eq!(error.to_string(), "expected table at App but found integer");
         }
@@ -1022,25 +1395,25 @@ mod tests {
             .unwrap_err();
         assert!(matches!(
             error,
-            Error::MissingKey { ref path, ref key }
-                if path == "\"App.server\"" && key == "port"
+            Error::MissingKey { ref table_path, ref key }
+                if table_path == "\"App.server\"" && key == "port"
         ));
         assert_eq!(error.to_string(), "missing key \"App.server\".port");
 
-        let error = Error::missing_key("App", "a.b");
+        let error = Error::missing_key_error("App", "a.b");
         assert_eq!(error.to_string(), "missing key App.\"a.b\"");
 
         let error = ConfigStore::new().get_integer("", "key").unwrap_err();
         assert_eq!(error.to_string(), "missing key \"\".key");
 
-        let error = Error::missing_key("App", "a\"b\n");
+        let error = Error::missing_key_error("App", "a\"b\n");
         assert_eq!(error.to_string(), "missing key App.\"a\\\"b\\n\"");
     }
 
     #[test]
     fn set_and_get_string_roundtrip() -> Result<()> {
         let store = ConfigStore::new();
-        store.set_string("App", "name", "demo".into())?;
+        store.set_string("App", "name", "demo")?;
         assert_eq!(store.get_string("App", "name")?, "demo");
         assert_eq!(
             store.get_value("App", "name"),
@@ -1050,9 +1423,137 @@ mod tests {
     }
 
     #[test]
+    fn typed_setters_accept_into_and_iterable_inputs() -> Result<()> {
+        let store = ConfigStore::new();
+
+        store.set_string("App", "borrowed", "text")?;
+        store.set_string("App", "owned", String::from("text"))?;
+
+        store.set_string_vec("App", "array", ["array", "values"])?;
+        store.set_string_vec(
+            "App",
+            "owned_vec",
+            vec![String::from("owned"), String::from("values")],
+        )?;
+        let borrowed_vec = vec![String::from("borrowed"), String::from("values")];
+        store.set_string_vec("App", "borrowed_vec", &borrowed_vec)?;
+        let borrowed_slice = ["slice", "values"];
+        store.set_string_vec("App", "borrowed_slice", borrowed_slice.iter().copied())?;
+        store.set_string_vec(
+            "App",
+            "mapped",
+            (0..2).map(|index| format!("mapped-{index}")),
+        )?;
+
+        let integers = [1, 2];
+        store.set_integer_vec("App", "integers", integers.iter().copied())?;
+        let floats = [1.5, 2.5];
+        store.set_float_vec("App", "floats", floats.iter().copied())?;
+        let booleans = [true, false];
+        store.set_boolean_vec("App", "booleans", booleans.iter().copied())?;
+        let date: Datetime = "2024-01-01".parse().expect("valid TOML date");
+        let dates = [date, date];
+        store.set_datetime_vec("App", "dates", dates.iter().copied())?;
+
+        store.set_integer_vec("App", "empty_integers", vec![])?;
+        store.set_string_vec("App", "empty_strings", Vec::<String>::new())?;
+
+        assert_eq!(store.get_string("App", "borrowed")?, "text");
+        assert_eq!(store.get_string("App", "owned")?, "text");
+        assert_eq!(
+            store.get_string_vec("App", "array")?,
+            vec![String::from("array"), String::from("values")]
+        );
+        assert_eq!(
+            store.get_string_vec("App", "owned_vec")?,
+            vec![String::from("owned"), String::from("values")]
+        );
+        assert_eq!(
+            store.get_string_vec("App", "borrowed_vec")?,
+            vec![String::from("borrowed"), String::from("values")]
+        );
+        assert_eq!(
+            store.get_string_vec("App", "borrowed_slice")?,
+            vec![String::from("slice"), String::from("values")]
+        );
+        assert_eq!(
+            store.get_string_vec("App", "mapped")?,
+            vec![String::from("mapped-0"), String::from("mapped-1")]
+        );
+        assert_eq!(store.get_integer_vec("App", "integers")?, integers);
+        assert_eq!(store.get_float_vec("App", "floats")?, floats);
+        assert_eq!(store.get_boolean_vec("App", "booleans")?, booleans);
+        assert_eq!(store.get_datetime_vec("App", "dates")?, dates);
+        assert!(store.get_integer_vec("App", "empty_integers")?.is_empty());
+        assert!(store.get_string_vec("App", "empty_strings")?.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn setter_inputs_can_read_the_same_store_without_deadlocking() -> Result<()> {
+        let store = ConfigStore::from_str("[App]\nanswer = 42")?;
+        let (sender, receiver) = sync_channel(1);
+        let conversion_store = store.clone();
+        std::thread::spawn(move || {
+            let result = conversion_store.set_string(
+                "App",
+                "converted",
+                StoreReadingString(conversion_store.clone()),
+            );
+            let _ = sender.send(result);
+        });
+        receiver
+            .recv_timeout(Duration::from_secs(5))
+            .expect("custom string conversion should finish outside the write lock")?;
+        assert_eq!(store.get_string("App", "converted")?, "converted");
+
+        let (sender, receiver) = sync_channel(1);
+        let iterator_store = store.clone();
+        std::thread::spawn(move || {
+            let values = (0..2).map(|index| {
+                assert_eq!(iterator_store.get_integer("App", "answer").unwrap(), 42);
+                format!("item-{index}")
+            });
+            let result = iterator_store.set_string_vec("App", "items", values);
+            let _ = sender.send(result);
+        });
+        receiver
+            .recv_timeout(Duration::from_secs(5))
+            .expect("iterator should finish outside the write lock")?;
+        assert_eq!(
+            store.get_string_vec("App", "items")?,
+            vec![String::from("item-0"), String::from("item-1")]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn typed_setters_consume_inputs_before_rejecting_invalid_sections() -> Result<()> {
+        let store = ConfigStore::from_str("App = 7\n[Other]\nkeep = true")?;
+        let before = store.save_str()?;
+        let consumed = Cell::new(0);
+        let values = (0_i64..3).inspect(|_| consumed.set(consumed.get() + 1));
+
+        let error = store.set_integer_vec("App", "values", values).unwrap_err();
+        assert!(matches!(
+            error,
+            Error::TypeMismatch {
+                ref table_path,
+                ref key,
+                expected: "table",
+                found: "integer",
+                ..
+            } if table_path.is_empty() && key == "App"
+        ));
+        assert_eq!(consumed.get(), 3);
+        assert_eq!(store.save_str()?, before);
+        Ok(())
+    }
+
+    #[test]
     fn datetime_fallback_from_string() -> Result<()> {
         let store = ConfigStore::new();
-        store.set_string("Build", "time", "2024-01-01T00:00:00Z".into())?;
+        store.set_string("Build", "time", "2024-01-01T00:00:00Z")?;
         let dt = store.get_datetime("Build", "time")?;
         assert_eq!(dt.to_string(), "2024-01-01T00:00:00Z");
         Ok(())
@@ -1080,8 +1581,8 @@ mod tests {
         let error = store.get_integer_vec("App", "ports").unwrap_err();
         assert!(matches!(
             error,
-            Error::ValueParse { ref path, ref key, ref message }
-                if path == "App"
+            Error::ValueParse { ref table_path, ref key, ref message }
+                if table_path == "App"
                     && key == "ports"
                     && message == "expected array elements of type integer, found boolean (at index 1)"
         ));
@@ -1089,8 +1590,8 @@ mod tests {
         let error = store.get_datetime_vec("App", "times").unwrap_err();
         assert!(matches!(
             error,
-            Error::ValueParse { ref path, ref key, ref message }
-                if path == "App"
+            Error::ValueParse { ref table_path, ref key, ref message }
+                if table_path == "App"
                     && key == "times"
                     && message.ends_with("(at index 1)")
         ));
@@ -1107,7 +1608,7 @@ mod tests {
     #[test]
     fn load_str_replaces_content() -> Result<()> {
         let store = ConfigStore::new();
-        store.set_string("App", "name", "demo".into())?;
+        store.set_string("App", "name", "demo")?;
         store.load_str("[Srv]\nport = 8080\n")?;
 
         assert!(store.get_value("App", "name").is_none());
@@ -1144,7 +1645,7 @@ mod tests {
     #[tokio::test]
     async fn save_and_load_file_roundtrip() -> Result<()> {
         let store = ConfigStore::new();
-        store.set_string("App", "name", "demo".into())?;
+        store.set_string("App", "name", "demo")?;
         store.set_integer("App", "port", 3000)?;
 
         let temp = NamedTempFile::new().expect("temp file");
@@ -1154,6 +1655,115 @@ mod tests {
         let restored = ConfigStore::from_file(&path_buf).await?;
         assert_eq!(restored.get_string("App", "name")?, "demo");
         assert_eq!(restored.get_integer("App", "port")?, 3000);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn save_serialization_error_carries_the_target_path() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("config.toml");
+        let store = ConfigStore::new();
+        store.set_datetime(
+            "App",
+            "invalid",
+            Datetime {
+                date: None,
+                time: None,
+                offset: None,
+            },
+        )?;
+
+        let error = store.save_str().unwrap_err();
+        assert!(matches!(
+            &error,
+            Error::Serialize {
+                target_path: None,
+                ..
+            }
+        ));
+        assert_eq!(error.to_string(), "failed to serialize TOML");
+        assert!(
+            error
+                .source()
+                .unwrap()
+                .downcast_ref::<toml::ser::Error>()
+                .is_some()
+        );
+
+        let error = store.save_file(&path).await.unwrap_err();
+        assert!(matches!(
+            &error,
+            Error::Serialize {
+                target_path: Some(target_path),
+                ..
+            } if target_path == &path
+        ));
+        assert_eq!(
+            error.to_string(),
+            format!("failed to serialize TOML for {path:?}")
+        );
+        assert!(
+            error
+                .source()
+                .unwrap()
+                .downcast_ref::<toml::ser::Error>()
+                .is_some()
+        );
+        assert!(!path.exists());
+        Ok(())
+    }
+
+    #[test]
+    fn save_file_requires_a_runtime_only_after_serialization() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "original")?;
+
+        let invalid = ConfigStore::new();
+        invalid.set_datetime(
+            "App",
+            "invalid",
+            Datetime {
+                date: None,
+                time: None,
+                offset: None,
+            },
+        )?;
+        let mut serialization = Box::pin(invalid.save_file(&path));
+        assert!(matches!(
+            poll_without_runtime(serialization.as_mut()),
+            Poll::Ready(Err(Error::Serialize {
+                target_path: Some(target_path),
+                ..
+            })) if target_path == path
+        ));
+        assert_eq!(std::fs::read_to_string(&path)?, "original");
+
+        let valid = ConfigStore::from_str("[App]\nport = 80")?;
+        let mut file_operation = Box::pin(valid.save_file(&path));
+        assert!(
+            catch_unwind(AssertUnwindSafe(|| poll_without_runtime(
+                file_operation.as_mut()
+            )))
+            .is_err()
+        );
+        assert_eq!(std::fs::read_to_string(&path)?, "original");
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn file_methods_work_on_a_current_thread_runtime() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[App]\nport = 80")?;
+
+        let store = ConfigStore::from_file(&path).await?;
+        store.set_integer("App", "port", 8080)?;
+        store.save_file(&path).await?;
+
+        let reloaded = ConfigStore::new();
+        reloaded.load_file(&path).await?;
+        assert_eq!(reloaded.get_integer("App", "port")?, 8080);
         Ok(())
     }
 
@@ -1202,12 +1812,25 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(attempts, 1);
+        assert!(matches!(
+            &error,
+            Error::Io {
+                path: Some(error_path),
+                operation: Some(IoOperation::ReplaceTarget),
+                target_path: Some(target_path),
+                ..
+            } if error_path == &path && target_path == &path
+        ));
         match error {
             Error::Io {
                 path: error_path,
                 source,
+                operation: Some(IoOperation::ReplaceTarget),
+                target_path: Some(target_path),
+                ..
             } => {
                 assert_eq!(error_path.as_deref(), Some(path.as_path()));
+                assert_eq!(target_path, path);
                 assert_eq!(source.kind(), ErrorKind::AlreadyExists);
                 assert_eq!(source.to_string(), "rename failed");
             }
@@ -1237,6 +1860,7 @@ mod tests {
             Error::Io {
                 path: error_path,
                 source,
+                ..
             } => {
                 assert_eq!(error_path.as_deref(), Some(path.as_path()));
                 assert!(source.raw_os_error().is_some());
