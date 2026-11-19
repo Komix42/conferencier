@@ -5,7 +5,7 @@ Common compile-time and load-time error messages and how to fix them.
 `Error`'s `Display` describes the failed operation without repeating its source.
 To include the cause chain when reporting an error, format each source explicitly:
 
-```rust,ignore
+```rust
 fn display_error_chain(error: &dyn std::error::Error) -> String {
     let mut message = error.to_string();
     let mut source = error.source();
@@ -16,6 +16,35 @@ fn display_error_chain(error: &dyn std::error::Error) -> String {
     }
     message
 }
+# #[derive(Debug)]
+# struct ExampleError {
+#     text: &'static str,
+#     source: Option<Box<ExampleError>>,
+# }
+# impl std::fmt::Display for ExampleError {
+#     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+#         f.write_str(self.text)
+#     }
+# }
+# impl std::error::Error for ExampleError {
+#     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+#         match &self.source {
+#             Some(source) => Some(source.as_ref()),
+#             None => None,
+#         }
+#     }
+# }
+# let error = ExampleError {
+#     text: "outer",
+#     source: Some(Box::new(ExampleError {
+#         text: "middle line 1\nmiddle line 2",
+#         source: Some(Box::new(ExampleError { text: "inner", source: None })),
+#     })),
+# };
+# assert_eq!(
+#     display_error_chain(&error),
+#     "outer\nCaused by: middle line 1\nmiddle line 2\nCaused by: inner",
+# );
 ```
 
 Error sources are not generally redacted: for example, a TOML parser diagnostic

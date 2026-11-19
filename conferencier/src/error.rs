@@ -14,7 +14,9 @@ pub type Result<T> = std::result::Result<T, Error>;
 ///
 /// These variants identify phases rather than individual system calls. A phase
 /// such as preparing the temporary file may perform no system call on a platform
-/// that does not need it.
+/// that does not need it. Existing operations retain their meanings throughout
+/// 0.1.x. This enum is non-exhaustive; matches outside this crate must allow for
+/// future operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum IoOperation {
@@ -53,18 +55,23 @@ impl IoOperation {
 /// the key, such as `App.upstream[1]`. For errors about a top-level entry that is
 /// not a table, `table_path` is empty and `key` is the entry name.
 ///
+/// `Error` is `Send + Sync + 'static` throughout the 0.1.x series.
+///
 /// # Inspecting errors
 ///
 /// This enum is non-exhaustive: match the variants relevant to your application
-/// and keep a fallback arm for future variants. Key-error variants are also
-/// individually non-exhaustive: patterns outside this crate must include `..`,
-/// and the constructors such as [`Error::missing_key_error`] create them.
+/// and keep a fallback arm for future variants. Every variant is also
+/// individually non-exhaustive: patterns outside this crate must include `..`.
+/// Use public constructors such as [`Error::missing_key_error`] to create errors.
 /// [`std::error::Error::source`] exposes wrapped errors without duplicating them
 /// in this error's `Display`; field errors and [`UnknownKey`](Self::UnknownKey)
 /// carry their diagnostic context directly.
 /// For [`SaveFileCleanup`](Self::SaveFileCleanup), the source is the original
-/// save error; the target path, cleanup error and temporary path are also
-/// available as fields.
+/// save error; `Display` includes the secondary cleanup error. Both paths and the
+/// cleanup error are also available as fields.
+///
+/// `Display` provides diagnostic context, but its wording and formatting are not
+/// stable. Inspect variants, fields and sources instead of parsing messages.
 ///
 /// ```
 /// use conferencier::{ConfigStore, Error};
@@ -88,28 +95,45 @@ impl IoOperation {
 /// fn report_save_failure(error: &Error) {
 ///     if let Error::SaveFileCleanup { save_error, .. } = error {
 ///         if let Error::Io { source, .. } = save_error.as_ref() {
-///             eprintln!("save failed with {:?}; source: {}", source.kind(), error);
+///             eprintln!(
+///                 "save failed: kind {:?}, OS code {:?}; {error}",
+///                 source.kind(),
+///                 source.raw_os_error(),
+///             );
 ///         }
 ///     }
 /// }
 /// ```
 ///
 /// File methods attach operation and path context to [`Error::Io`]. Converting a
-/// plain [`std::io::Error`] with `?` or `Error::from` leaves the paths unset; use
-/// [`Error::io_error`] or [`Error::io_error_with_operation`] to supply context,
-/// as shown in the
+/// plain [`std::io::Error`] with `?` or `Error::from` leaves `path`, `operation`
+/// and `target_path` unset. Callers may update these public context fields after
+/// conversion, or use [`Error::io_error`] or [`Error::io_error_with_operation`]
+/// to supply context, as shown in the
 /// [guide](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/concepts/index.html#reading-a-file-before-the-runtime-starts).
+///
+/// # Sensitive diagnostics
+///
+/// File paths in `Display` are escaped but may be rendered lossily. Other
+/// diagnostic text and error sources are not sanitized or generally redacted.
+/// `Display`, `Debug` and source chains may reveal configuration values, key
+/// names or file paths. A TOML parser source can include the offending input line.
+/// Derived save-time `u64` and `usize` range errors omit the numeric value and
+/// identify the index for a vector, but this does not redact other diagnostics.
+/// Decide whether it is safe to show or log errors and their sources.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Error {
     /// Reading or writing a file failed.
     #[non_exhaustive]
     Io {
-        /// The file directly involved in the failed operation, if known.
+        /// The filesystem path directly involved in the failed operation, if known.
+        /// Callers may change this diagnostic context.
         path: Option<PathBuf>,
-        /// The phase of the file operation, if known.
+        /// The phase of the file operation, if known. Callers may change it.
         operation: Option<IoOperation>,
-        /// The original save destination, if this error came from `save_file`.
+        /// The destination passed to `save_file`, if this error came from it.
+        /// Callers may change this diagnostic context.
         target_path: Option<PathBuf>,
         /// The underlying I/O error.
         source: std::io::Error,
@@ -118,10 +142,11 @@ pub enum Error {
     ///
     /// The original save failure remains the error source. The cleanup failure
     /// is shown in this error's `Display`, not in the source chain; the temporary
-    /// path and cleanup error are also available separately.
+    /// path and cleanup error are also available separately. This variant is
+    /// created by `save_file`; callers can inspect but cannot construct it.
     #[non_exhaustive]
     SaveFileCleanup {
-        /// The destination path of the save.
+        /// The destination path passed to `save_file`.
         target_path: PathBuf,
         /// The original save failure, including its path and underlying cause.
         save_error: Box<Error>,
@@ -135,7 +160,8 @@ pub enum Error {
     /// The source contains the parser's location and diagnostic details.
     #[non_exhaustive]
     Parse {
-        /// The file that was parsed, if known.
+        /// The filesystem path of the parsed file, if known. Callers may change
+        /// it after parsing a string read from a file.
         path: Option<PathBuf>,
         /// The parser's diagnostic, with its location in the document.
         source: toml::de::Error,
@@ -145,15 +171,19 @@ pub enum Error {
     /// Serialization happens before file writes; this error leaves the file untouched.
     #[non_exhaustive]
     Serialize {
-        /// The destination of the save, if any.
+        /// The save destination, if known; `save_file` supplies its input path.
         target_path: Option<PathBuf>,
         /// The serializer's error.
         source: toml::ser::Error,
     },
     /// The Tokio blocking task for a save could not be joined.
+    ///
+    /// This variant is created by `save_file`; callers can inspect but cannot
+    /// construct it. The target may have changed and a temporary file may remain.
+    /// Inspect the filesystem if recovery depends on their state.
     #[non_exhaustive]
     SaveFileTaskJoin {
-        /// The destination path of the save.
+        /// The destination path passed to `save_file`.
         target_path: PathBuf,
         /// The failure to join the Tokio blocking task.
         source: tokio::task::JoinError,

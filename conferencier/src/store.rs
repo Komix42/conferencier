@@ -95,6 +95,15 @@ use crate::value_conversion;
 /// configuration values. If the lock is unavailable, it reports that the keys could not
 /// be read rather than waiting. Key names may themselves be sensitive, and the output
 /// format is not stable or intended for parsing.
+///
+/// # Nesting depth
+///
+/// Parsing uses `toml`'s default recursion limit. Cargo features are additive, so
+/// another dependency can enable `toml/unbounded` and remove that limit. Deeply
+/// nested input without the limit can overflow the stack during parsing. Values
+/// built in code are not limited and can overflow the stack when serialized,
+/// cloned or dropped. A stack overflow aborts the process. See the
+/// [guide](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/concepts/index.html#nesting-limits).
 #[derive(Clone, Default)]
 pub struct ConfigStore {
     table: Arc<RwLock<Table>>,
@@ -311,7 +320,7 @@ impl ConfigStore {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::TypeMismatch`] with an empty `path` and the section name
+    /// Returns [`Error::TypeMismatch`] with an empty `table_path` and the section name
     /// as `key` when the entry is not a table.
     pub fn set_section(&self, section: &str, table: Table) -> Result<()> {
         let mut guard = self.write();
@@ -592,7 +601,7 @@ impl ConfigStore {
     /// # Errors
     ///
     /// Returns [`Error::TypeMismatch`] if the top-level entry named `section` is not a
-    /// table, leaving the document unchanged. The error has an empty `path` and uses
+    /// table, leaving the document unchanged. The error has an empty `table_path` and uses
     /// `section` as its `key`.
     pub fn set_string(&self, section: &str, key: &str, value: impl Into<String>) -> Result<()> {
         self.set_value(section, key, Value::String(value.into()))

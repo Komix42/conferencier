@@ -19,8 +19,9 @@ implementations remain available:
 The library enables only Tokio's `sync`, `rt` and `fs` features; enable runtime
 features such as `macros` and `rt-multi-thread` in your own dependency. Invalid
 input handled by the library returns an error rather than panicking, except for
-caller-supplied code and the documented file-operation runtime and deep-nesting
-limits. See the [0.1.x migration guide](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/migration/index.html)
+caller-supplied code, file operations polled without a Tokio runtime, and stack
+overflows from deeply nested values built in code or parsed with `toml/unbounded`.
+See the [0.1.x migration guide](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/migration/index.html)
 and [runtime requirements](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/concepts/index.html#reading-a-file-before-the-runtime-starts)
 and [nesting limits](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/concepts/index.html#nesting-limits).
 

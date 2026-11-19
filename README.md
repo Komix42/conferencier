@@ -50,7 +50,8 @@ async fn main() -> conferencier::Result<()> {
 Add `conferencier` and Tokio to your project:
 
 ```sh
-cargo add conferencier tokio --features tokio/macros,tokio/rt-multi-thread
+cargo add conferencier@0.1.0-beta.1
+cargo add tokio --features macros,rt-multi-thread
 ```
 
 or to your `Cargo.toml`:
