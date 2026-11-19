@@ -12,8 +12,8 @@
 //! The results are diagnostic strings only. They are not store addresses, they are
 //! not TOML dotted keys once they contain an index, and the helpers neither access
 //! a store nor check that a key or array exists. Pass raw section and key names;
-//! the `parent` and `path` arguments are already formatted paths. A path received
-//! by [`ConfigTable::from_table`](crate::ConfigTable::from_table) or
+//! the `parent` and `path` arguments are already formatted paths. The `table_path`
+//! received by [`ConfigTable::from_table`](crate::ConfigTable::from_table) or
 //! [`ConfigTable::to_table`](crate::ConfigTable::to_table) is already formatted and
 //! can be extended directly; do not pass it through [`section_path`] again.
 //!

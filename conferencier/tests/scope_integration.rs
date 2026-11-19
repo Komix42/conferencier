@@ -158,8 +158,8 @@ fn derived_scope_diagnostics_format_the_literal_top_level_section() -> Result<()
     let error = DottedSection::from_store(&ConfigStore::new()).unwrap_err();
     assert!(matches!(
         error,
-        Error::MissingKey { ref path, ref key }
-            if path == "\"App.server\"" && key == "port"
+        Error::MissingKey { ref table_path, ref key, .. }
+            if table_path == "\"App.server\"" && key == "port"
     ));
     assert_eq!(error.to_string(), "missing key \"App.server\".port");
     let store = ConfigStore::from_str("[\"App.server\"]\nport = 80")?;
@@ -179,8 +179,8 @@ async fn scalar_array_range_errors_include_the_element_index() -> Result<()> {
     let error = Ports::from_store(&store).unwrap_err();
     assert!(matches!(
         error,
-        Error::ValueParse { ref path, ref key, ref message }
-            if path == "Ports"
+        Error::ValueParse { ref table_path, ref key, ref message, .. }
+            if table_path == "Ports"
                 && key == "ports"
                 && message == "value out of range for u8 (at index 1)"
     ));
@@ -207,8 +207,8 @@ async fn scalar_array_range_errors_include_the_element_index() -> Result<()> {
     );
     assert!(matches!(
         error,
-        Error::ValueParse { ref path, ref key, message }
-            if path == "App"
+        Error::ValueParse { ref table_path, ref key, message, .. }
+            if table_path == "App"
                 && key == "ports"
                 && message == expected_message
     ));
@@ -218,8 +218,8 @@ async fn scalar_array_range_errors_include_the_element_index() -> Result<()> {
     let error = Ratios::from_store(&store).unwrap_err();
     assert!(matches!(
         error,
-        Error::ValueParse { ref path, ref key, ref message }
-            if path == "Ratios"
+        Error::ValueParse { ref table_path, ref key, ref message, .. }
+            if table_path == "Ratios"
                 && key == "ratios"
                 && message == "value out of range for f32 (at index 1)"
     ));
@@ -239,16 +239,16 @@ async fn strict_scope_checks_known_keys_before_conversion_and_keeps_failed_load_
     let error = StrictScope::from_store(&ConfigStore::from_str("StrictScope = 7")?).unwrap_err();
     assert!(matches!(
         error,
-        Error::TypeMismatch { ref path, ref key, expected: "table", found: "integer" }
-            if path.is_empty() && key == "StrictScope"
+        Error::TypeMismatch { ref table_path, ref key, expected: "table", found: "integer", .. }
+            if table_path.is_empty() && key == "StrictScope"
     ));
 
     let store = ConfigStore::from_str("[StrictScope]\nzeta = 1\nalpha = 2")?;
     let error = StrictScope::from_store(&store).unwrap_err();
     assert!(matches!(
         error,
-        Error::UnknownKey { ref path, ref key }
-            if path == "StrictScope" && key == "alpha"
+        Error::UnknownKey { ref table_path, ref key, .. }
+            if table_path == "StrictScope" && key == "alpha"
     ));
     assert_eq!(error.to_string(), "unknown key StrictScope.alpha");
 
@@ -260,8 +260,8 @@ async fn strict_scope_checks_known_keys_before_conversion_and_keeps_failed_load_
     let error = StrictScope::load(&scope, &store).await.unwrap_err();
     assert!(matches!(
         error,
-        Error::UnknownKey { ref path, ref key }
-            if path == "StrictScope" && key == "extra"
+        Error::UnknownKey { ref table_path, ref key, .. }
+            if table_path == "StrictScope" && key == "extra"
     ));
     assert_eq!(scope.read().await.name, "unchanged");
     StrictScope::save(&scope, &store).await?;
@@ -281,8 +281,8 @@ async fn strict_scope_checks_known_keys_before_conversion_and_keeps_failed_load_
         .unwrap_err();
     assert!(matches!(
         error,
-        Error::UnknownKey { ref path, ref key }
-            if path == "StrictEmpty" && key == "extra"
+        Error::UnknownKey { ref table_path, ref key, .. }
+            if table_path == "StrictEmpty" && key == "extra"
     ));
     assert!(
         StrictEmpty::from_store(&ConfigStore::new())?
@@ -314,8 +314,8 @@ fn strict_scope_reports_smallest_unknown_key_with_preserved_order() -> Result<()
     let error = StrictScope::from_store(&store).unwrap_err();
     assert!(matches!(
         error,
-        Error::UnknownKey { ref path, ref key }
-            if path == "StrictScope" && key == "alpha"
+        Error::UnknownKey { ref table_path, ref key, .. }
+            if table_path == "StrictScope" && key == "alpha"
     ));
     assert_eq!(error.to_string(), "unknown key StrictScope.alpha");
     Ok(())
@@ -935,7 +935,7 @@ async fn required_datetime_without_default_reports_missing_key() -> Result<()> {
         .expect("a missing required key must fail");
 
     assert!(
-        matches!(&err, Error::MissingKey { path, key } if path == "Clock" && key == "started_at"),
+        matches!(&err, Error::MissingKey { table_path, key, .. } if table_path == "Clock" && key == "started_at"),
         "unexpected error: {err}"
     );
 

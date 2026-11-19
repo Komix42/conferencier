@@ -78,13 +78,17 @@ pub mod __private {
     }
 
     /// Rejects the first key not present in the struct's loaded field names.
-    pub fn deny_unknown_keys(path: &str, table: &toml::Table, known: &[&str]) -> crate::Result<()> {
+    pub fn deny_unknown_keys(
+        table_path: &str,
+        table: &toml::Table,
+        known: &[&str],
+    ) -> crate::Result<()> {
         match table
             .keys()
             .filter(|key| !known.contains(&key.as_str()))
             .min()
         {
-            Some(key) => Err(crate::Error::unknown_key(path, key.clone())),
+            Some(key) => Err(crate::Error::unknown_key_error(table_path, key.clone())),
             None => Ok(()),
         }
     }

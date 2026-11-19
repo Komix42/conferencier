@@ -149,16 +149,16 @@ fn required_scalar_and_table_keys_fail_at_the_correct_path() -> Result<()> {
         let store = ConfigStore::from_str(&format!("[Required]\n{fields}"))?;
         let error = error_of(RequiredKeys::from_store(&store));
         assert!(
-            matches!(&error, Error::MissingKey { path, key }
-                if path == "Required" && key == missing),
+            matches!(&error, Error::MissingKey { table_path, key, .. }
+                if table_path == "Required" && key == missing),
             "unexpected error: {error:?}"
         );
 
         let table: Table = fields.parse().unwrap();
         let error = error_of(RequiredKeys::from_table("Root.inner", table));
         assert!(
-            matches!(&error, Error::MissingKey { path, key }
-                if path == "Root.inner" && key == missing),
+            matches!(&error, Error::MissingKey { table_path, key, .. }
+                if table_path == "Root.inner" && key == missing),
             "unexpected error: {error:?}"
         );
     }
@@ -262,8 +262,8 @@ mod field_defaults {
         store.load_str("[FieldDefaults]\nbefore = 4\n\"child.with.dot\" = 5")?;
         let error = error_of(Scope::load(&scope, &store).await);
         assert!(
-            matches!(&error, Error::TypeMismatch { path, key, expected: "table", found: "integer" }
-                if path == "FieldDefaults" && key == "child.with.dot"),
+            matches!(&error, Error::TypeMismatch { table_path, key, expected: "table", found: "integer", .. }
+                if table_path == "FieldDefaults" && key == "child.with.dot"),
             "unexpected error: {error:?}"
         );
 
@@ -272,8 +272,8 @@ mod field_defaults {
         )?;
         let error = error_of(Scope::load(&scope, &store).await);
         assert!(
-            matches!(&error, Error::UnknownKey { path, key }
-                if path == "FieldDefaults.\"child.with.dot\"" && key == "typo"),
+            matches!(&error, Error::UnknownKey { table_path, key, .. }
+                if table_path == "FieldDefaults.\"child.with.dot\"" && key == "typo"),
             "unexpected error: {error:?}"
         );
         {
@@ -352,8 +352,8 @@ mod field_defaults {
 
         let error = error_of(AtomicScope::load(&scope, &store).await);
         assert!(
-            matches!(&error, Error::MissingKey { path, key }
-                if path == "Atomic.\"child.key\"" && key == "value"),
+            matches!(&error, Error::MissingKey { table_path, key, .. }
+                if table_path == "Atomic.\"child.key\"" && key == "value"),
             "unexpected error: {error:?}"
         );
         let guard = scope.read().await;
@@ -454,17 +454,18 @@ struct ManualChild {
 impl ConfigTable for ManualChild {
     fn from_table(path: &str, mut table: Table) -> Result<Self> {
         let value = match table.remove("value") {
-            Some(Value::Integer(value)) => u16::try_from(value)
-                .map_err(|_| Error::value_parse(path, "value", "value out of range for u16"))?,
+            Some(Value::Integer(value)) => u16::try_from(value).map_err(|_| {
+                Error::value_parse_error(path, "value", "value out of range for u16")
+            })?,
             Some(other) => {
-                return Err(Error::type_mismatch(
+                return Err(Error::type_mismatch_error(
                     path,
                     "value",
                     "integer",
                     other.type_str(),
                 ));
             }
-            None => return Err(Error::missing_key(path, "value")),
+            None => return Err(Error::missing_key_error(path, "value")),
         };
         Ok(Self { value })
     }
@@ -488,14 +489,14 @@ impl ConfigScope for ManualScope {
         let child = match section.remove("child") {
             Some(Value::Table(table)) => table,
             Some(other) => {
-                return Err(Error::type_mismatch(
+                return Err(Error::type_mismatch_error(
                     &path,
                     "child",
                     "table",
                     other.type_str(),
                 ));
             }
-            None => return Err(Error::missing_key(&path, "child")),
+            None => return Err(Error::missing_key_error(&path, "child")),
         };
         let child_path = conferencier::table_path::child_path(&path, "child");
         let child = ManualChild::from_table(&child_path, child)?;
@@ -687,8 +688,8 @@ async fn absent_tables_follow_their_shape() -> Result<()> {
 
     let error = error_of(Strict::from_store(&ConfigStore::from_str("[Strict]")?));
     assert!(
-        matches!(&error, Error::MissingKey { path, key }
-            if path == "Strict" && key == "tls"),
+        matches!(&error, Error::MissingKey { table_path, key, .. }
+            if table_path == "Strict" && key == "tls"),
         "unexpected error: {error:?}"
     );
     assert_eq!(error.to_string(), "missing key Strict.tls");
@@ -697,8 +698,8 @@ async fn absent_tables_follow_their_shape() -> Result<()> {
         "[Strict]",
     )?));
     assert!(
-        matches!(&error, Error::MissingKey { path, key }
-            if path == "Strict.tls" && key == "cert"),
+        matches!(&error, Error::MissingKey { table_path, key, .. }
+            if table_path == "Strict.tls" && key == "cert"),
         "unexpected error: {error:?}"
     );
     assert_eq!(error.to_string(), "missing key Strict.tls.cert");
@@ -833,16 +834,16 @@ async fn checked_error(source: &str) -> Result<Error> {
 async fn errors_report_nested_paths() -> Result<()> {
     let error = checked_error("[App.server]\nother = 1").await?;
     assert!(
-        matches!(&error, Error::MissingKey { path, key }
-            if path == "App.server" && key == "port"),
+        matches!(&error, Error::MissingKey { table_path, key, .. }
+            if table_path == "App.server" && key == "port"),
         "unexpected error: {error:?}"
     );
     assert_eq!(error.to_string(), "missing key App.server.port");
 
     let error = checked_error("[App]\nserver = 5").await?;
     assert!(
-        matches!(&error, Error::TypeMismatch { path, key, expected: "table", found: "integer" }
-            if path == "App" && key == "server"),
+        matches!(&error, Error::TypeMismatch { table_path, key, expected: "table", found: "integer", .. }
+            if table_path == "App" && key == "server"),
         "unexpected error: {error:?}"
     );
     assert_eq!(
@@ -852,8 +853,8 @@ async fn errors_report_nested_paths() -> Result<()> {
 
     let error = checked_error("[App.upstream]\nurl = \"a\"\nweight = 1").await?;
     assert!(
-        matches!(&error, Error::TypeMismatch { path, key, expected: "array", found: "table" }
-            if path == "App" && key == "upstream"),
+        matches!(&error, Error::TypeMismatch { table_path, key, expected: "array", found: "table", .. }
+            if table_path == "App" && key == "upstream"),
         "unexpected error: {error:?}"
     );
     assert_eq!(
@@ -863,8 +864,8 @@ async fn errors_report_nested_paths() -> Result<()> {
 
     let error = checked_error("[App]\nupstream = [{ url = \"a\", weight = 1 }, \"b\"]").await?;
     assert!(
-        matches!(&error, Error::ValueParse { path, key, message }
-            if path == "App"
+        matches!(&error, Error::ValueParse { table_path, key, message, .. }
+            if table_path == "App"
                 && key == "upstream"
                 && message == "expected array elements of type table, found string (at index 1)"),
         "unexpected error: {error:?}"
@@ -879,8 +880,8 @@ async fn errors_report_nested_paths() -> Result<()> {
     )
     .await?;
     assert!(
-        matches!(&error, Error::ValueParse { path, key, message }
-            if path == "App.upstream[1]"
+        matches!(&error, Error::ValueParse { table_path, key, message, .. }
+            if table_path == "App.upstream[1]"
                 && key == "weight"
                 && message == "value out of range for u32"),
         "unexpected error: {error:?}"
@@ -892,8 +893,8 @@ async fn errors_report_nested_paths() -> Result<()> {
 
     let error = checked_error("[App]\n\"my key\" = { port = \"bad\" }").await?;
     assert!(
-        matches!(&error, Error::TypeMismatch { path, key, expected: "integer", found: "string" }
-            if path == "App.\"my key\"" && key == "port"),
+        matches!(&error, Error::TypeMismatch { table_path, key, expected: "integer", found: "string", .. }
+            if table_path == "App.\"my key\"" && key == "port"),
         "unexpected error: {error:?}"
     );
     assert_eq!(
@@ -908,8 +909,8 @@ async fn strictness_is_per_struct_and_reports_nested_paths() -> Result<()> {
     let error = LenientOuter::from_store(&ConfigStore::from_str("[Outer]")?).unwrap_err();
     assert!(matches!(
         error,
-        Error::MissingKey { ref path, ref key }
-            if path == "Outer.child" && key == "port"
+        Error::MissingKey { ref table_path, ref key, .. }
+            if table_path == "Outer.child" && key == "port"
     ));
 
     let store = ConfigStore::from_str("[Outer]\nchild = { port = 80, typo = 1 }")?;
@@ -922,8 +923,8 @@ async fn strictness_is_per_struct_and_reports_nested_paths() -> Result<()> {
     let error = LenientOuter::from_store(&store).unwrap_err();
     assert!(matches!(
         error,
-        Error::UnknownKey { ref path, ref key }
-            if path == "Outer.child" && key == "typo"
+        Error::UnknownKey { ref table_path, ref key, .. }
+            if table_path == "Outer.child" && key == "typo"
     ));
 
     let store = ConfigStore::from_str(
@@ -932,8 +933,8 @@ async fn strictness_is_per_struct_and_reports_nested_paths() -> Result<()> {
     let error = LenientOuter::from_store(&store).unwrap_err();
     assert!(matches!(
         error,
-        Error::UnknownKey { ref path, ref key }
-            if path == "Outer.children[0]" && key == "typo"
+        Error::UnknownKey { ref table_path, ref key, .. }
+            if table_path == "Outer.children[0]" && key == "typo"
     ));
 
     let mut table = Table::new();
@@ -941,8 +942,8 @@ async fn strictness_is_per_struct_and_reports_nested_paths() -> Result<()> {
     let error = StrictChild::from_table("Manual", table).unwrap_err();
     assert!(matches!(
         error,
-        Error::UnknownKey { ref path, ref key }
-            if path == "Manual" && key == "extra"
+        Error::UnknownKey { ref table_path, ref key, .. }
+            if table_path == "Manual" && key == "extra"
     ));
 
     assert_eq!(
@@ -956,8 +957,8 @@ async fn strictness_is_per_struct_and_reports_nested_paths() -> Result<()> {
     let error = StrictIgnoredTable::from_table("Manual", table).unwrap_err();
     assert!(matches!(
         error,
-        Error::UnknownKey { ref path, ref key }
-            if path == "Manual" && key == "extra"
+        Error::UnknownKey { ref table_path, ref key, .. }
+            if table_path == "Manual" && key == "extra"
     ));
     Ok(())
 }
@@ -967,8 +968,8 @@ fn manual_scope_and_table_helpers_build_matching_error_paths() -> Result<()> {
     let error = ManualScope::from_store(&ConfigStore::from_str("[Manual.child]")?).unwrap_err();
     assert!(matches!(
         error,
-        Error::MissingKey { ref path, ref key }
-            if path == "Manual.child" && key == "value"
+        Error::MissingKey { ref table_path, ref key, .. }
+            if table_path == "Manual.child" && key == "value"
     ));
     assert_eq!(error.to_string(), "missing key Manual.child.value");
 
@@ -985,8 +986,8 @@ async fn array_elements_are_converted_depth_first() -> Result<()> {
     // The first element misses a required key and the second is not a table (L5).
     let error = checked_error("[App]\nupstream = [{ url = \"a\" }, \"b\"]").await?;
     assert!(
-        matches!(&error, Error::MissingKey { path, key }
-            if path == "App.upstream[0]" && key == "weight"),
+        matches!(&error, Error::MissingKey { table_path, key, .. }
+            if table_path == "App.upstream[0]" && key == "weight"),
         "unexpected error: {error:?}"
     );
     Ok(())
@@ -1099,8 +1100,8 @@ async fn nested_save_errors_leave_the_store_unchanged() -> Result<()> {
     let before = store.get_section("Stats");
     let error = error_of(Stats::save(&module, &store).await);
     assert!(
-        matches!(&error, Error::ValueParse { path, key, .. }
-            if path == "Stats.counters[1]" && key == "total"),
+        matches!(&error, Error::ValueParse { table_path, key, .. }
+            if table_path == "Stats.counters[1]" && key == "total"),
         "unexpected error: {error:?}"
     );
     assert_eq!(
@@ -1289,21 +1290,21 @@ impl ConfigTable for Address {
         let raw = match table.remove("address") {
             Some(Value::String(raw)) => raw,
             Some(other) => {
-                return Err(Error::type_mismatch(
+                return Err(Error::type_mismatch_error(
                     path,
                     "address",
                     "string",
                     other.type_str(),
                 ));
             }
-            None => return Err(Error::missing_key(path, "address")),
+            None => return Err(Error::missing_key_error(path, "address")),
         };
         let (host, port) = raw
             .rsplit_once(':')
-            .ok_or_else(|| Error::value_parse(path, "address", "expected host:port"))?;
+            .ok_or_else(|| Error::value_parse_error(path, "address", "expected host:port"))?;
         let port = port
             .parse()
-            .map_err(|_| Error::value_parse(path, "address", "invalid port"))?;
+            .map_err(|_| Error::value_parse_error(path, "address", "invalid port"))?;
         Ok(Self {
             host: host.into(),
             port,

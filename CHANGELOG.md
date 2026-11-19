@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+- **Breaking:** The key-error constructors are renamed with an `_error` suffix: `Error::missing_key_error`, `type_mismatch_error`, `value_parse_error` and `unknown_key_error`. Their argument types and order are unchanged; the old names are removed without aliases ([RFC-0011](docs/devel-0.1.x/RFC-0011_api_polish_before_0.1.md) E5).
+- **Breaking:** `Error::MissingKey`, `TypeMismatch`, `ValueParse` and `UnknownKey` store the formatted table path in `table_path` instead of `path`, and each variant is `#[non_exhaustive]`: patterns outside the crate must include `..`, and the constructors create these variants. The `ConfigTable` method parameter is documented as `table_path`; existing implementations keep compiling ([RFC-0011](docs/devel-0.1.x/RFC-0011_api_polish_before_0.1.md) E5).
+- `conferencier` depends on the exactly matching `conferencier-derive` version (`=0.1.0-beta.1`), so Cargo cannot pair the library with a different derive release ([RFC-0011](docs/devel-0.1.x/RFC-0011_api_polish_before_0.1.md), audit finding A8).
+
 ## [0.0.8] - 2026-11-17
 
 ### Added

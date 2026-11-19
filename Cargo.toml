@@ -12,6 +12,7 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/Komix42/conferencier"
 
 [workspace.dependencies]
-# Keep the version in sync with `workspace.package.version`.
-conferencier-derive = { version = "0.1.0-beta.1", path = "conferencier-derive" }
+# Keep the exact version in sync with `workspace.package.version`: generated
+# derive code must match the library's support code (lockstep releases).
+conferencier-derive = { version = "=0.1.0-beta.1", path = "conferencier-derive" }
 toml = "1.2"

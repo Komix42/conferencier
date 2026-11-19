@@ -574,7 +574,7 @@ fn absent_value(
     match (optional, fallback) {
         (_, Some(fallback)) => quote! { #fallback },
         (true, None) => quote! { ::core::option::Option::None },
-        (false, None) => quote! { return Err(#crate_path::Error::missing_key(#path, #key)) },
+        (false, None) => quote! { return Err(#crate_path::Error::missing_key_error(#path, #key)) },
     }
 }
 
@@ -694,7 +694,7 @@ fn integer_from_store(
         match <#ty as ::core::convert::TryFrom<i64>>::try_from(#value) {
             Ok(#v) => #v,
             Err(_) => {
-                return Err(#err::value_parse(#path, #key, format!("value out of range for {}", stringify!(#ty))));
+                return Err(#err::value_parse_error(#path, #key, format!("value out of range for {}", stringify!(#ty))));
             }
         }
     }
@@ -717,10 +717,10 @@ fn float_from_store(
                 {
                     let #raw = #value;
                     if !#raw.is_finite() {
-                        return Err(#err::value_parse(#path, #key, String::from("non-finite float")));
+                        return Err(#err::value_parse_error(#path, #key, String::from("non-finite float")));
                     }
                     if #raw < f32::MIN as f64 || #raw > f32::MAX as f64 {
-                        return Err(#err::value_parse(#path, #key, String::from("value out of range for f32")));
+                        return Err(#err::value_parse_error(#path, #key, String::from("value out of range for f32")));
                     }
                     #raw as f32
                 }
@@ -750,7 +750,7 @@ fn integer_vec_from_store(
                 match <#scalar as ::core::convert::TryFrom<i64>>::try_from(#raw) {
                     Ok(#v) => #out.push(#v),
                     Err(_) => {
-                        return Err(#err::value_parse(#path, #key, format!("value out of range for {} (at index {})", stringify!(#scalar), #index)));
+                        return Err(#err::value_parse_error(#path, #key, format!("value out of range for {} (at index {})", stringify!(#scalar), #index)));
                     }
                 }
             }
@@ -779,10 +779,10 @@ fn float_vec_from_store(
                     let mut #out = Vec::with_capacity(#value.len());
                     for (#index, #raw) in #value.into_iter().enumerate() {
                         if !#raw.is_finite() {
-                            return Err(#err::value_parse(#path, #key, format!("non-finite float (at index {})", #index)));
+                            return Err(#err::value_parse_error(#path, #key, format!("non-finite float (at index {})", #index)));
                         }
                         if #raw < f32::MIN as f64 || #raw > f32::MAX as f64 {
-                            return Err(#err::value_parse(#path, #key, format!("value out of range for f32 (at index {})", #index)));
+                            return Err(#err::value_parse_error(#path, #key, format!("value out of range for f32 (at index {})", #index)));
                         }
                         #out.push(#raw as f32);
                     }
@@ -821,7 +821,7 @@ fn integer_to_store(
                 {
                     let #raw = #value as u64;
                     if #raw > i64::MAX as u64 {
-                        return Err(#err::value_parse(#path, #key, #error_message));
+                        return Err(#err::value_parse_error(#path, #key, #error_message));
                     }
                     #raw as i64
                 }

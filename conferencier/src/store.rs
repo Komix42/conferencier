@@ -661,14 +661,14 @@ impl ConfigStore {
         let guard = self.read();
         let section_value = guard
             .get(section)
-            .ok_or_else(|| Error::missing_key(&path, key))?;
+            .ok_or_else(|| Error::missing_key_error(&path, key))?;
         let table = section_value
             .as_table()
             .ok_or_else(|| section_mismatch(section, section_value))?;
         table
             .get(key)
             .cloned()
-            .ok_or_else(|| Error::missing_key(&path, key))
+            .ok_or_else(|| Error::missing_key_error(&path, key))
     }
 
     fn from_table(table: Table) -> Self {
@@ -709,7 +709,7 @@ fn section_table<'a>(root: &'a Table, section: &str) -> Option<&'a Table> {
 
 /// The error for a top-level entry `section` that is not a table.
 fn section_mismatch(section: &str, found: &Value) -> Error {
-    Error::type_mismatch("", section, "table", value_conversion::describe(found))
+    Error::type_mismatch_error("", section, "table", value_conversion::describe(found))
 }
 
 /// Reads the file at `path`, attaching the path to I/O errors.
@@ -1006,8 +1006,8 @@ mod tests {
         ] {
             assert!(matches!(
                 &error,
-                Error::TypeMismatch { path, key, expected: "table", found: "integer" }
-                    if path.is_empty() && key == "App"
+                Error::TypeMismatch { table_path, key, expected: "table", found: "integer" }
+                    if table_path.is_empty() && key == "App"
             ));
             assert_eq!(error.to_string(), "expected table at App but found integer");
         }
@@ -1022,18 +1022,18 @@ mod tests {
             .unwrap_err();
         assert!(matches!(
             error,
-            Error::MissingKey { ref path, ref key }
-                if path == "\"App.server\"" && key == "port"
+            Error::MissingKey { ref table_path, ref key }
+                if table_path == "\"App.server\"" && key == "port"
         ));
         assert_eq!(error.to_string(), "missing key \"App.server\".port");
 
-        let error = Error::missing_key("App", "a.b");
+        let error = Error::missing_key_error("App", "a.b");
         assert_eq!(error.to_string(), "missing key App.\"a.b\"");
 
         let error = ConfigStore::new().get_integer("", "key").unwrap_err();
         assert_eq!(error.to_string(), "missing key \"\".key");
 
-        let error = Error::missing_key("App", "a\"b\n");
+        let error = Error::missing_key_error("App", "a\"b\n");
         assert_eq!(error.to_string(), "missing key App.\"a\\\"b\\n\"");
     }
 
@@ -1080,8 +1080,8 @@ mod tests {
         let error = store.get_integer_vec("App", "ports").unwrap_err();
         assert!(matches!(
             error,
-            Error::ValueParse { ref path, ref key, ref message }
-                if path == "App"
+            Error::ValueParse { ref table_path, ref key, ref message }
+                if table_path == "App"
                     && key == "ports"
                     && message == "expected array elements of type integer, found boolean (at index 1)"
         ));
@@ -1089,8 +1089,8 @@ mod tests {
         let error = store.get_datetime_vec("App", "times").unwrap_err();
         assert!(matches!(
             error,
-            Error::ValueParse { ref path, ref key, ref message }
-                if path == "App"
+            Error::ValueParse { ref table_path, ref key, ref message }
+                if table_path == "App"
                     && key == "times"
                     && message.ends_with("(at index 1)")
         ));

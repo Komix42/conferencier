@@ -7,10 +7,11 @@ use crate::Result;
 /// A plain configuration value stored as a nested TOML table.
 ///
 /// Unlike [`ConfigScope`](crate::ConfigScope), a table has no section or lock of
-/// its own. `path` identifies its location in diagnostics, not a store address.
-/// Errors for keys in this table use `path` as their section; nested errors use
-/// the nested path, for example `App.upstream[1]`. A dot in `path` does not cause
-/// a store lookup, and these functions never read or write a file.
+/// its own. `table_path` identifies its location in diagnostics, not a store
+/// address. Errors for keys in this table carry it as their `table_path`; nested
+/// errors use the nested path, for example `App.upstream[1]`. A dot in
+/// `table_path` does not cause a store lookup, and these functions never read or
+/// write a file.
 ///
 /// # Implementations
 ///
@@ -20,10 +21,10 @@ use crate::Result;
 /// describes the table field shapes, their attributes and how tables behave on reload.
 ///
 /// Manual implementations own the input table and can move values out instead of cloning
-/// them. Use [`Error`](crate::Error)'s constructors to attach `path` and the failing
-/// key to conversion errors. When delegating to a nested table, extend `path`
-/// with [`table_path`](crate::table_path) so that its errors carry the same
-/// paths as derived tables. Return a complete table from `to_table`, not a patch.
+/// them. Use [`Error`](crate::Error)'s constructors to attach `table_path` and the
+/// failing key to conversion errors. When delegating to a nested table, extend
+/// `table_path` with [`table_path`](crate::table_path) so that its errors carry
+/// the same paths as derived tables. Return a complete table from `to_table`, not a patch.
 /// These signatures and their TOML types may change while the API is in alpha.
 ///
 /// # Example
@@ -37,20 +38,25 @@ use crate::Result;
 /// struct Endpoint(std::net::SocketAddr);
 ///
 /// impl ConfigTable for Endpoint {
-///     fn from_table(path: &str, mut table: Table) -> Result<Self> {
+///     fn from_table(table_path: &str, mut table: Table) -> Result<Self> {
 ///         let raw = match table.remove("addr") {
 ///             Some(Value::String(raw)) => raw,
 ///             Some(other) => {
-///                 return Err(Error::type_mismatch(path, "addr", "string", other.type_str()));
+///                 return Err(Error::type_mismatch_error(
+///                     table_path,
+///                     "addr",
+///                     "string",
+///                     other.type_str(),
+///                 ));
 ///             }
-///             None => return Err(Error::missing_key(path, "addr")),
+///             None => return Err(Error::missing_key_error(table_path, "addr")),
 ///         };
 ///         raw.parse()
 ///             .map(Endpoint)
-///             .map_err(|err| Error::value_parse(path, "addr", err.to_string()))
+///             .map_err(|err| Error::value_parse_error(table_path, "addr", err.to_string()))
 ///     }
 ///
-///     fn to_table(&self, _path: &str) -> Result<Table> {
+///     fn to_table(&self, _table_path: &str) -> Result<Table> {
 ///         let mut table = Table::new();
 ///         table.insert("addr".into(), Value::String(self.0.to_string()));
 ///         Ok(table)
@@ -70,7 +76,7 @@ use crate::Result;
     note = "derive it with `#[derive(ConfigTable)]` or implement `ConfigTable` manually"
 )]
 pub trait ConfigTable: Sized {
-    /// Constructs a value from an owned table, using `path` for error reporting.
+    /// Constructs a value from an owned table, using `table_path` for error reporting.
     ///
     /// For an absent key, the derived implementation uses its field's fallback,
     /// `None` for an `Option`, or returns [`Error::MissingKey`](crate::Error::MissingKey).
@@ -87,13 +93,13 @@ pub trait ConfigTable: Sized {
     /// [`Error::ValueParse`](crate::Error::ValueParse) for invalid fields, or
     /// [`Error::UnknownKey`](crate::Error::UnknownKey) for an unknown key in a strict table.
     /// A manual implementation may return other errors as appropriate.
-    fn from_table(path: &str, table: Table) -> Result<Self>;
+    fn from_table(table_path: &str, table: Table) -> Result<Self>;
 
     /// Converts this value into the complete table to persist.
     ///
     /// The derived implementation writes only loaded fields, omits absent optional
     /// fields, writes empty arrays of tables as `[]`, and recursively converts nested tables.
-    /// It never mutates `self`. `path` is used only for error reporting.
+    /// It never mutates `self`. `table_path` is used only for error reporting.
     ///
     /// The owning scope replaces its whole section on save, so keys not returned
     /// here disappear from the persisted nested table.
@@ -103,5 +109,5 @@ pub trait ConfigTable: Sized {
     /// Returns a conversion error, such as an unsigned integer outside TOML's
     /// signed 64-bit range, or an error from a nested table implementation.
     /// No partial table is returned, and the caller's store is not modified.
-    fn to_table(&self, path: &str) -> Result<Table>;
+    fn to_table(&self, table_path: &str) -> Result<Table>;
 }

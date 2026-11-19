@@ -14,14 +14,17 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// [`ConfigScope`](crate::ConfigScope) and [`ConfigTable`](crate::ConfigTable)
 /// implementations.
 ///
-/// `path` holds the formatted path of the table containing the key, such as
-/// `App.upstream[1]`. For errors about a top-level entry that is not a table,
-/// `path` is empty and `key` is the entry name.
+/// In key errors, `table_path` holds the formatted path of the table containing
+/// the key, such as `App.upstream[1]`. For errors about a top-level entry that is
+/// not a table, `table_path` is empty and `key` is the entry name.
 ///
 /// # Inspecting errors
 ///
 /// This enum is non-exhaustive: match the variants relevant to your application
-/// and keep a fallback arm for future variants. [`std::error::Error::source`]
+/// and keep a fallback arm for future variants. Key-error variants are also
+/// individually non-exhaustive: patterns outside this crate must include `..`,
+/// and the constructors such as [`Error::missing_key_error`] create them.
+/// [`std::error::Error::source`]
 /// exposes the underlying I/O, TOML parsing or serialization error; field errors
 /// and [`UnknownKey`](Self::UnknownKey) carry their diagnostic context directly.
 /// For [`SaveFileCleanup`](Self::SaveFileCleanup), the source is the original
@@ -32,8 +35,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 ///
 /// let error = ConfigStore::new().get_integer("App", "port").unwrap_err();
 /// match error {
-///     Error::MissingKey { path, key } => {
-///         assert_eq!((path.as_str(), key.as_str()), ("App", "port"));
+///     Error::MissingKey { table_path, key, .. } => {
+///         assert_eq!((table_path.as_str(), key.as_str()), ("App", "port"));
 ///     }
 ///     other => panic!("unexpected error: {other}"),
 /// }
@@ -100,16 +103,18 @@ pub enum Error {
     /// Serialization happens before file writes; this error leaves the file untouched.
     Serialize(toml::ser::Error),
     /// A required key is absent.
+    #[non_exhaustive]
     MissingKey {
         /// Formatted path of the table containing the key.
-        path: String,
+        table_path: String,
         /// The missing key, without path formatting.
         key: String,
     },
     /// A value has a different TOML type than the field expects.
+    #[non_exhaustive]
     TypeMismatch {
         /// Formatted path of the table containing the key.
-        path: String,
+        table_path: String,
         /// The key holding the value, without path formatting.
         key: String,
         /// Expected TOML type, such as `integer` or `table`.
@@ -120,18 +125,20 @@ pub enum Error {
     /// A value has an acceptable TOML type but cannot be converted, for example an
     /// integer out of range for the field type, an invalid datetime string or an
     /// array element of the wrong type.
+    #[non_exhaustive]
     ValueParse {
         /// Formatted path of the table containing the key.
-        path: String,
+        table_path: String,
         /// The key holding the value, without path formatting.
         key: String,
         /// Description of the problem.
         message: String,
     },
     /// A strict struct found a key that no loaded field maps.
+    #[non_exhaustive]
     UnknownKey {
         /// Formatted path of the table containing the key.
-        path: String,
+        table_path: String,
         /// The unknown TOML key, without formatting.
         key: String,
     },
@@ -159,14 +166,14 @@ impl Error {
         }
     }
 
-    /// Reports that `key` is required but absent from the table at `path`.
+    /// Reports that `key` is required but absent from the table at `table_path`.
     ///
     /// Pass an already formatted diagnostic path, such as `App.server`. For a
-    /// top-level entry itself, use an empty path and its name as the key. This
+    /// top-level entry itself, use an empty table path and its name as the key. This
     /// constructs an error; it does not look in a store.
-    pub fn missing_key(path: impl Into<String>, key: impl Into<String>) -> Self {
+    pub fn missing_key_error(table_path: impl Into<String>, key: impl Into<String>) -> Self {
         Self::MissingKey {
-            path: path.into(),
+            table_path: table_path.into(),
             key: key.into(),
         }
     }
@@ -175,15 +182,15 @@ impl Error {
     ///
     /// `expected` and `found` are type labels such as `"integer"` or `"string"`;
     /// [`toml::Value::type_str`] supplies the latter. Pass a nested table's
-    /// diagnostic path as `path` when appropriate.
-    pub fn type_mismatch(
-        path: impl Into<String>,
+    /// diagnostic path as `table_path` when appropriate.
+    pub fn type_mismatch_error(
+        table_path: impl Into<String>,
         key: impl Into<String>,
         expected: &'static str,
         found: &'static str,
     ) -> Self {
         Self::TypeMismatch {
-            path: path.into(),
+            table_path: table_path.into(),
             key: key.into(),
             expected,
             found,
@@ -193,15 +200,15 @@ impl Error {
     /// Reports a value that cannot be converted despite having an acceptable TOML type.
     ///
     /// Use `message` to explain the reason, for example `"value out of range for u16"`.
-    /// Both borrowed and owned strings are accepted for `path`, `key` and `message`;
-    /// the path must already be formatted.
-    pub fn value_parse(
-        path: impl Into<String>,
+    /// Both borrowed and owned strings are accepted for `table_path`, `key` and
+    /// `message`; the table path must already be formatted.
+    pub fn value_parse_error(
+        table_path: impl Into<String>,
         key: impl Into<String>,
         message: impl Into<String>,
     ) -> Self {
         Self::ValueParse {
-            path: path.into(),
+            table_path: table_path.into(),
             key: key.into(),
             message: message.into(),
         }
@@ -211,16 +218,16 @@ impl Error {
     ///
     /// Pass an already formatted diagnostic path and the raw TOML key. This
     /// constructs an error; it does not inspect a table.
-    pub fn unknown_key(path: impl Into<String>, key: impl Into<String>) -> Self {
+    pub fn unknown_key_error(table_path: impl Into<String>, key: impl Into<String>) -> Self {
         Self::UnknownKey {
-            path: path.into(),
+            table_path: table_path.into(),
             key: key.into(),
         }
     }
 }
 
-fn display_key(path: &str, key: &str) -> String {
-    crate::table_path::child_path(path, key)
+fn display_key(table_path: &str, key: &str) -> String {
+    crate::table_path::child_path(table_path, key)
 }
 
 impl fmt::Display for Error {
@@ -237,24 +244,32 @@ impl fmt::Display for Error {
             ),
             Self::Parse(source) => write!(f, "failed to parse TOML: {source}"),
             Self::Serialize(source) => write!(f, "failed to serialize TOML: {source}"),
-            Self::MissingKey { path, key } => {
-                write!(f, "missing key {}", display_key(path, key))
+            Self::MissingKey { table_path, key } => {
+                write!(f, "missing key {}", display_key(table_path, key))
             }
             Self::TypeMismatch {
-                path,
+                table_path,
                 key,
                 expected,
                 found,
             } => write!(
                 f,
                 "expected {expected} at {} but found {found}",
-                display_key(path, key)
+                display_key(table_path, key)
             ),
-            Self::ValueParse { path, key, message } => {
-                write!(f, "invalid value at {}: {message}", display_key(path, key))
+            Self::ValueParse {
+                table_path,
+                key,
+                message,
+            } => {
+                write!(
+                    f,
+                    "invalid value at {}: {message}",
+                    display_key(table_path, key)
+                )
             }
-            Self::UnknownKey { path, key } => {
-                write!(f, "unknown key {}", display_key(path, key))
+            Self::UnknownKey { table_path, key } => {
+                write!(f, "unknown key {}", display_key(table_path, key))
             }
         }
     }
@@ -304,13 +319,16 @@ mod tests {
     #[test]
     fn value_errors_preserve_messages_and_have_no_source() {
         let cases = [
-            (Error::missing_key("App", "port"), "missing key App.port"),
             (
-                Error::type_mismatch("App", "port", "integer", "string"),
+                Error::missing_key_error("App", "port"),
+                "missing key App.port",
+            ),
+            (
+                Error::type_mismatch_error("App", "port", "integer", "string"),
                 "expected integer at App.port but found string",
             ),
             (
-                Error::value_parse("App", "port", "out of range"),
+                Error::value_parse_error("App", "port", "out of range"),
                 "invalid value at App.port: out of range",
             ),
         ];
@@ -324,16 +342,19 @@ mod tests {
     #[test]
     fn diagnostics_quote_final_keys_and_root_entries() {
         assert_eq!(
-            Error::missing_key("App", "a.b").to_string(),
+            Error::missing_key_error("App", "a.b").to_string(),
             "missing key App.\"a.b\""
         );
         assert_eq!(
-            Error::type_mismatch("", "App.server", "table", "integer").to_string(),
+            Error::type_mismatch_error("", "App.server", "table", "integer").to_string(),
             "expected table at \"App.server\" but found integer"
         );
-        assert_eq!(Error::missing_key("", "").to_string(), "missing key \"\"");
         assert_eq!(
-            Error::unknown_key("App", "a.b").to_string(),
+            Error::missing_key_error("", "").to_string(),
+            "missing key \"\""
+        );
+        assert_eq!(
+            Error::unknown_key_error("App", "a.b").to_string(),
             "unknown key App.\"a.b\""
         );
     }
