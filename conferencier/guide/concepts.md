@@ -46,7 +46,9 @@ assert_eq!(app.read().await.port, 7070);
 
 ## Reading a file before the runtime starts
 
-All in-memory work, including [`ConfigScope::from_store`](crate::ConfigScope::from_store), runs without a Tokio runtime, but `ConfigStore::from_file` is async and has no blocking variant. To read the configuration before the runtime starts, combine [`std::fs::read_to_string`] with `ConfigStore::from_str`. The standard library's error does not carry the path; attach it with [`Error::io_error_with_operation`](crate::Error::io_error_with_operation) if needed:
+Conferencier does not start a Tokio runtime or choose its flavor; applications enable the Tokio features they need, such as `macros` and `rt-multi-thread`. The file methods work on any Tokio runtime, including a current-thread runtime. `ConfigStore::from_file` and `load_file` panic if polled without a runtime when they reach the Tokio file read. `save_file` serializes first, so a serialization error is returned without a runtime; a successful serialization requires a runtime when file I/O starts.
+
+All in-memory work, including [`ConfigScope::from_store`](crate::ConfigScope::from_store), runs without a Tokio runtime. To read the configuration before the runtime starts, combine [`std::fs::read_to_string`] with `ConfigStore::from_str`. The standard library's error does not carry the path; attach it with [`Error::io_error_with_operation`](crate::Error::io_error_with_operation) if needed:
 
 ```rust,no_run
 use conferencier::{ConfigStore, Error, IoOperation};
@@ -61,6 +63,12 @@ let store = ConfigStore::from_str(&source)?;
 # Ok(())
 # }
 ```
+
+## Nesting limits
+
+Parsing uses the default recursion limit of `toml` (currently 80 levels with `toml` 1.2); that exact limit is not part of conferencier's API. Deeper arrays, inline tables, dotted keys and table headers return a parse error. Conferencier does not enable `toml/unbounded`, but Cargo features are additive, so another dependency can remove this limit. Applications loading untrusted TOML should check the feature graph with `cargo tree -e features -i toml`.
+
+Values created in code and inserted with [`ConfigStore::set_value`](crate::ConfigStore::set_value) or [`ConfigStore::set_section`](crate::ConfigStore::set_section) are not subject to the parser's limit. Very deeply nested values can overflow the stack when serialized, cloned or dropped; a stack overflow aborts the process.
 
 ## Reloading configuration
 

@@ -60,6 +60,10 @@ pub type SharedScope<T> = Arc<RwLock<T>>;
 /// a scope does not change the store until `save` is called. None of these
 /// functions reads or writes a file.
 ///
+/// The library does not start a Tokio runtime or choose its flavor. Derived
+/// `from_store`, `load` and `save` need no runtime unless caller-supplied defaults,
+/// ignore expressions, or manual implementations require one.
+///
 /// # Implementations
 ///
 /// With the default `derive` feature, `#[derive(ConfigScope)]` implements this

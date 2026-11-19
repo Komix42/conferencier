@@ -1,4 +1,6 @@
+use std::future::Future;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::task::{Context, Poll, Waker};
 
 use conferencier::{ConfigScope, ConfigStore, Datetime, Error, Result, SharedScope};
 
@@ -149,14 +151,39 @@ async fn generic_code_can_spawn_load() -> Result<()> {
 }
 
 #[test]
-fn store_and_from_store_work_without_a_runtime() -> Result<()> {
+fn derived_scope_construction_load_and_save_work_without_a_runtime() -> Result<()> {
     let store: ConfigStore = "[Srv]\np = 8080".parse()?;
     store.set_string("Srv", "host", String::from("localhost"))?;
 
     let module = Server::from_store(&store)?;
-    let guard = module.try_read().expect("no other guard exists");
-    assert_eq!(guard.port, 8080);
-    assert_eq!(guard.host, "localhost");
+    {
+        let guard = module.try_read().expect("no other guard exists");
+        assert_eq!(guard.port, 8080);
+        assert_eq!(guard.host, "localhost");
+    }
+
+    let mut context = Context::from_waker(Waker::noop());
+    store.set_string("Srv", "host", "loaded")?;
+    let mut load = Box::pin(Server::load(&module, &store));
+    assert!(matches!(
+        load.as_mut().poll(&mut context),
+        Poll::Ready(Ok(()))
+    ));
+    assert_eq!(
+        module
+            .try_read()
+            .expect("load released the scope lock")
+            .host,
+        "loaded"
+    );
+
+    module.try_write().expect("no other guard exists").host = "saved".into();
+    let mut save = Box::pin(Server::save(&module, &store));
+    assert!(matches!(
+        save.as_mut().poll(&mut context),
+        Poll::Ready(Ok(()))
+    ));
+    assert_eq!(store.get_string("Srv", "host")?, "saved");
     Ok(())
 }
 

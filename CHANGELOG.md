@@ -20,6 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Save-time `u64` and `usize` range errors no longer include the raw value; vector errors continue to include the element index ([RFC-0011](docs/devel-0.1.x/RFC-0011_api_polish_before_0.1.md) E7).
 - **Breaking:** `set_string` accepts `impl Into<String>`, and vector setters accept iterators instead of requiring owned vectors. Calls using `.into()` without a concrete target type may need adjustment; see RFC-0011 S1–S3 ([RFC-0011](docs/devel-0.1.x/RFC-0011_api_polish_before_0.1.md)).
 - **Breaking:** `ConfigStore`'s `Debug` output now lists top-level keys without configuration values, and reports when it cannot read keys because the store is locked ([RFC-0011](docs/devel-0.1.x/RFC-0011_api_polish_before_0.1.md) D1–D2).
+- **Breaking:** the normal Tokio dependency now enables only `sync`, `rt` and `fs`; applications that relied on other Tokio features being enabled transitively must enable them directly ([RFC-0011](docs/devel-0.1.x/RFC-0011_api_polish_before_0.1.md) T1–T2).
 
 ## [0.0.8] - 2026-11-17
 

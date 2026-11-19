@@ -28,7 +28,9 @@ use crate::value_conversion;
 /// and [`save_file`](Self::save_file) run their file operations on Tokio's blocking thread
 /// pool. Every other method works only on
 /// the in-memory document and is synchronous, so it can also be called before the runtime
-/// starts or from synchronous code on a runtime thread.
+/// starts or from synchronous code on a runtime thread. Conferencier does not start a
+/// Tokio runtime or choose its flavor; applications enable the Tokio features they need.
+/// The file methods work on any Tokio runtime, including a current-thread runtime.
 ///
 /// # Absence of sections and keys
 ///
@@ -155,6 +157,11 @@ impl ConfigStore {
     /// Returns [`Error::Io`] if the file cannot be read as UTF-8, or [`Error::Parse`]
     /// if its contents are not valid TOML. Parse errors carry parser diagnostics
     /// and the file path.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this future is polled without an active Tokio runtime when it reaches
+    /// the Tokio file read.
     pub async fn from_file(path: impl AsRef<Path> + Send + Sync) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
         let contents = read_file(&path).await?;
@@ -186,6 +193,11 @@ impl ConfigStore {
     ///
     /// Returns [`Error::Io`] with [`IoOperation::Read`] and `path` if reading
     /// fails, or [`Error::Parse`] with `path` for invalid TOML.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this future is polled without an active Tokio runtime when it reaches
+    /// the Tokio file read.
     pub async fn load_file(&self, path: impl AsRef<Path> + Send + Sync) -> Result<()> {
         let path = path.as_ref().to_path_buf();
         let contents = read_file(&path).await?;
@@ -248,6 +260,12 @@ impl ConfigStore {
     /// returns [`Error::SaveFileCleanup`] with the target path, original error,
     /// temporary path and cleanup error. An I/O failure does not change the
     /// in-memory store.
+    ///
+    /// # Panics
+    ///
+    /// Panics if serialization succeeds and this future is polled without an active Tokio
+    /// runtime when it starts the blocking file operation. A serialization error is
+    /// returned before a runtime is needed.
     pub async fn save_file(&self, path: impl AsRef<Path> + Send + Sync) -> Result<()> {
         let path = path.as_ref();
         let serialized = self
@@ -1028,13 +1046,22 @@ mod save_tests;
 mod tests {
     use std::cell::Cell;
     use std::error::Error as _;
+    use std::future::Future;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use std::pin::Pin;
     use std::sync::mpsc::sync_channel;
+    use std::task::{Context, Poll, Waker};
     use std::time::Duration;
 
     use super::*;
     use crate::error::{Error, Result};
 
     use tempfile::NamedTempFile;
+
+    fn poll_without_runtime<F: Future>(future: Pin<&mut F>) -> Poll<F::Output> {
+        let mut context = Context::from_waker(Waker::noop());
+        future.poll(&mut context)
+    }
 
     struct StoreReadingString(ConfigStore);
 
@@ -1096,6 +1123,31 @@ mod tests {
         assert_eq!(error.to_string(), format!("failed to read file {path:?}"));
     }
 
+    #[test]
+    fn file_reads_panic_without_a_tokio_runtime() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[App]\nport = 80")?;
+
+        let mut from_file = Box::pin(ConfigStore::from_file(&path));
+        assert!(
+            catch_unwind(AssertUnwindSafe(|| poll_without_runtime(
+                from_file.as_mut()
+            )))
+            .is_err()
+        );
+
+        let store = ConfigStore::new();
+        let mut load_file = Box::pin(store.load_file(&path));
+        assert!(
+            catch_unwind(AssertUnwindSafe(|| poll_without_runtime(
+                load_file.as_mut()
+            )))
+            .is_err()
+        );
+        Ok(())
+    }
+
     #[tokio::test]
     async fn file_parse_errors_keep_the_file_path_and_load_is_atomic() -> Result<()> {
         let dir = tempfile::tempdir()?;
@@ -1126,6 +1178,34 @@ mod tests {
             } if error_path == path
         ));
         assert_eq!(store.get_integer("App", "port")?, 8080);
+        Ok(())
+    }
+
+    #[test]
+    fn nesting_beyond_tomls_default_limit_returns_parse_errors() -> Result<()> {
+        let depth = 128;
+        let dotted_path = vec!["a"; depth].join(".");
+        let inputs = [
+            format!("value = {}0{}", "[".repeat(depth), "]".repeat(depth)),
+            format!(
+                "value = {}0{}",
+                "{ value = ".repeat(depth),
+                " }".repeat(depth)
+            ),
+            format!("{dotted_path}.value = 0"),
+            format!("[{dotted_path}]\nvalue = 0"),
+        ];
+        let store = ConfigStore::from_str("[Existing]\nkeep = 1")?;
+        let before = store.save_str()?;
+
+        for source in inputs {
+            let error = ConfigStore::from_str(&source).unwrap_err();
+            assert!(matches!(error, Error::Parse { .. }));
+
+            let error = store.load_str(&source).unwrap_err();
+            assert!(matches!(error, Error::Parse { .. }));
+            assert_eq!(store.save_str()?, before);
+        }
         Ok(())
     }
 
@@ -1527,6 +1607,60 @@ mod tests {
         );
         assert!(error.source().is_some());
         assert!(!path.exists());
+        Ok(())
+    }
+
+    #[test]
+    fn save_file_requires_a_runtime_only_after_serialization() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "original")?;
+
+        let invalid = ConfigStore::new();
+        invalid.set_datetime(
+            "App",
+            "invalid",
+            Datetime {
+                date: None,
+                time: None,
+                offset: None,
+            },
+        )?;
+        let mut serialization = Box::pin(invalid.save_file(&path));
+        assert!(matches!(
+            poll_without_runtime(serialization.as_mut()),
+            Poll::Ready(Err(Error::Serialize {
+                target_path: Some(target_path),
+                ..
+            })) if target_path == path
+        ));
+        assert_eq!(std::fs::read_to_string(&path)?, "original");
+
+        let valid = ConfigStore::from_str("[App]\nport = 80")?;
+        let mut file_operation = Box::pin(valid.save_file(&path));
+        assert!(
+            catch_unwind(AssertUnwindSafe(|| poll_without_runtime(
+                file_operation.as_mut()
+            )))
+            .is_err()
+        );
+        assert_eq!(std::fs::read_to_string(&path)?, "original");
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn file_methods_work_on_a_current_thread_runtime() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[App]\nport = 80")?;
+
+        let store = ConfigStore::from_file(&path).await?;
+        store.set_integer("App", "port", 8080)?;
+        store.save_file(&path).await?;
+
+        let reloaded = ConfigStore::new();
+        reloaded.load_file(&path).await?;
+        assert_eq!(reloaded.get_integer("App", "port")?, 8080);
         Ok(())
     }
 
