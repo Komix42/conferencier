@@ -206,7 +206,8 @@ Decision: **Fix**. Add a compile-time assertion for these futures and for
 
 ## Follow-up
 
-- A1, B1, B2 and B3 are fixed before beta.1, as part of the review step in the
+- A1, B1, B2 and B3 are fixed, and the A2 workaround is documented, before
+  beta.1, as part of the review step in the
   [beta.1 release steps](../BACKLOG.md#beta1-release-steps).
 - A2 and A4, and the `crate` attribute from A1, are recorded in the
   [backlog](../BACKLOG.md) with a link to this report.

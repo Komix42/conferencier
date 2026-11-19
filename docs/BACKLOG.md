@@ -19,9 +19,11 @@ dependencies resolve to that precise derive release rather than a later beta.
 
 ### Beta.1 release steps
 
-1. **Review and finalize.** Review the repository for beta readiness, make the
-   agreed revisions, and close [AUDIT-001](./devel-0.0.x/AUDIT-001_quality_0.0.8.md)
-   by linking each finding to the RFC or release that resolved it.
+1. **Review and finalize.** Review the repository for beta readiness and make
+   the agreed revisions, including the fixes planned in
+   [AUDIT-002](./devel-0.1.x/AUDIT-002_quality_0.1.0-beta.1.md#follow-up).
+   Close [AUDIT-001](./devel-0.0.x/AUDIT-001_quality_0.0.8.md) and AUDIT-002
+   by linking each finding to the RFC, release or backlog entry that resolved it.
 2. **Verify the final candidate locally.** Run these checks only after the
    review and revisions are complete. If the candidate changes afterward,
    rerun the affected checks:
@@ -52,7 +54,7 @@ dependencies resolve to that precise derive release rather than a later beta.
 Publish stable `0.1.0` only when all of the following hold:
 
 - The beta release steps above are complete, including the final checks, exact
-  derive requirement and closure of the 0.0.8 audit.
+  derive requirement and closure of AUDIT-001 and AUDIT-002.
 - The example applications have been built and tested against the beta API.
 - All CI jobs pass on the release candidate, including cross-platform tests,
   MSRV checks, packaged doctests and publish dry-runs for both crates. The three
@@ -77,13 +79,15 @@ The section-name migration guard stays until 0.2.0.
 - **Compile-time checked datetime macro.** With [RFC-0007](./devel-0.0.x/RFC-0007_default_expressions.md), a datetime default is written `"2024-01-01T00:00:00Z".parse().unwrap()`, so an invalid string panics on load instead of failing to compile, as the removed literal form did. Direction: a convenience macro such as `conferencier::datetime!("...")` that validates the string at compile time; usable in `default`, `ignore` and ordinary code. Origin: the RFC-0007 discussion; datetime defaults are expected to be rare.
 - **Generated `Default` from `confer` attributes.** With [RFC-0007](./devel-0.0.x/RFC-0007_default_expressions.md) (M4), `#[confer(table, default)]` calls the table type's `Default`, and the standard `#[derive(Default)]` does not know `#[confer(default = ...)]`, so a type with `#[confer(default = 8080)] port: u16` gets `port == 0`. Direction: an opt-in way to generate a `Default` that uses each field's `confer` default (fields without one would need `Default` or fail to compile). Origin: the RFC-0007 discussion.
 - **Conversion hooks.** Types the derive does not support, such as maps, enums or newtypes, must be ignored and handled manually. Direction: `#[confer(with = ...)]` with user-defined conversions, or a `#[confer(serde)]` escape hatch for types implementing `Serialize` and `DeserializeOwned`. Origin: [RFC-0001](./devel-0.0.x/RFC-0001_baseline_architecture.md#out-of-scope), [RFC-0004](./devel-0.0.x/RFC-0004_nested_tables.md#out-of-scope--future-work).
-- **More table shapes.** Maps of tables (`BTreeMap<String, T>` ↔ `[App.servers.alpha]`, `[App.servers.beta]`), `Option<Vec<T>>` and `Box<T>` table fields, `#[confer(flatten)]`, and detecting table types without `#[confer(table)]`. Origin: [RFC-0004](./devel-0.0.x/RFC-0004_nested_tables.md#out-of-scope--future-work).
+- **More table shapes.** Maps of tables (`BTreeMap<String, T>` ↔ `[App.servers.alpha]`, `[App.servers.beta]`), `Option<Vec<T>>` and `Box<T>` table fields, `#[confer(flatten)]`, and detecting table types without `#[confer(table)]`. During 0.1.x, new shapes must be recognized by the derive, not added as blanket `ConfigTable` implementations such as `impl<T: ConfigTable> ConfigTable for Box<T>`, which would break downstream implementations. Origin: [RFC-0004](./devel-0.0.x/RFC-0004_nested_tables.md#out-of-scope--future-work), [AUDIT-002](./devel-0.1.x/AUDIT-002_quality_0.1.0-beta.1.md) A4.
+- **Explicit crate path for the derive.** The derives find the core crate through Cargo, so a facade crate that re-exports `conferencier` cannot direct the generated code to its re-export. Direction: an additive `#[confer(crate = "path")]` container attribute, as in `serde`. Origin: [AUDIT-002](./devel-0.1.x/AUDIT-002_quality_0.1.0-beta.1.md) A1.
 - **Scopes owning nested sections.** `#[confer(section = "App.server")]` names a top-level key that contains a dot. Direction: treat `section` as a path, with rules for which scope owns which sub-table. Origin: [RFC-0004](./devel-0.0.x/RFC-0004_nested_tables.md#out-of-scope--future-work).
 - **Hooks around load and save**, for example to compute derived values or check invariants. Origin: [RFC-0001](./devel-0.0.x/RFC-0001_baseline_architecture.md#limitations).
 
 ### Store and errors
 
 - **Inspecting unknown keys without rejecting them.** Strict scopes fail on the first unknown key, while lenient scopes currently provide no direct way to report leftovers for application logging or diagnostics. Direction: a non-mutating API that lists unmapped keys without changing lenient loading; define how it handles nested tables, strict and lenient table types, and manually implemented `ConfigTable`s before proposing an RFC. Origin: review feedback on [RFC-0006](./devel-0.0.x/RFC-0006_strict_unknown_keys.md).
+- **Unshared scope values.** `ConfigScope::from_store` always returns a `SharedScope`, so tests, validation or one-shot tools that want a plain value derive `ConfigTable` as well and call `from_table` with the section name. Direction: a free function or an extension trait; during 0.1.x neither a new `ConfigScope` method nor a derive-generated inherent method is compatible. Origin: [AUDIT-002](./devel-0.1.x/AUDIT-002_quality_0.1.0-beta.1.md) A2.
 - **Path-based typed getters and setters on `ConfigStore`**, for reading or writing a value such as `App.server.port` without a scope. Origin: [RFC-0004](./devel-0.0.x/RFC-0004_nested_tables.md#out-of-scope--future-work).
 - **Structured error paths.** Errors inside nested tables carry diagnostic paths as strings, such as `App.upstream[1]`; [RFC-0006](./devel-0.0.x/RFC-0006_strict_unknown_keys.md#error-paths) makes this notation unambiguous and adds public formatting helpers, but does not add a structured path type. Direction: consider a structured type if callers need to inspect path segments without parsing display notation. Origin: [RFC-0004](./devel-0.0.x/RFC-0004_nested_tables.md#alternatives-considered), [RFC-0006](./devel-0.0.x/RFC-0006_strict_unknown_keys.md#out-of-scope).
 - **Caller-specified permissions for new files.** [RFC-0010](./devel-0.0.x/RFC-0010_save_file_permissions.md) preserves the mode bits of an existing Unix target, but a new target gets the operating system's default permissions, so a private file must be pre-created by the caller. Direction: an option to request a Unix mode for a file created by `save_file`, applied to the temporary file before writing; decide what it means on Windows before proposing an RFC. Origin: review feedback on the RFC-0010 draft.
