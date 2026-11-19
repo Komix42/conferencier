@@ -185,12 +185,7 @@ where
                 match convert(path, key, item) {
                     Ok(v) => out.push(v),
                     Err(err) => {
-                        return Err(match err {
-                            Error::TypeMismatch { .. } | Error::ValueParse { .. } => {
-                                annotate_with_index(err, index)
-                            }
-                            other => other,
-                        });
+                        return Err(annotate_with_index(err, index));
                     }
                 }
             }
@@ -228,17 +223,6 @@ fn annotate_with_index(error: Error, index: usize) -> Error {
             table_path,
             key,
             message: format!("{message} (at index {index})"),
-        },
-        Error::TypeMismatch {
-            table_path,
-            key,
-            expected,
-            found,
-        } => Error::TypeMismatch {
-            table_path,
-            key,
-            expected,
-            found,
         },
         other => other,
     }

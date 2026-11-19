@@ -21,7 +21,6 @@ toml.workspace = true
 conferencier-derive = { workspace = true, optional = true }
 
 [dev-dependencies]
-once_cell = "1.19"
 tempfile = "3"
 tokio = { version = "1.39", default-features = false, features = ["macros", "rt-multi-thread"] }
 
