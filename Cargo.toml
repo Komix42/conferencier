@@ -1,5 +1,5 @@
 [workspace]
-members = ["conferencier", "conferencier-derive", "tests/derive", "tests/derive-msrv", "tests/readme", "examples/uptime-monitor", "examples/folder-indexer", "examples/modular-agent"]
+members = ["conferencier", "conferencier-derive", "tests/derive", "tests/derive-msrv", "tests/docs", "examples/uptime-monitor", "examples/folder-indexer", "examples/modular-agent"]
 default-members = ["conferencier"]
 resolver = "3"
 

@@ -13,7 +13,7 @@ categories = ["development-tools::procedural-macro-helpers", "config"]
 
 [lib]
 proc-macro = true
-# Consumer examples are tested by conferencier's doctests and the trybuild suite.
+# The examples in doc/ need conferencier; tests/docs runs them as doctests.
 doctest = false
 
 [dependencies]

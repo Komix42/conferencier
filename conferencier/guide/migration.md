@@ -57,7 +57,10 @@ impl ConfigTable for Settings {
 
 **After (0.1.0-beta.1):**
 
-```rust,ignore
+```rust
+# use conferencier::{ConfigTable, Error, Result};
+# use conferencier::toml::Table;
+# struct Settings;
 impl ConfigTable for Settings {
     fn from_table(table_path: &str, _table: Table) -> Result<Self> {
         Err(Error::missing_key_error(table_path, "port"))
@@ -67,6 +70,7 @@ impl ConfigTable for Settings {
         Ok(Table::new())
     }
 }
+# assert!(Settings::from_table("App", Table::new()).is_err());
 ```
 
 ### Tokio, setters and `Debug`

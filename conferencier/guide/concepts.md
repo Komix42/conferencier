@@ -118,6 +118,10 @@ async fn reload<S: ConfigScope>(
     store.load_file(path).await?;
     S::load(scope, store).await
 }
+# #[derive(ConfigScope)]
+# #[confer(section = "App")]
+# struct App {}
+# let _ = reload::<App>;
 ```
 
 - `ConfigStore::load_file` and `ConfigStore::load_str` replace the whole store, including sections that no scope owns and values saved into the store but not yet written to a file. If the new document cannot be read or parsed, the store keeps its previous content.

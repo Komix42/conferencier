@@ -1,4 +1,5 @@
 #![cfg_attr(feature = "derive", doc = include_str!("../guide/overview.md"))]
+#![doc(test(attr(deny(warnings))))]
 #![cfg_attr(
     not(feature = "derive"),
     doc = r#"A minimal, easy-to-use TOML configuration library for Tokio applications.

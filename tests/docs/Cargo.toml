@@ -1,10 +1,10 @@
 [package]
-name = "readme-tests"
+name = "docs-tests"
 version = "0.0.0"
 edition.workspace = true
 rust-version.workspace = true
 publish = false
-description = "Runs the Rust code blocks of the repository README as doctests"
+description = "Runs the README and derive documentation examples as doctests"
 
 [dev-dependencies]
 conferencier = { path = "../../conferencier" }

@@ -103,6 +103,7 @@ impl IoOperation {
 ///         }
 ///     }
 /// }
+/// # report_save_failure(&Error::from(std::io::Error::other("disk full")));
 /// ```
 ///
 /// File methods attach operation and path context to [`Error::Io`]. Converting a

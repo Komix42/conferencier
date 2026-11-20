@@ -39,13 +39,23 @@ async fn main() -> conferencier::Result<()> {
     )?;
     let config: SharedScope<HttpConfig> = HttpConfig::from_store(&store)?;
 
-    let config = config.read().await;
-    println!("HTTP server configured for {}:{}", config.address, config.port);
+    {
+        let config = config.read().await;
+        println!("HTTP server configured for {}:{}", config.address, config.port);
+    }
+
+    // Update runtime state under the write lock and release it right away.
+    {
+        let mut config = config.write().await;
+        config.request_count += 1;
+    }
+
+    println!("Requests handled: {}", config.read().await.request_count);
     Ok(())
 }
 ```
 
-`request_count` is runtime state: it starts at zero and is never read from or written to TOML. A real application would load its configuration file with `ConfigStore::from_file(path).await?` instead of `from_str`.
+`request_count` is runtime state: it starts at zero and is never read from or written to TOML. Hold a scope guard only for a short block; a single write guard keeps several related changes consistent for other readers. A real application would load its configuration file with `ConfigStore::from_file(path).await?` instead of `from_str`.
 
 Add `conferencier` and Tokio to your project:
 
