@@ -43,4 +43,5 @@ fn trybuild_suite() {
     t.compile_fail("tests/trybuild/fail_deny_unknown_keys_value.rs");
     t.compile_fail("tests/trybuild/fail_deny_unknown_keys_field.rs");
     t.compile_fail("tests/trybuild/fail_unknown_attribute.rs");
+    t.compile_fail("tests/trybuild/fail_ignored_field_not_send.rs");
 }

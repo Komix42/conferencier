@@ -15,7 +15,7 @@ use crate::model::{
 pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
     let Scope {
         ident,
-        generics,
+        mut generics,
         section,
         section_span,
         deny_unknown_keys,
@@ -23,6 +23,15 @@ pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
     } = scope;
 
     let section_lit = LitStr::new(&section, Span::call_site());
+    // Make the trait's bounds explicit so failures do not cascade through generated futures.
+    let (_, ty_generics, _) = generics.split_for_impl();
+    let scope_type: syn::Type = syn::parse_quote!(#ident #ty_generics);
+    generics
+        .make_where_clause()
+        .predicates
+        .push(syn::parse_quote!(
+            #scope_type: ::core::marker::Send + ::core::marker::Sync + 'static
+        ));
     let path = generated_local("path");
     let path_expr = quote! { &#path };
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
