@@ -1,0 +1,5 @@
+error: #[confer(deny_unknown_keys)] is a struct attribute
+ --> tests/trybuild/fail_deny_unknown_keys_field.rs:5:14
+  |
+5 |     #[confer(deny_unknown_keys)]
+  |              ^^^^^^^^^^^^^^^^^

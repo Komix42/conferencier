@@ -13,7 +13,7 @@ Thanks for your interest in improving **conferencier**! This quick guide explain
    cargo test -p conferencier --features toml/preserve_order --test scope_integration strict_scope_reports_smallest_unknown_key_with_preserved_order --locked -- --ignored
    ```
 
-   The first command covers the whole workspace, including the compile-fail tests of the derive macro and the README examples (see [Documentation](#documentation)). Their expected compiler output (`conferencier-derive/tests/trybuild/*.stderr`) follows the latest stable Rust. If you change a diagnostic on purpose, rerun the tests with the `TRYBUILD=overwrite` environment variable set and review the updated files.
+   The first command covers the whole workspace, including the compile-fail tests of the derive macro and the README examples (see [Documentation](#documentation)). The trybuild snapshots (`tests/derive/tests/trybuild/*.stderr`) follow the latest stable Rust. If you change a diagnostic on purpose, rerun the tests with the `TRYBUILD=overwrite` environment variable set and review the updated files. The same cases with Rust 1.85 (MSRV) snapshots live in `tests/derive-msrv/`; this suite is ignored by default, so update it as well with `cargo +1.85 test -p derive-msrv-tests --locked -- --ignored`. Changes to a test case's `.rs` file must be copied to both suites.
 
    The last command runs the otherwise ignored strict-ordering test with `toml/preserve_order`; it checks that the feature actually preserves insertion order before testing the reported key.
 
@@ -89,7 +89,8 @@ and confirm they contain no `docs.rs/conferencier/latest` links.
 
 ## Documentation
 
-- **`README.md`** is a short showcase shared by GitHub and crates.io. Cargo copies it into the root of the `conferencier` package, so its links must be absolute URLs. Its Rust code blocks run as doctests of the unpublished `readme-tests` workspace member.
+- **`README.md`** is a short showcase shared by GitHub and crates.io. Cargo copies it into the root of the `conferencier` package, so its links must be absolute URLs. Its Rust code blocks run as doctests of the unpublished `readme-tests` workspace member in `tests/readme/`.
+- **`tests/`** holds unpublished workspace members for test suites that need to test across crates or use repository files. `derive-tests` runs the derive macro's trybuild suite against both library crates, `derive-msrv-tests` runs the same suite with Rust 1.85 diagnostics; `readme-tests` runs the README code blocks. Consumer examples in `conferencier-derive` are covered by the core crate's doctests and the trybuild suite because the derive package cannot depend on the core crate without a release cycle.
 - **`conferencier/guide/`** holds the user guide in Markdown. `overview.md` is the crate-level documentation; the other pages become modules of `conferencier::guide` (see `conferencier/src/guide.rs`) and are listed in `index.md`. A new page needs both. The guide is part of the package, so its Rust code blocks run as doctests and its intra-doc links are checked by `cargo doc`; link between pages and to API items with intra-doc links, not with file paths.
 - **Migration steps** for every release belong to `conferencier/guide/migration.md`; `CHANGELOG.md` only links to them.
 - **`docs/`** contains the [backlog](docs/BACKLOG.md) and the design records (RFCs, implementation reports and audits) grouped by version series, such as `docs/devel-0.0.x/`.

@@ -1,0 +1,11 @@
+error[E0425]: cannot find value `store` in this scope
+ --> tests/trybuild/fail_ignore_expr_scope.rs:4:23
+  |
+4 |     #[confer(ignore = store.clone())]
+  |                       ^^^^^ not found in this scope
+
+error[E0425]: cannot find value `__confer_field_port` in this scope
+  --> tests/trybuild/fail_ignore_expr_scope.rs:11:23
+   |
+11 |     #[confer(ignore = __confer_field_port)]
+   |                       ^^^^^^^^^^^^^^^^^^^ not found in this scope

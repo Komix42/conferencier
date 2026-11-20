@@ -1,0 +1,29 @@
+error: `ConferApp` needs an explicit section: conferencier 0.0.4 stripped the leading `Confer` and used `[App]`, but the default section is now the full struct name `[ConferApp]`; add #[confer(section = "App")] to keep the old section or #[confer(section = "ConferApp")] to use the full name
+ --> tests/trybuild/fail_confer_prefix.rs:4:8
+  |
+4 | struct ConferApp {
+  |        ^^^^^^^^^
+
+error: `ConferRaw` needs an explicit section: conferencier 0.0.4 stripped the leading `Confer` and used `[Raw]`, but the default section is now the full struct name `[ConferRaw]`; add #[confer(section = "Raw")] to keep the old section or #[confer(section = "ConferRaw")] to use the full name
+ --> tests/trybuild/fail_confer_prefix.rs:9:8
+  |
+9 | struct r#ConferRaw {
+  |        ^^^^^^^^^^^
+
+error: `ConferConferApp` needs an explicit section: conferencier 0.0.4 stripped the leading `Confer` and used `[ConferApp]`, but the default section is now the full struct name `[ConferConferApp]`; add #[confer(section = "ConferApp")] to keep the old section or #[confer(section = "ConferConferApp")] to use the full name
+  --> tests/trybuild/fail_confer_prefix.rs:14:8
+   |
+14 | struct ConferConferApp {
+   |        ^^^^^^^^^^^^^^^
+
+error: `ConferÉtat` needs an explicit section: conferencier 0.0.4 stripped the leading `Confer` and used `[État]`, but the default section is now the full struct name `[ConferÉtat]`; add #[confer(section = "État")] to keep the old section or #[confer(section = "ConferÉtat")] to use the full name
+  --> tests/trybuild/fail_confer_prefix.rs:19:8
+   |
+19 | struct ConferÉtat {
+   |        ^^^^^^^^^^
+
+error: `ConferBoth` needs an explicit section: conferencier 0.0.4 stripped the leading `Confer` and used `[Both]`, but the default section is now the full struct name `[ConferBoth]`; add #[confer(section = "Both")] to keep the old section or #[confer(section = "ConferBoth")] to use the full name
+  --> tests/trybuild/fail_confer_prefix.rs:25:8
+   |
+25 | struct ConferBoth {
+   |        ^^^^^^^^^^

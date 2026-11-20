@@ -5,5 +5,5 @@
 //! in this workspace and in the published package. This crate is not published.
 
 #[cfg(doctest)]
-#[doc = include_str!("../../README.md")]
+#[doc = include_str!("../../../README.md")]
 struct ReadmeDoctests;

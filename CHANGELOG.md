@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+- Moved the derive macro's cross-crate trybuild suite into the unpublished `derive-tests` workspace member, and added its `derive-msrv-tests` copy with Rust 1.85 snapshots that CI runs on the MSRV. Disabled the derive crate's consumer-dependent doctests; their examples remain covered by `conferencier` doctests and the trybuild suite, so `cargo test` also succeeds from the published derive archive.
+
 ## [0.1.0-beta.1] - 2026-11-19
 
 ### Added

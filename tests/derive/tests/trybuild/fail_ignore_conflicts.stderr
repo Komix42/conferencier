@@ -1,0 +1,11 @@
+error: #[confer(default)] cannot be combined with #[confer(ignore)]; use #[confer(ignore = <expr>)]
+ --> tests/trybuild/fail_ignore_conflicts.rs:3:22
+  |
+3 |     #[confer(ignore, default = 5)]
+  |                      ^^^^^^^
+
+error: #[confer(rename)] cannot be combined with #[confer(ignore)]; an ignored field has no TOML key
+ --> tests/trybuild/fail_ignore_conflicts.rs:9:14
+  |
+9 |     #[confer(rename = "other")]
+  |              ^^^^^^

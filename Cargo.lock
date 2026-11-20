@@ -86,11 +86,27 @@ dependencies = [
 name = "conferencier-derive"
 version = "0.1.0"
 dependencies = [
- "conferencier",
  "proc-macro-crate",
  "proc-macro2",
  "quote",
  "syn 3.0.9",
+]
+
+[[package]]
+name = "derive-msrv-tests"
+version = "0.0.0"
+dependencies = [
+ "conferencier",
+ "conferencier-derive",
+ "trybuild",
+]
+
+[[package]]
+name = "derive-tests"
+version = "0.0.0"
+dependencies = [
+ "conferencier",
+ "conferencier-derive",
  "trybuild",
 ]
 

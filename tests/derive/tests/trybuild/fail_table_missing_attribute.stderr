@@ -1,0 +1,5 @@
+error: unsupported field type `Server`; supported types are recognized by their final path segment and type aliases are opaque. Nested table fields require #[confer(table)] and an implementation of ConfigTable
+ --> tests/trybuild/fail_table_missing_attribute.rs:8:13
+  |
+8 |     server: Server,
+  |             ^^^^^^

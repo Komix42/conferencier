@@ -1,0 +1,17 @@
+error: #[confer(init)] was removed in 0.0.4; use #[confer(ignore = <expr>)] for ignored fields; remove it from loaded fields and add #[confer(default = ...)] only if a missing-key fallback is intended
+ --> tests/trybuild/fail_init_removed.rs:3:14
+  |
+3 |     #[confer(init = "Default::default()")]
+  |              ^^^^
+
+error: #[confer(init)] was removed in 0.0.4; use #[confer(ignore = <expr>)] for ignored fields; remove it from loaded fields and add #[confer(default = ...)] only if a missing-key fallback is intended
+ --> tests/trybuild/fail_init_removed.rs:9:22
+  |
+9 |     #[confer(ignore, init = "Vec::new()")]
+  |                      ^^^^
+
+error: #[confer(init)] was removed in 0.0.4; use #[confer(ignore = <expr>)] for ignored fields; remove it from loaded fields and add #[confer(default = ...)] only if a missing-key fallback is intended
+  --> tests/trybuild/fail_init_removed.rs:15:14
+   |
+15 |     #[confer(init)]
+   |              ^^^^

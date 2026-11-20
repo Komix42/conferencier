@@ -7,5 +7,5 @@ publish = false
 description = "Runs the Rust code blocks of the repository README as doctests"
 
 [dev-dependencies]
-conferencier = { path = "../conferencier" }
+conferencier = { path = "../../conferencier" }
 tokio = { version = "1.39", features = ["macros", "rt-multi-thread"] }

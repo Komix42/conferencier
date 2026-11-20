@@ -1,0 +1,8 @@
+error[E0277]: `std::string::String` cannot be used as a nested configuration table
+ --> tests/trybuild/fail_table_not_implemented.rs:6:11
+  |
+6 |     name: String,
+  |           ^^^^^^ the trait `ConfigTable` is not implemented for `std::string::String`
+  |
+  = note: derive it with `#[derive(ConfigTable)]` or implement `ConfigTable` manually
+  = help: the trait `ConfigTable` is implemented for `NotATable`

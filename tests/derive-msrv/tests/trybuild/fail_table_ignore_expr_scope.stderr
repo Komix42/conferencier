@@ -1,0 +1,17 @@
+error[E0425]: cannot find value `table` in this scope
+ --> tests/trybuild/fail_table_ignore_expr_scope.rs:5:23
+  |
+5 |     #[confer(ignore = table.len())]
+  |                       ^^^^^ not found in this scope
+
+error[E0423]: expected value, found built-in attribute `path`
+  --> tests/trybuild/fail_table_ignore_expr_scope.rs:12:23
+   |
+12 |     #[confer(ignore = path.to_string())]
+   |                       ^^^^ not a value
+
+error[E0425]: cannot find value `__confer_field_port` in this scope
+  --> tests/trybuild/fail_table_ignore_expr_scope.rs:19:23
+   |
+19 |     #[confer(ignore = __confer_field_port)]
+   |                       ^^^^^^^^^^^^^^^^^^^ not found in this scope

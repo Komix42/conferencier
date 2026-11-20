@@ -60,7 +60,7 @@ jobs:
           - test: core-no-defaults
             command: cargo test -p conferencier --no-default-features --locked
           - test: derive
-            command: cargo test -p conferencier-derive --locked
+            command: cargo test -p conferencier-derive -p derive-tests --locked
     steps:
       - uses: actions/checkout@v4
 
@@ -122,9 +122,11 @@ jobs:
       - name: Check core (no default features)
         run: cargo check -p conferencier --no-default-features --locked
 
-      # trybuild tests are skipped here: their .stderr snapshots track stable diagnostics.
       - name: Run core tests
         run: cargo test -p conferencier --all-features --locked
+
+      - name: Run trybuild tests with MSRV snapshots
+        run: cargo test -p derive-msrv-tests --locked -- --ignored
 
       - name: Check fresh MSRV dependency resolution
         if: runner.os == 'Linux'

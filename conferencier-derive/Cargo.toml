@@ -13,15 +13,11 @@ categories = ["development-tools::procedural-macro-helpers", "config"]
 
 [lib]
 proc-macro = true
+# Consumer examples are tested by conferencier's doctests and the trybuild suite.
+doctest = false
 
 [dependencies]
 proc-macro2 = "1"
 quote = "1"
 syn = { version = "3", features = ["full", "extra-traits"] }
 proc-macro-crate = "3"
-
-[dev-dependencies]
-trybuild = "1.0"
-# Path-only on purpose: a versioned dev-dependency would create a publish cycle
-# with `conferencier`, which itself depends on this crate.
-conferencier = { path = "../conferencier" }
