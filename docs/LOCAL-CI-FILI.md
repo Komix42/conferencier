@@ -26,6 +26,8 @@ cargo test -p conferencier --no-default-features --locked
 cargo test -p conferencier-derive --locked
 cargo test -p conferencier --features toml/preserve_order --test scope_integration strict_scope_reports_smallest_unknown_key_with_preserved_order --locked -- --ignored
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
+cargo semver-checks --package conferencier --baseline-rev v0.1.0-beta.1 --release-type minor --default-features
+cargo semver-checks --package conferencier --baseline-rev v0.1.0-beta.1 --release-type minor --only-explicit-features
 cargo +1.85 check --workspace --all-targets --all-features --locked
 cargo +1.85 check -p conferencier --no-default-features --locked
 cargo +1.85 test -p conferencier --all-features --locked
@@ -35,6 +37,9 @@ cargo publish --workspace --dry-run --locked
 
 - In PowerShell, set `$env:RUSTDOCFLAGS = "-D warnings"` before `cargo doc` and
   remove it afterwards with `Remove-Item Env:RUSTDOCFLAGS`.
+- The semver commands require `cargo-semver-checks` on the machine running
+  them (`cargo install cargo-semver-checks --locked` with stable Rust). Keep
+  their baseline tag in sync with CI after each publication.
 - The publish dry run needs network access and a clean working tree. If it
   reports stale sources of the unpublished derive crate, rerun it with a fresh
   temporary `CARGO_HOME`.
@@ -106,5 +111,6 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 source ~/.cargo/env
 rustup toolchain install 1.85
 cargo install cargo-audit --locked
+cargo install cargo-semver-checks --locked
 git clone -b develop /mnt/c/Users/komix/source/conferencier ~/conferencier
 ```

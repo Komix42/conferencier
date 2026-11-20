@@ -43,20 +43,27 @@ MSRV-aware dependency resolution in fallback mode on Rust 1.85. The fresh
 resolution uses an isolated lockfile and must not change the workspace
 `Cargo.lock`.
 
-Before publishing `0.1.0-beta.1`, audit the intentional transition from 0.0.8
-with `cargo-semver-checks`, using `--release-type minor` explicitly:
+Before publishing `0.1.0-beta.1`, the intentional transition from 0.0.8 was
+audited with `cargo-semver-checks`, using `--release-type minor` explicitly:
 
 ```powershell
 cargo semver-checks --package conferencier --baseline-version 0.0.8 --release-type minor --default-features
 cargo semver-checks --package conferencier --baseline-version 0.0.8 --release-type minor --only-explicit-features
 ```
 
-This is a reviewed audit, not a requirement that the transition have no
-reported breaks. Reconcile every break with the compatibility and migration
-documentation. After the beta.1 tag exists, compare each candidate with the
-immediately preceding 0.1.x tag using `--baseline-rev <tag>` and
-`--release-type minor`, using the same two feature configurations shown above.
-The baseline includes pre-releases and advances after each publication.
+This was a reviewed audit, not a requirement that the transition have no
+reported breaks.
+
+CI checks `conferencier` with and without default features against the
+immediately preceding published 0.1.x tag, including pre-releases. After each
+publication, update `baseline-rev` in `.github/workflows/ci.yml` and the local
+commands in `docs/LOCAL-CI-FILI.md` to the new tag.
+
+The check uses `--release-type minor` explicitly: without it, a pre-release
+transition can be treated as a major change and skip the breaking-change
+checks. The checker uses stable Rust and does not detect every API or
+behavioral incompatibility, so the existing tests, MSRV checks and manual
+review are still required.
 
 `cargo-semver-checks` cannot check `conferencier-derive`: a proc-macro crate
 has no library API for it to compare. The derive's compatibility is covered by

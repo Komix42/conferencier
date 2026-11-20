@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+- CI checks `conferencier` for API compatibility with the preceding published 0.1.x tag, including pre-releases, with and without default features.
+
 ### Changed
 - Moved the derive macro's cross-crate trybuild suite into the unpublished `derive-tests` workspace member, and added its `derive-msrv-tests` copy with Rust 1.85 snapshots that CI runs on the MSRV. Disabled the derive crate's own doctests, so `cargo test` also succeeds from the published derive archive; its examples moved to `conferencier-derive/doc/` and run as doctests of the unpublished `docs-tests` member (formerly `readme-tests`).
 - Unsupported `#[confer(...)]` attributes are reported by name together with the list of supported struct or field attributes, e.g. ``unsupported attribute `defualt` for #[derive(ConfigScope)]; supported field attributes: …``.

@@ -47,6 +47,26 @@ jobs:
       - name: Check core library without default features
         run: cargo check -p conferencier --lib --no-default-features --locked
 
+  semver:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        feature_group: [default-features, only-explicit-features]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check public API compatibility
+        uses: obi1kenobi/cargo-semver-checks-action@v2
+        with:
+          package: conferencier
+          feature-group: ${{ matrix.feature_group }}
+          # Update to the latest published 0.1.x tag, including pre-releases.
+          baseline-rev: v0.1.0-beta.1
+          release-type: minor
+
   test:
     runs-on: ${{ matrix.os }}
     strategy:

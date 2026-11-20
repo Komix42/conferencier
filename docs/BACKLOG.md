@@ -35,7 +35,6 @@ The section-name migration guard stays until 0.2.0.
 
 ## Technical debt
 
-- **Semver CI after beta.1.** Before the first release after `0.1.0-beta.1`, add `cargo-semver-checks` to CI, checking `conferencier` with and without default features; the proc-macro crate `conferencier-derive` cannot be checked by it. Compare each candidate against the immediately preceding published 0.1.x tag, including pre-releases, with `--release-type minor`, and advance the baseline after each release. Origin: [RFC-0011](./devel-0.1.x/RFC-0011_api_polish_before_0.1.md).
 - **Temporary section-name migration guard.** Following [RFC-0005](./devel-0.0.x/RFC-0005_api_redesign.md), `ConfigScope` derives in 0.0.5 and later 0.0.x and 0.1.x releases whose implicit section was affected by the old `Confer` prefix rule require an explicit section. Remove the guard in 0.2.0, and warn in its migration notes that a direct upgrade from 0.0.4 bypasses the guard. Origin: RFC-0005 N7.
 
 ## Ideas
@@ -77,6 +76,7 @@ The README's [Project scope](../README.md#project-scope) lists these as intentio
 <a name="planned-for-010-beta1"></a>
 <a name="beta1-release-steps"></a>
 
+- **Semver CI after beta.1**: added for `0.1.0` ([RFC-0011](./devel-0.1.x/RFC-0011_api_polish_before_0.1.md)).
 - **0.1.0-beta.1 release**: published after review and verification ([release](https://github.com/Komix42/conferencier/releases/tag/v0.1.0-beta.1), [release plan](https://github.com/Komix42/conferencier/blob/v0.1.0-beta.1/docs/BACKLOG.md#beta1-release-steps)).
 - **AUDIT-002 fixes before the API freeze (A1, B1–B3, A2 documentation)**: completed for `0.1.0-beta.1` ([AUDIT-002](./devel-0.1.x/AUDIT-002_quality_0.1.0-beta.1.md)).
 - **RFC-0011 and internal 0.0.8 audit fixes (A1–A8, B1–B5)**: implemented and documented for `0.1.0-beta.1` ([RFC-0011](./devel-0.1.x/RFC-0011_api_polish_before_0.1.md), [AUDIT-001](./devel-0.0.x/AUDIT-001_quality_0.0.8.md)).
