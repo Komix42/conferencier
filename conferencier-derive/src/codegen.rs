@@ -52,8 +52,14 @@ pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
     let shared_scope = quote! { #crate_path::SharedScope<Self> };
     let result_type = quote! { #crate_path::Result };
     let table_type = quote! { #crate_path::toml::Table };
+    // The desugared form of `async fn`; clippy's `unused_async_trait_impl` would flag an
+    // `async fn` without `.await` in a scope that has only ignored fields.
+    let future_type = quote! {
+        impl ::core::future::Future<Output = #result_type<()>> + ::core::marker::Send
+    };
     let section_marker = section_span.map(|_| {
         quote! {
+            #[automatically_derived]
             impl #impl_generics #crate_path::__private::DerivedConfigScope
                 for #ident #ty_generics #where_clause {}
         }
@@ -91,6 +97,7 @@ pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
         quote! {
             let mut #guard = #scope.write().await;
             #( #guard.#loaded_idents = #loaded_locals; )*
+            ::core::mem::drop(#guard);
         }
     };
 
@@ -102,6 +109,7 @@ pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
                 let #guard = #scope.read().await;
                 let mut #table = #table_type::new();
                 #( #store_statements )*
+                ::core::mem::drop(#guard);
                 #table
             }
         }
@@ -110,6 +118,7 @@ pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
     Ok(quote! {
         #section_marker
 
+        #[automatically_derived]
         impl #impl_generics #crate_path::ConfigScope for #ident #ty_generics #where_clause {
             fn from_store(#store: &#store_type) -> #result_type<#shared_scope> {
                 #path_binding
@@ -120,19 +129,23 @@ pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
                 ::core::result::Result::Ok(#crate_private::new_shared_scope(#value))
             }
 
-            async fn load(#scope: &#shared_scope, #store: &#store_type) -> #result_type<()> {
-                #path_binding
-                #snapshot
-                #unknown_key_check
-                #( #load_statements )*
-                #assign
-                ::core::result::Result::Ok(())
+            fn load(#scope: &#shared_scope, #store: &#store_type) -> #future_type {
+                async move {
+                    #path_binding
+                    #snapshot
+                    #unknown_key_check
+                    #( #load_statements )*
+                    #assign
+                    ::core::result::Result::Ok(())
+                }
             }
 
-            async fn save(#scope: &#shared_scope, #store: &#store_type) -> #result_type<()> {
-                #path_binding
-                let #table = #section_table;
-                #store.set_section(#section_lit, #table)
+            fn save(#scope: &#shared_scope, #store: &#store_type) -> #future_type {
+                async move {
+                    #path_binding
+                    let #table = #section_table;
+                    #store.set_section(#section_lit, #table)
+                }
             }
         }
     })
@@ -215,6 +228,7 @@ pub fn generate_table(scope: Scope, crate_path: syn::Path) -> Result<TokenStream
     };
 
     Ok(quote! {
+        #[automatically_derived]
         impl #impl_generics #crate_path::ConfigTable for #ident #ty_generics #where_clause {
             fn from_table(#from_params) -> #result_type<Self> {
                 #section_check
