@@ -104,7 +104,9 @@ fn parse_section_name(
                 Ok(())
             } else {
                 Err(meta.error(format!(
-                    "unsupported attribute on struct for #[derive({})]",
+                    "unsupported attribute `{}` on struct for #[derive({})]; supported struct \
+                     attributes: `section`, `deny_unknown_keys`",
+                    attribute_name(&meta.path),
                     derive.name()
                 )))
             }
@@ -206,7 +208,9 @@ fn parse_field(
                 Err(meta.error("#[confer(deny_unknown_keys)] is a struct attribute"))
             } else {
                 Err(meta.error(format!(
-                    "unsupported attribute for #[derive({})]",
+                    "unsupported attribute `{}` for #[derive({})]; supported field attributes: \
+                     `rename`, `default`, `field_defaults`, `ignore`, `table`",
+                    attribute_name(&meta.path),
                     derive.name()
                 )))
             }
@@ -336,6 +340,15 @@ fn legacy_section_name(name: &str) -> Option<&str> {
 /// Returns `true` when the attribute is `#[confer(...)]`.
 fn is_confer_attr(attr: &Attribute) -> bool {
     attr.path().is_ident("confer")
+}
+
+/// Formats an attribute path inside `#[confer(...)]` for diagnostics, e.g. `default` or `a::b`.
+fn attribute_name(path: &syn::Path) -> String {
+    path.segments
+        .iter()
+        .map(|segment| segment.ident.to_string())
+        .collect::<Vec<_>>()
+        .join("::")
 }
 
 /// Classifies a field type into container and scalar components.

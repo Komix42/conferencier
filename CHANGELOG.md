@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 - Moved the derive macro's cross-crate trybuild suite into the unpublished `derive-tests` workspace member, and added its `derive-msrv-tests` copy with Rust 1.85 snapshots that CI runs on the MSRV. Disabled the derive crate's own doctests, so `cargo test` also succeeds from the published derive archive; its examples moved to `conferencier-derive/doc/` and run as doctests of the unpublished `docs-tests` member (formerly `readme-tests`).
+- Unsupported `#[confer(...)]` attributes are reported by name together with the list of supported struct or field attributes, e.g. ``unsupported attribute `defualt` for #[derive(ConfigScope)]; supported field attributes: …``.
 - Documentation examples in `conferencier`, the README and the derive macros are now doctested with `deny(warnings)`. The README example no longer warns about the unread `request_count` field; it now updates the field under a short-lived write lock. The guide's reload and error examples use their helper functions, and the migration guide's current-API example is no longer ignored.
 
 ### Fixed
