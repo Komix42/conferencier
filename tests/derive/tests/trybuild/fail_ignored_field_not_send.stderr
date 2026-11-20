@@ -6,10 +6,12 @@ error[E0277]: `Rc<i32>` cannot be shared between threads safely
   |
   = help: within `ScopeWithNonSendIgnoredField`, the trait `Sync` is not implemented for `Rc<i32>`
 note: required because it appears within the type `ScopeWithNonSendIgnoredField`
- --> tests/trybuild/fail_ignored_field_not_send.rs:4:8
+ --> tests/trybuild/fail_ignored_field_not_send.rs:6:5
   |
 4 | struct ScopeWithNonSendIgnoredField {
-  |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+5 |     #[confer(ignore)]
+6 |     value: Rc<i32>,
+  |     ^^^^^^^^^^^^^^ required by this field
   = note: this error originates in the derive macro `conferencier_derive::ConfigScope` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error[E0277]: `Rc<i32>` cannot be sent between threads safely
@@ -20,8 +22,10 @@ error[E0277]: `Rc<i32>` cannot be sent between threads safely
   |
   = help: within `ScopeWithNonSendIgnoredField`, the trait `Send` is not implemented for `Rc<i32>`
 note: required because it appears within the type `ScopeWithNonSendIgnoredField`
- --> tests/trybuild/fail_ignored_field_not_send.rs:4:8
+ --> tests/trybuild/fail_ignored_field_not_send.rs:6:5
   |
 4 | struct ScopeWithNonSendIgnoredField {
-  |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+5 |     #[confer(ignore)]
+6 |     value: Rc<i32>,
+  |     ^^^^^^^^^^^^^^ required by this field
   = note: this error originates in the derive macro `conferencier_derive::ConfigScope` (in Nightly builds, run with -Z macro-backtrace for more info)
