@@ -101,8 +101,11 @@ use crate::value_conversion;
 /// Parsing uses `toml`'s default recursion limit. Cargo features are additive, so
 /// another dependency can enable `toml/unbounded` and remove that limit. Deeply
 /// nested input without the limit can overflow the stack during parsing. Values
-/// built in code are not limited and can overflow the stack when serialized,
-/// cloned or dropped. A stack overflow aborts the process. See the
+/// built in code are not limited: [`save_str`](Self::save_str) and
+/// [`save_file`](Self::save_file) can succeed even if the resulting document cannot
+/// be loaded again because it exceeds the parser's limit. Very deeply nested values
+/// can overflow the stack when serialized, cloned or dropped. A stack overflow aborts
+/// the process. See the
 /// [guide](https://docs.rs/conferencier/%5E0.1.0/conferencier/guide/concepts/index.html#nesting-limits).
 #[derive(Clone, Default)]
 pub struct ConfigStore {

@@ -99,7 +99,7 @@ fn load_before_runtime(path: &Path) -> conferencier::Result<ConfigStore> {
 
 Parsing uses the default recursion limit of `toml` (currently 80 levels with `toml` 1.2); that exact limit is not part of conferencier's API. Deeper arrays, inline tables, dotted keys and table headers return a parse error. Conferencier does not enable `toml/unbounded`, but Cargo features are additive, so another dependency can remove this limit. Applications loading untrusted TOML should check the feature graph with `cargo tree -e features -i toml`.
 
-Values created in code and inserted with [`ConfigStore::set_value`](crate::ConfigStore::set_value) or [`ConfigStore::set_section`](crate::ConfigStore::set_section) are not subject to the parser's limit. Very deeply nested values can overflow the stack when serialized, cloned or dropped; a stack overflow aborts the process.
+Values created in code and inserted with [`ConfigStore::set_value`](crate::ConfigStore::set_value) or [`ConfigStore::set_section`](crate::ConfigStore::set_section) are not subject to the parser's limit. [`save_str`](crate::ConfigStore::save_str) and [`save_file`](crate::ConfigStore::save_file) can therefore succeed even if the resulting document cannot be loaded again because it exceeds the parser's limit. Very deeply nested values can overflow the stack when serialized, cloned or dropped; a stack overflow aborts the process.
 
 ## Reloading configuration
 
