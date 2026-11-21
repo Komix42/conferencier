@@ -6,33 +6,6 @@ Unlike the RFCs and implementation reports in the version folders such as [`deve
 
 Each entry states the problem, a possible direction and where it comes from.
 
-## Planned for 0.1.0
-
-`0.1.0-beta.1` is the first release covered by the 0.1.x compatibility
-commitment. Under the compatibility policy in RFC-0011, each subsequent 0.1.x
-pre-release and release must remain backward compatible with the immediately
-preceding published 0.1.x version; a necessary breaking change is deferred to
-0.2.0. The exact `=` requirement on `conferencier-derive` makes beta
-dependencies resolve to that precise derive release rather than a later beta.
-
-### Stable 0.1.0 exit criteria
-
-Publish stable `0.1.0` only when all of the following hold:
-
-- The [beta.1 release steps](#beta1-release-steps) are complete, including the
-  final checks, exact derive requirement and closure of AUDIT-001 and AUDIT-002.
-- The example applications have been built and tested against the beta API.
-- All CI jobs pass on the release candidate, including cross-platform tests,
-  MSRV checks, packaged doctests and publish dry-runs for both crates. The three
-  packaged-consumer checks in [CONTRIBUTING.md](../CONTRIBUTING.md) also pass on
-  Rust 1.85.
-- The semver CI check against the immediately preceding published 0.1.x tag,
-  including pre-releases, passes.
-- The README development status, changelog and migration guide describe the
-  stable release accurately, and no known breaking change remains for 0.1.x.
-
-The section-name migration guard stays until 0.2.0.
-
 ## Technical debt
 
 - **Temporary section-name migration guard.** Following [RFC-0005](./devel-0.0.x/RFC-0005_api_redesign.md), `ConfigScope` derives in 0.0.5 and later 0.0.x and 0.1.x releases whose implicit section was affected by the old `Confer` prefix rule require an explicit section. Remove the guard in 0.2.0, and warn in its migration notes that a direct upgrade from 0.0.4 bypasses the guard. Origin: RFC-0005 N7.
@@ -75,7 +48,9 @@ The README's [Project scope](../README.md#project-scope) lists these as intentio
 <!-- Keep these anchors for links from RFC-0011 and AUDIT-002. -->
 <a name="planned-for-010-beta1"></a>
 <a name="beta1-release-steps"></a>
+<a name="stable-010-exit-criteria"></a>
 
+- **0.1.0-beta.1 release preparation**: completed; ongoing 0.1.x release checks are documented in the [release checklist](../CONTRIBUTING.md#release-checklist), and the compatibility policy is in the [README](../README.md#status-and-compatibility).
 - **Semver CI after beta.1**: added for `0.1.0` ([RFC-0011](./devel-0.1.x/RFC-0011_api_polish_before_0.1.md)).
 - **0.1.0-beta.1 release**: published after review and verification ([release](https://github.com/Komix42/conferencier/releases/tag/v0.1.0-beta.1), [release plan](https://github.com/Komix42/conferencier/blob/v0.1.0-beta.1/docs/BACKLOG.md#beta1-release-steps)).
 - **AUDIT-002 fixes before the API freeze (A1, B1–B3, A2 documentation)**: completed for `0.1.0-beta.1` ([AUDIT-002](./devel-0.1.x/AUDIT-002_quality_0.1.0-beta.1.md)).

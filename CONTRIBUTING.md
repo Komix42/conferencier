@@ -147,8 +147,9 @@ After publication:
 - [ ] Tag the release commit and create the matching GitHub release.
 - [ ] Update `baseline-rev` in `.github/workflows/ci.yml` and the matching
       baseline commands in `docs/LOCAL-CI-FILI.md` to the new tag.
-- [ ] Replace completed backlog items with versioned one-line notes under
-      `Done`, including the 0.1.0 release plan after the stable release.
+- [ ] Record completed backlog items as versioned one-line notes under `Done`;
+      keep release procedures and exit criteria in this checklist rather than
+      duplicating them in the backlog.
 
 ## Documentation
 

@@ -12,7 +12,7 @@ Conferencier keeps configuration explicit and predictable:
 
 - Derives map structs to TOML sections, nested tables and arrays of tables.
 - Rust types, defaults and optional fields make configuration visible in application code.
-- A store (`ConfigStore`) holds the TOML document; each scope (a struct implementing `ConfigScope`) copies data to or from it only when asked. Nothing reloads or saves in the background.
+- A store (`ConfigStore`) holds the TOML document; each scope (a struct implementing `ConfigScope`) copies data to or from it only when asked. Configuration is never reloaded or saved automatically.
 - Shared scopes (`SharedScope<T>`) use Tokio locks, while the store's in-memory operations are synchronous.
 
 ## Example

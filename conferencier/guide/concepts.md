@@ -4,7 +4,7 @@ Conferencier keeps the store and scopes separate; data moves between them only w
 - A **scope** is a struct implementing [`ConfigScope`](crate::ConfigScope), usually through `#[derive(ConfigScope)]`. A derived scope maps its loaded fields to one top-level TOML section; its ignored fields hold runtime state that never reaches the file. Async tasks share a scope through [`SharedScope<T>`](crate::SharedScope).
 - A **table** is a plain struct implementing [`ConfigTable`](crate::ConfigTable). It maps a nested table or an array of tables inside a scope.
 
-Nothing runs in the background. The main operations move data explicitly:
+Conferencier does not load or save configuration automatically. The main operations move data explicitly:
 
 | Call | Direction |
 |---|---|
@@ -16,7 +16,7 @@ Nothing runs in the background. The main operations move data explicitly:
 | [`ConfigStore::save_file`](crate::ConfigStore::save_file) | store → file |
 | [`ConfigStore::save_str`](crate::ConfigStore::save_str) | store → TOML string |
 
-Store getters and setters also read and change the in-memory document directly.
+Store getters and setters also read and change the in-memory document directly. A started file save can continue after its future is dropped; see [cancellation and relative paths](crate::guide::files#cancellation-and-relative-paths).
 
 A change in the store is therefore invisible to a scope until the scope is loaded again:
 
@@ -241,7 +241,43 @@ Other fields, such as `host` in this example, remain visible.
 
 Scopes and the store use different locks, chosen for their different uses.
 
-A scope's `SharedScope<T>` handle uses Tokio's `RwLock`, because tasks hold its guards while they work with the configuration and runtime state, possibly across an `.await`. The lock is not reentrant, so drop every guard of a scope before calling its `load` or `save` in the same task. For a derived scope with loaded fields, `load` locks the scope for writing and would wait for a held guard forever. `save` locks it for reading, which waits forever behind a held write guard and, because Tokio's lock is fair, also behind a held read guard while another task is waiting to write. Copy what you need out of a short-lived guard instead, for example `let port = server.read().await.port;`.
+A scope's `SharedScope<T>` handle uses Tokio's `RwLock`, because tasks hold its guards while they work with the configuration and runtime state, possibly across an `.await`. By taking a guard itself, the application chooses which related changes to group together. While one write guard is held, other tasks using the same lock cannot read the scope between those changes. Read related fields protected by this lock under one read guard to get a single snapshot; separate reads can observe values from different updates.
+
+For example, a range must keep `min <= max`. When changing it from `0..=5` to `10..=20`, setting `min` first temporarily violates that invariant. One write guard prevents other tasks from reading the scope between the two assignments:
+
+```rust
+use conferencier::{ConfigScope, ConfigStore};
+
+#[derive(ConfigScope)]
+#[confer(section = "Limits")]
+struct Limits {
+    min: u16,
+    max: u16,
+}
+
+# #[tokio::main(flavor = "current_thread")]
+# async fn main() -> conferencier::Result<()> {
+let store = ConfigStore::from_str("[Limits]\nmin = 0\nmax = 5")?;
+let limits = Limits::from_store(&store)?;
+
+{
+    let mut limits = limits.write().await;
+    limits.min = 10;
+    limits.max = 20;
+}
+
+let (min, max) = {
+    let limits = limits.read().await;
+    (limits.min, limits.max)
+};
+assert!(min <= max);
+# Ok(())
+# }
+```
+
+The application must preserve its own invariants: the lock does not validate values or roll back changes if an update fails. It also does not synchronize the scope with the store.
+
+The lock is not reentrant, so drop every guard of a scope before calling its `load` or `save` in the same task. For a derived scope with loaded fields, `load` locks the scope for writing and would wait for a held guard forever. `save` locks it for reading, which waits forever behind a held write guard and, because Tokio's lock is fair, also behind a held read guard while another task is waiting to write. Copy what you need out of a short-lived guard instead, for example `let port = server.read().await.port;`.
 
 The store uses a synchronous [`std::sync::RwLock`] that it holds only inside a single method call, so its in-memory methods need no runtime and cannot deadlock. This assumes relatively small documents and low contention, in line with [Tokio's guidance on synchronous locks](https://tokio.rs/tokio/tutorial/shared-state#on-using-stdsyncmutex-and-tokiosyncmutex):
 
