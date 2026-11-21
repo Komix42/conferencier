@@ -86,12 +86,10 @@ Conferencier supports TOML and uses Tokio for async operations. It does not laye
 
 ## Status and compatibility
 
-The 0.1.x API is in beta. Starting with `0.1.0-beta.1`, each later 0.1.x
-pre-release and release must remain backward compatible with the immediately
-preceding published 0.1.x version; breaking changes are deferred to `0.2.0`.
-Rust 1.85 is supported throughout 0.1.x. See the
-[migration guide](https://docs.rs/conferencier/%5E0.1.0/conferencier/guide/migration/index.html)
-when upgrading from an earlier release.
+The 0.1.x API was introduced in `0.1.0-beta.1`. Later 0.1.x versions remain
+backward compatible with it; breaking changes are deferred to `0.2.0`.
+Rust 1.85 is supported throughout 0.1.x. When upgrading from 0.0.x, see the
+[migration guide](https://docs.rs/conferencier/%5E0.1.0/conferencier/guide/migration/index.html).
 
 ## Learn more
 

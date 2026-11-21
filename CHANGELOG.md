@@ -43,7 +43,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Fixed
 - Corrected the beta installation command and completed error-handling and runtime guidance, including examples for synchronous loading, error sources and selective scope `Debug`.
 
-See the [migration guide from 0.0.8](conferencier/guide/migration.md#from-008-to-010-beta1).
+See the [migration guide from 0.0.8](conferencier/guide/migration.md#from-008-to-01x).
 
 ## [0.0.8] - 2026-11-17
 

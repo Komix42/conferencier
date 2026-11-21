@@ -5,11 +5,12 @@ order. Names in a section refer to the API of that release; for example,
 `ConferModule` in the 0.0.4 instructions becomes `ConfigScope` in 0.0.5.
 Before saving, check that each scope uses the intended TOML section.
 
-## From 0.0.8 to 0.1.0-beta.1
+## From 0.0.8 to 0.1.x
 
-This is the first 0.1.x release and includes breaking API changes. Check
-downstream code that constructs or matches errors, uses typed setters, or relies
-on Tokio features enabled transitively.
+The 0.1.x API was introduced in 0.1.0-beta.1 and includes breaking API changes.
+Later 0.1.x versions need no further migration. Check downstream code that
+constructs or matches errors, uses typed setters, or relies on Tokio features
+enabled transitively.
 
 ### Errors
 
@@ -55,7 +56,7 @@ impl ConfigTable for Settings {
 }
 ```
 
-**After (0.1.0-beta.1):**
+**In 0.1.x:**
 
 ```rust
 # use conferencier::{ConfigTable, Error, Result};
@@ -106,7 +107,7 @@ TOML features, deeply nested untrusted input is rejected with a parse error;
 enabling `toml/unbounded` removes that limit and can allow stack overflow.
 
 Lenient loading followed by saving a scope can remove keys and nested tables
-that are not mapped by that scope. This is existing behavior, not a beta.1
+that are not mapped by that scope. This is existing behavior, not a 0.1.x
 change; see [saving configuration](crate::guide::files) before saving a
 section that may contain keys written by another application version.
 
