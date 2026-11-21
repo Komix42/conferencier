@@ -60,7 +60,7 @@ async fn main() -> conferencier::Result<()> {
 Add `conferencier` and Tokio to your project:
 
 ```sh
-cargo add conferencier@0.1.0
+cargo add conferencier@0.1
 cargo add tokio --features macros,rt-multi-thread
 ```
 
@@ -68,7 +68,7 @@ or to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-conferencier = "0.1.0"
+conferencier = "0.1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -90,6 +90,8 @@ The 0.1.x API was introduced in `0.1.0-beta.1`. Later 0.1.x versions remain
 backward compatible with it; breaking changes are deferred to `0.2.0`.
 Rust 1.85 is supported throughout 0.1.x. When upgrading from 0.0.x, see the
 [migration guide](https://docs.rs/conferencier/%5E0.1.0/conferencier/guide/migration/index.html).
+The workspace uses Cargo resolver 3, which prefers dependency versions
+compatible with Rust 1.85 when resolving a fresh lockfile.
 
 ## Learn more
 

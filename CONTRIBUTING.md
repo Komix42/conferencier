@@ -15,6 +15,10 @@ Thanks for your interest in improving **conferencier**! This quick guide explain
 
    The first command covers the whole workspace, including the trybuild pass cases of the derive macro and the README examples (see [Documentation](#documentation)). The derive macro's compile-fail cases live in `tests/derive-fail/`. Their `.stderr` snapshots follow Rust 1.85 (MSRV), so this suite is ignored by default; run it with `cargo +1.85 test -p derive-fail-tests --locked -- --ignored`. If you change a diagnostic on purpose, rerun that command with the `TRYBUILD=overwrite` environment variable set and review the updated files. CI also runs the suite on stable with `TRYBUILD=overwrite`, which only checks that every case still fails to compile; do not commit snapshots rewritten by a newer Rust.
 
+   Existing trybuild `.rs` cases are frozen compatibility contracts. Add a new
+   case to cover another accepted or rejected input instead of changing an
+   existing case.
+
    The last command runs the otherwise ignored strict-ordering test with `toml/preserve_order`; it checks that the feature actually preserves insertion order before testing the reported key.
 
 3. **Check formatting, lints and docs**:
@@ -42,6 +46,10 @@ The MSRV checks validate both the locked dependency graph and a fresh,
 MSRV-aware dependency resolution in fallback mode on Rust 1.85. The fresh
 resolution uses an isolated lockfile and must not change the workspace
 `Cargo.lock`.
+
+New or upgraded dependencies must keep a fresh resolution buildable on Rust
+1.85; a passing locked build alone is not sufficient. Check the dependency's
+declared MSRV when available and use the fresh-resolution check before merging.
 
 Before publishing `0.1.0-beta.1`, the intentional transition from 0.0.8 was
 audited with `cargo-semver-checks`, using `--release-type minor` explicitly:
@@ -71,6 +79,12 @@ the trybuild pass and fail tests, the packaged-consumer builds below, the exact
 version requirement in `conferencier`, and a manual review of accepted derive
 inputs, generated code and the matching `__private` support.
 
+`ConfigScope` and `ConfigTable` remain open to manual implementations, but
+their required methods, bounds and documented behavior are frozen throughout
+0.1.x. Do not add methods to either trait, even with a default implementation;
+new capabilities belong in standalone functions or a separate opt-in
+extension trait. Adding a core-trait method is reserved for a breaking release.
+
 Before every 0.1.x pre-release or release, also build three downstream
 consumers on Rust 1.85 against the actual packaged `.crate` archives for both
 crates, outside the workspace. A temporary local registry or `[patch]` entries
@@ -98,12 +112,32 @@ the 0.1.x series use the range URL beginning
 development series begins. Before publication, inspect both packaged archives
 and confirm they contain no `docs.rs/conferencier/latest` links.
 
+### Release checklist
+
+Before each 0.1.x pre-release or release:
+
+- [ ] Keep the workspace package versions and the exact `conferencier-derive`
+      requirement in `conferencier` in sync.
+- [ ] Update `CHANGELOG.md` and the migration guide for the candidate.
+- [ ] Confirm CI passes, including the semver, MSRV, packaged-doctest and
+      packaged-consumer checks.
+- [ ] Run the publish dry-run and packaged-consumer commands above.
+- [ ] Verify the direct-use dependencies in `conferencier-derive/README.md`
+      are exact pins to the same candidate version.
+- [ ] Record independent beta-test results and example-application test
+      results in the release PR description.
+
+After publication:
+
+- [ ] Update `baseline-rev` in `.github/workflows/ci.yml` and the matching
+      baseline commands in `docs/LOCAL-CI-FILI.md` to the new tag.
+
 ## Documentation
 
 - **`README.md`** is a short showcase shared by GitHub and crates.io. Cargo copies it into the root of the `conferencier` package, so its links must be absolute URLs. Its Rust code blocks run as doctests of the unpublished `docs-tests` workspace member in `tests/docs/`.
 - **`tests/`** holds unpublished workspace members for test suites that need to test across crates or use repository files. `derive-tests` runs the derive macro's trybuild pass cases against both library crates and checks with clippy that generated code triggers no pedantic lints in user crates; `derive-fail-tests` runs the derive macro's compile-fail cases with Rust 1.85 diagnostics; `docs-tests` runs the README code blocks and the examples of `conferencier-derive`. Those examples live in `conferencier-derive/doc/` and are included into the macro documentation, because the derive package cannot depend on the core crate for its own doctests.
 - **Documentation examples must compile without warnings.** `conferencier` and `docs-tests` run their doctests with `deny(warnings)`; use hidden `# ` lines for setup and to use items the example only defines. Mark a block `ignore` only for code of an old API version in the migration guide.
-- **`conferencier/guide/`** holds the user guide in Markdown. `overview.md` is the crate-level documentation; the other pages become modules of `conferencier::guide` (see `conferencier/src/guide.rs`) and are listed in `index.md`. A new page needs both. The guide is part of the package, so its Rust code blocks run as doctests and its intra-doc links are checked by `cargo doc`; link between pages and to API items with intra-doc links, not with file paths.
+- **`conferencier/guide/`** holds the user guide in Markdown. `overview.md` is the crate-level documentation; the other pages become modules of `conferencier::guide` (see `conferencier/src/guide.rs`) and are listed in `index.md`. A new page needs both. The guide module names are public API; do not remove or rename them during 0.1.x. The guide is part of the package, so its Rust code blocks run as doctests and its intra-doc links are checked by `cargo doc`; link between pages and to API items with intra-doc links, not with file paths.
 - **Migration steps** for every release belong to `conferencier/guide/migration.md`; `CHANGELOG.md` only links to them.
 - **`docs/`** contains the [backlog](docs/BACKLOG.md) and the design records (RFCs, implementation reports and audits) grouped by version series, such as `docs/devel-0.0.x/`.
 - **`examples/`** holds runnable example applications, such as [`uptime-monitor`](examples/uptime-monitor/README.md), [`folder-indexer`](examples/folder-indexer/README.md) and [`modular-agent`](examples/modular-agent/README.md). Each is an unpublished workspace member (`publish = false`) documented in its own `README.md`, so its dependencies stay out of the library crates. The workspace commands above build, lint and test it; run it with `cargo run -p <name>`. Short examples of single features belong to `conferencier/examples/` instead.
