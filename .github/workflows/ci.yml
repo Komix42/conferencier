@@ -9,6 +9,7 @@ on:
     branches:
       - main
       - develop
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -202,6 +203,45 @@ jobs:
           # The unpublished derive crate is patched in, which changes the packaged
           # Cargo.lock, so --locked cannot be used here.
           cargo test --doc --all-features --config "patch.crates-io.conferencier-derive.path='$dir/conferencier-derive-$version'"
+
+      - name: Determine package archive version
+        id: package-version
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 --locked | jq -er '.packages[] | select(.name == "conferencier") | .version')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Upload packaged crates
+        uses: actions/upload-artifact@v4
+        with:
+          name: packaged-crates
+          path: |
+            target/package/conferencier-${{ steps.package-version.outputs.version }}.crate
+            target/package/conferencier-derive-${{ steps.package-version.outputs.version }}.crate
+          if-no-files-found: error
+
+  packaged-consumers:
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.base_ref == 'main')
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download packaged crates
+        uses: actions/download-artifact@v4
+        with:
+          name: packaged-crates
+          path: target/package
+
+      - name: Install Rust toolchain (MSRV)
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: "1.85"
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build downstream consumers against packaged crates
+        run: bash tests/consumers/check.sh
 
   audit:
     runs-on: ubuntu-latest

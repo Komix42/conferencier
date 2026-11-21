@@ -86,7 +86,11 @@ package paths:
    both traits.
 
 All three builds must succeed. This packaged-consumer check is a release gate,
-not a per-pull-request CI job.
+not a per-pull-request CI job. Run it locally with
+`cargo publish --workspace --dry-run --locked`,
+`cargo package -p conferencier -p conferencier-derive --no-verify --locked`,
+then `bash tests/consumers/check.sh`; the latter builds all three consumers
+against the actual archives on Rust 1.85.
 
 Use absolute docs.rs links to versioned documentation, not `/latest/`. During
 the 0.1.x series use the range URL beginning

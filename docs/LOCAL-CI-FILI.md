@@ -38,6 +38,8 @@ cargo +1.85 test -p derive-tests --locked
 cargo +1.85 test -p derive-fail-tests --locked -- --ignored
 cargo audit
 cargo publish --workspace --dry-run --locked
+cargo package -p conferencier -p conferencier-derive --no-verify --locked
+bash tests/consumers/check.sh
 ```
 
 - In PowerShell, set `TRYBUILD` and `RUSTDOCFLAGS` before their commands with
@@ -51,6 +53,9 @@ cargo publish --workspace --dry-run --locked
 - The publish dry run needs network access and a clean working tree. If it
   reports stale sources of the unpublished derive crate, rerun it with a fresh
   temporary `CARGO_HOME`.
+- The packaged-consumer script requires `jq` and `tar`. It packages both crates,
+  builds temporary copies of the three downstream consumers against the archives
+  on Rust 1.85, and removes those temporary copies afterwards.
 - When CI changes, update this list.
 
 ### Fresh MSRV resolution
