@@ -1,0 +1,13 @@
+[package]
+name = "consumer-manual-no-defaults"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+
+[dependencies]
+conferencier = { version = "=@CANDIDATE_VERSION@", default-features = false }
+tokio = { version = "1.39", default-features = false, features = ["sync"] }
+
+[workspace]
+resolver = "3"

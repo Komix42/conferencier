@@ -1,0 +1,12 @@
+[package]
+name = "derive-tests"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Cross-crate trybuild pass tests for conferencier derive macros"
+
+[dev-dependencies]
+conferencier = { path = "../../conferencier" }
+conferencier-derive = { path = "../../conferencier-derive" }
+trybuild = "1.0"

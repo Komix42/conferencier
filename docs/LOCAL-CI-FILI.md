@@ -21,24 +21,64 @@ at a time from the repository root:
 ```sh
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+cargo check -p conferencier --lib --locked
+cargo check -p conferencier --lib --no-default-features --locked
 cargo test --workspace --all-features --locked
 cargo test -p conferencier --no-default-features --locked
-cargo test -p conferencier-derive --locked
 cargo test -p conferencier --features toml/preserve_order --test scope_integration strict_scope_reports_smallest_unknown_key_with_preserved_order --locked -- --ignored
+TRYBUILD=overwrite cargo test -p derive-fail-tests --locked -- --ignored
+git checkout -- tests/derive-fail/tests/trybuild
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
+cargo semver-checks --package conferencier --baseline-rev v0.1.0-beta.1 --release-type minor --default-features
+cargo semver-checks --package conferencier --baseline-rev v0.1.0-beta.1 --release-type minor --only-explicit-features
 cargo +1.85 check --workspace --all-targets --all-features --locked
 cargo +1.85 check -p conferencier --no-default-features --locked
 cargo +1.85 test -p conferencier --all-features --locked
+cargo +1.85 test -p derive-tests --locked
+cargo +1.85 test -p derive-fail-tests --locked -- --ignored
 cargo audit
 cargo publish --workspace --dry-run --locked
+cargo package -p conferencier -p conferencier-derive --no-verify --locked
+bash tests/consumers/check.sh
 ```
 
-- In PowerShell, set `$env:RUSTDOCFLAGS = "-D warnings"` before `cargo doc` and
-  remove it afterwards with `Remove-Item Env:RUSTDOCFLAGS`.
+- In PowerShell, set `TRYBUILD` and `RUSTDOCFLAGS` before their commands with
+  `$env:NAME = "value"` and remove them afterwards with `Remove-Item Env:NAME`.
+- The stable compile-fail check rewrites the snapshots that differ from Rust
+  1.85; the following `git checkout` restores them. It also discards
+  uncommitted snapshot changes, so run the suite on a committed tree.
+- The semver commands require `cargo-semver-checks` on the machine running
+  them (`cargo install cargo-semver-checks --locked` with stable Rust). Keep
+  their baseline tag in sync with CI after each publication.
 - The publish dry run needs network access and a clean working tree. If it
   reports stale sources of the unpublished derive crate, rerun it with a fresh
   temporary `CARGO_HOME`.
+- The packaged-consumer script requires `jq`, `tar` and the archives produced by
+  the preceding `cargo package` command. It builds temporary copies of the
+  three downstream consumers against those archives on Rust 1.85, and removes
+  the temporary copies afterwards.
 - When CI changes, update this list.
+
+### Fresh MSRV resolution
+
+CI also checks a fresh, MSRV-aware dependency resolution on Linux. Run it in
+the Linux clone; it uses the committed `HEAD` and leaves the workspace
+`Cargo.lock` untouched:
+
+```sh
+(
+  set -eu
+  dir=$(mktemp -d)
+  printf 'Fresh checkout: %s\n' "$dir"
+  git archive HEAD | tar -x -C "$dir"
+  rm "$dir/Cargo.lock"
+  cd "$dir"
+  cargo +1.85 check --workspace --all-targets --all-features
+  cargo +1.85 check -p conferencier --no-default-features
+)
+```
+
+The temporary directory can be removed after the check.
 
 ### Packaged doctests
 
@@ -106,5 +146,6 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 source ~/.cargo/env
 rustup toolchain install 1.85
 cargo install cargo-audit --locked
+cargo install cargo-semver-checks --locked
 git clone -b develop /mnt/c/Users/komix/source/conferencier ~/conferencier
 ```

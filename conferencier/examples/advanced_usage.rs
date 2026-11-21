@@ -6,7 +6,7 @@
 //! cargo run --example advanced_usage
 //! ```
 
-use std::{fs, path::PathBuf};
+use std::path::PathBuf;
 
 use conferencier::{ConfigScope, ConfigStore, Datetime, Result};
 use tokio::try_join;
@@ -78,14 +78,11 @@ async fn main() -> Result<()> {
         FeatureToggles::save(&toggles, &store)
     )?;
 
-    // Export the resulting TOML to stdout and to an output file inside `target/`.
+    // Export the resulting TOML to stdout and to a file next to the example binary.
     let snapshot = store.save_str()?;
     println!("\nFinal snapshot:\n{}", snapshot);
 
-    let snapshot_path = example_snapshot_path();
-    if let Some(parent) = snapshot_path.parent() {
-        fs::create_dir_all(parent).map_err(conferencier::Error::from)?;
-    }
+    let snapshot_path = example_snapshot_path()?;
     store.save_file(&snapshot_path).await?;
     println!("Snapshot also written to {}", snapshot_path.display());
 
@@ -131,9 +128,15 @@ async fn retire_beta_features(toggles: &conferencier::SharedScope<FeatureToggles
 }
 
 fn example_config_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/data/advanced_config.toml")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("examples")
+        .join("data")
+        .join("advanced_config.toml")
 }
 
-fn example_snapshot_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/advanced_usage_snapshot.toml")
+/// Places the snapshot next to the example binary (e.g. `target/debug/examples/`),
+/// so it follows `CARGO_TARGET_DIR` and never touches the package sources.
+fn example_snapshot_path() -> Result<PathBuf> {
+    let exe = std::env::current_exe().map_err(conferencier::Error::from)?;
+    Ok(exe.with_file_name("advanced_usage_snapshot.toml"))
 }

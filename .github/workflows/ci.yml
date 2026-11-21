@@ -9,6 +9,7 @@ on:
     branches:
       - main
       - develop
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -47,20 +48,38 @@ jobs:
       - name: Check core library without default features
         run: cargo check -p conferencier --lib --no-default-features --locked
 
+  semver:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        feature_group: [default-features, only-explicit-features]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check public API compatibility
+        uses: obi1kenobi/cargo-semver-checks-action@v2
+        with:
+          package: conferencier
+          feature-group: ${{ matrix.feature_group }}
+          # Update to the latest published 0.1.x tag, including pre-releases.
+          baseline-rev: v0.1.0-beta.1
+          release-type: minor
+
   test:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        test: [workspace-all, core-no-defaults, derive]
+        test: [workspace-all, core-no-defaults]
         include:
           - test: workspace-all
             command: cargo test --workspace --all-features --locked
           - test: core-no-defaults
             command: cargo test -p conferencier --no-default-features --locked
-          - test: derive
-            command: cargo test -p conferencier-derive --locked
     steps:
       - uses: actions/checkout@v4
 
@@ -78,6 +97,14 @@ jobs:
       - name: Test strict key ordering with toml/preserve_order
         if: matrix.test == 'workspace-all'
         run: cargo test -p conferencier --features toml/preserve_order --test scope_integration strict_scope_reports_smallest_unknown_key_with_preserved_order --locked -- --ignored
+
+      # The .stderr snapshots come from the MSRV job; on stable, overwrite mode
+      # only checks that every compile-fail case still fails to compile.
+      - name: Check compile-fail cases still fail on stable
+        if: matrix.test == 'workspace-all' && runner.os == 'Linux'
+        env:
+          TRYBUILD: overwrite
+        run: cargo test -p derive-fail-tests --locked -- --ignored
 
   docs:
     runs-on: ubuntu-latest
@@ -122,9 +149,14 @@ jobs:
       - name: Check core (no default features)
         run: cargo check -p conferencier --no-default-features --locked
 
-      # trybuild tests are skipped here: their .stderr snapshots track stable diagnostics.
       - name: Run core tests
         run: cargo test -p conferencier --all-features --locked
+
+      - name: Run derive pass cases
+        run: cargo test -p derive-tests --locked
+
+      - name: Run compile-fail cases with MSRV snapshots
+        run: cargo test -p derive-fail-tests --locked -- --ignored
 
       - name: Check fresh MSRV dependency resolution
         if: runner.os == 'Linux'
@@ -171,6 +203,45 @@ jobs:
           # The unpublished derive crate is patched in, which changes the packaged
           # Cargo.lock, so --locked cannot be used here.
           cargo test --doc --all-features --config "patch.crates-io.conferencier-derive.path='$dir/conferencier-derive-$version'"
+
+      - name: Determine package archive version
+        id: package-version
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 --locked | jq -er '.packages[] | select(.name == "conferencier") | .version')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Upload packaged crates
+        uses: actions/upload-artifact@v4
+        with:
+          name: packaged-crates
+          path: |
+            target/package/conferencier-${{ steps.package-version.outputs.version }}.crate
+            target/package/conferencier-derive-${{ steps.package-version.outputs.version }}.crate
+          if-no-files-found: error
+
+  packaged-consumers:
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.base_ref == 'main')
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download packaged crates
+        uses: actions/download-artifact@v4
+        with:
+          name: packaged-crates
+          path: target/package
+
+      - name: Install Rust toolchain (MSRV)
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: "1.85"
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build downstream consumers against packaged crates
+        run: bash tests/consumers/check.sh
 
   audit:
     runs-on: ubuntu-latest

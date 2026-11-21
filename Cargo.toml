@@ -1,10 +1,10 @@
 [workspace]
-members = ["conferencier", "conferencier-derive", "readme-tests", "examples/uptime-monitor", "examples/folder-indexer", "examples/modular-agent"]
+members = ["conferencier", "conferencier-derive", "tests/derive", "tests/derive-fail", "tests/docs", "examples/uptime-monitor", "examples/folder-indexer", "examples/modular-agent"]
 default-members = ["conferencier"]
 resolver = "3"
 
 [workspace.package]
-version = "0.1.0-beta.1"
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 authors = ["Komix42 <komix@ignore.cz>"]
@@ -14,5 +14,5 @@ repository = "https://github.com/Komix42/conferencier"
 [workspace.dependencies]
 # Keep the exact version in sync with `workspace.package.version`: generated
 # derive code must match the library's support code (lockstep releases).
-conferencier-derive = { version = "=0.1.0-beta.1", path = "conferencier-derive" }
+conferencier-derive = { version = "=0.1.0", path = "conferencier-derive" }
 toml = "1.2"

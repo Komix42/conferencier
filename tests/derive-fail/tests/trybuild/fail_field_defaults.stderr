@@ -71,12 +71,6 @@ error[E0277]: `Option<Child>` cannot be used as a nested configuration table
    |            ^^^^^^^^^^ the trait `ConfigTable` is not implemented for `Option<Child>`
    |
    = note: derive it with `#[derive(ConfigTable)]` or implement `ConfigTable` manually
-help: the following other types implement trait `ConfigTable`
-  --> tests/trybuild/fail_field_defaults.rs:1:10
-   |
- 1 | #[derive(conferencier_derive::ConfigTable)]
-   |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Child`
-...
-76 | #[derive(conferencier_derive::ConfigTable)]
-   |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `OpaqueOption`
-   = note: this error originates in the derive macro `conferencier_derive::ConfigTable` (in Nightly builds, run with -Z macro-backtrace for more info)
+   = help: the following other types implement trait `ConfigTable`:
+             Child
+             OpaqueOption

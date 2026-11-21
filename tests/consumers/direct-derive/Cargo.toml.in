@@ -1,0 +1,13 @@
+[package]
+name = "consumer-direct-derive"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+
+[dependencies]
+conferencier = { version = "=@CANDIDATE_VERSION@", default-features = false }
+conferencier-derive = { version = "=@CANDIDATE_VERSION@" }
+
+[workspace]
+resolver = "3"

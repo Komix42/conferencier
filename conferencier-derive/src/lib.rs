@@ -33,7 +33,7 @@ use crate::model::DeriveKind;
 /// `#[confer(...)]`, short for *conferencier*, accepts `section = "Name"` and
 /// `deny_unknown_keys` on the struct, and `rename = "key"`, `default`,
 /// `default = <expr>`, `ignore`, `ignore = <expr>`, `table` and `field_defaults`
-/// on fields. The [attribute reference](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/derive/index.html)
+/// on fields. The [attribute reference](https://docs.rs/conferencier/%5E0.1.0/conferencier/guide/derive/index.html)
 /// describes their semantics and the supported field types.
 ///
 /// # Compile-time checks
@@ -42,28 +42,9 @@ use crate::model::DeriveKind;
 /// loaded keys produce compile errors. The struct must satisfy the trait's
 /// `Send + Sync + 'static` bounds. Through 0.1.x, a name such as `ConferApp`
 /// also requires an explicit `section`; see the
-/// [migration guide](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/migration/index.html#from-004-to-005).
+/// [migration guide](https://docs.rs/conferencier/%5E0.1.0/conferencier/guide/migration/index.html#from-004-to-005).
 ///
-/// # Example
-///
-/// ```
-/// use conferencier::{ConfigScope, ConfigStore};
-///
-/// #[derive(ConfigScope)]
-/// #[confer(section = "App")]
-/// struct AppConfig {
-///     #[confer(default = 8080)]
-///     port: u16,
-///     #[confer(ignore)]
-///     requests: u64,
-/// }
-///
-/// let app = AppConfig::from_store(&ConfigStore::new())?;
-/// let state = app.try_read().expect("no other guard exists");
-/// assert_eq!(state.port, 8080);
-/// assert_eq!(state.requests, 0);
-/// # Ok::<(), conferencier::Error>(())
-/// ```
+#[doc = include_str!("../doc/config_scope_example.md")]
 #[proc_macro_derive(ConfigScope, attributes(confer))]
 pub fn scope_derive(input: TokenStream) -> TokenStream {
     expand(input, DeriveKind::Scope)
@@ -81,29 +62,10 @@ pub fn scope_derive(input: TokenStream) -> TokenStream {
 /// Fields accept the same `#[confer(...)]` attributes as [`ConfigScope`]. The struct
 /// accepts `deny_unknown_keys`, which applies only to this type, and rejects
 /// `section` unless it also derives `ConfigScope`. The
-/// [nested tables guide](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/tables/index.html)
+/// [nested tables guide](https://docs.rs/conferencier/%5E0.1.0/conferencier/guide/tables/index.html)
 /// describes table fields and how tables behave on reload.
 ///
-/// # Example
-///
-/// ```
-/// use conferencier::{ConfigTable, Error};
-/// use conferencier::toml::Table;
-///
-/// #[derive(ConfigTable)]
-/// struct Server {
-///     #[confer(default = "localhost".into())]
-///     host: String,
-///     port: u16,
-/// }
-///
-/// let table: Table = "port = 8080".parse().unwrap();
-/// let server = Server::from_table("App.server", table)?;
-/// assert_eq!(server.host, "localhost");
-/// assert_eq!(server.port, 8080);
-/// assert_eq!(server.to_table("App.server")?.len(), 2);
-/// # Ok::<(), Error>(())
-/// ```
+#[doc = include_str!("../doc/config_table_example.md")]
 #[proc_macro_derive(ConfigTable, attributes(confer))]
 pub fn table_derive(input: TokenStream) -> TokenStream {
     expand(input, DeriveKind::Table)

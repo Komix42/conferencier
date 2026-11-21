@@ -103,6 +103,7 @@ impl IoOperation {
 ///         }
 ///     }
 /// }
+/// # report_save_failure(&Error::from(std::io::Error::other("disk full")));
 /// ```
 ///
 /// File methods attach operation and path context to [`Error::Io`]. Converting a
@@ -110,7 +111,7 @@ impl IoOperation {
 /// and `target_path` unset. Callers may update these public context fields after
 /// conversion, or use [`Error::io_error`] or [`Error::io_error_with_operation`]
 /// to supply context, as shown in the
-/// [guide](https://docs.rs/conferencier/%5E0.1.0-beta.1/conferencier/guide/concepts/index.html#reading-a-file-before-the-runtime-starts).
+/// [guide](https://docs.rs/conferencier/%5E0.1.0/conferencier/guide/concepts/index.html#reading-a-file-before-the-runtime-starts).
 ///
 /// # Sensitive diagnostics
 ///

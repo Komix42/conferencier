@@ -1,4 +1,4 @@
-error: unsupported attribute on struct for #[derive(ConfigTable)]
+error: unsupported attribute `rename` on struct for #[derive(ConfigTable)]; supported struct attributes: `section`, `deny_unknown_keys`
  --> tests/trybuild/fail_table_struct.rs:2:10
   |
 2 | #[confer(rename = "Other")]
@@ -22,7 +22,7 @@ error: #[derive(ConfigTable)] requires named fields
 16 | struct Unit;
    |        ^^^^
 
-error: unsupported attribute for #[derive(ConfigTable)]
+error: unsupported attribute `flatten` for #[derive(ConfigTable)]; supported field attributes: `rename`, `default`, `field_defaults`, `ignore`, `table`
   --> tests/trybuild/fail_table_struct.rs:20:14
    |
 20 |     #[confer(flatten)]

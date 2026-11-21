@@ -15,7 +15,7 @@ use crate::model::{
 pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
     let Scope {
         ident,
-        generics,
+        mut generics,
         section,
         section_span,
         deny_unknown_keys,
@@ -23,6 +23,15 @@ pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
     } = scope;
 
     let section_lit = LitStr::new(&section, Span::call_site());
+    // Make the trait's bounds explicit so failures do not cascade through generated futures.
+    let (_, ty_generics, _) = generics.split_for_impl();
+    let scope_type: syn::Type = syn::parse_quote!(#ident #ty_generics);
+    generics
+        .make_where_clause()
+        .predicates
+        .push(syn::parse_quote!(
+            #scope_type: ::core::marker::Send + ::core::marker::Sync + 'static
+        ));
     let path = generated_local("path");
     let path_expr = quote! { &#path };
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
@@ -52,8 +61,14 @@ pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
     let shared_scope = quote! { #crate_path::SharedScope<Self> };
     let result_type = quote! { #crate_path::Result };
     let table_type = quote! { #crate_path::toml::Table };
+    // The desugared form of `async fn`; clippy's `unused_async_trait_impl` would flag an
+    // `async fn` without `.await` in a scope that has only ignored fields.
+    let future_type = quote! {
+        impl ::core::future::Future<Output = #result_type<()>> + ::core::marker::Send
+    };
     let section_marker = section_span.map(|_| {
         quote! {
+            #[automatically_derived]
             impl #impl_generics #crate_path::__private::DerivedConfigScope
                 for #ident #ty_generics #where_clause {}
         }
@@ -89,8 +104,9 @@ pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
         TokenStream::new()
     } else {
         quote! {
-            let mut #guard = #scope.write().await;
+            let mut #guard = #crate_private::RwLock::write(#scope).await;
             #( #guard.#loaded_idents = #loaded_locals; )*
+            ::core::mem::drop(#guard);
         }
     };
 
@@ -99,9 +115,10 @@ pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
     } else {
         quote! {
             {
-                let #guard = #scope.read().await;
+                let #guard = #crate_private::RwLock::read(#scope).await;
                 let mut #table = #table_type::new();
                 #( #store_statements )*
+                ::core::mem::drop(#guard);
                 #table
             }
         }
@@ -110,6 +127,7 @@ pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
     Ok(quote! {
         #section_marker
 
+        #[automatically_derived]
         impl #impl_generics #crate_path::ConfigScope for #ident #ty_generics #where_clause {
             fn from_store(#store: &#store_type) -> #result_type<#shared_scope> {
                 #path_binding
@@ -120,19 +138,23 @@ pub fn generate(scope: Scope, crate_path: syn::Path) -> Result<TokenStream> {
                 ::core::result::Result::Ok(#crate_private::new_shared_scope(#value))
             }
 
-            async fn load(#scope: &#shared_scope, #store: &#store_type) -> #result_type<()> {
-                #path_binding
-                #snapshot
-                #unknown_key_check
-                #( #load_statements )*
-                #assign
-                ::core::result::Result::Ok(())
+            fn load(#scope: &#shared_scope, #store: &#store_type) -> #future_type {
+                async move {
+                    #path_binding
+                    #snapshot
+                    #unknown_key_check
+                    #( #load_statements )*
+                    #assign
+                    ::core::result::Result::Ok(())
+                }
             }
 
-            async fn save(#scope: &#shared_scope, #store: &#store_type) -> #result_type<()> {
-                #path_binding
-                let #table = #section_table;
-                #store.set_section(#section_lit, #table)
+            fn save(#scope: &#shared_scope, #store: &#store_type) -> #future_type {
+                async move {
+                    #path_binding
+                    let #table = #section_table;
+                    #crate_path::ConfigStore::set_section(#store, #section_lit, #table)
+                }
             }
         }
     })
@@ -215,6 +237,7 @@ pub fn generate_table(scope: Scope, crate_path: syn::Path) -> Result<TokenStream
     };
 
     Ok(quote! {
+        #[automatically_derived]
         impl #impl_generics #crate_path::ConfigTable for #ident #ty_generics #where_clause {
             fn from_table(#from_params) -> #result_type<Self> {
                 #section_check
@@ -360,7 +383,7 @@ fn load_statements(
             };
             let absent = absent_value(optional, fallback.as_ref(), path, &key, crate_path);
             Ok(quote! {
-                let #local = match #table.remove(#key) {
+                let #local = match #crate_path::toml::Table::remove(&mut #table, #key) {
                     ::core::option::Option::Some(#value) => #present,
                     ::core::option::Option::None => #absent,
                 };
@@ -412,7 +435,13 @@ fn scalar_insert(
 ) -> TokenStream {
     let local_value = generated_local("value");
     let insert = |value: TokenStream| {
-        quote! { #table.insert(::std::string::String::from(#key), #value); }
+        quote! {
+            #crate_path::toml::Table::insert(
+                &mut #table,
+                ::std::string::String::from(#key),
+                #value,
+            );
+        }
     };
     match kind.container {
         ContainerKind::Plain => insert(scalar_to_value(&kind.scalar, path, key, crate_path, None)),
@@ -476,10 +505,17 @@ fn table_from_value(
             {
                 let #value = #private::array(#path, #key, #value)?;
                 let #array_path = #private::child_path(#path, #key);
-                let mut #out = ::std::vec::Vec::with_capacity(#value.len());
-                for (#index, #value) in #value.into_iter().enumerate() {
+                let mut #out = ::std::vec::Vec::with_capacity(
+                    ::std::vec::Vec::len(&#value),
+                );
+                for (#index, #value) in ::core::iter::Iterator::enumerate(
+                    ::core::iter::IntoIterator::into_iter(#value),
+                ) {
                     let #value = #private::table_element(#path, #key, #value, #index)?;
-                    #out.push(#from_table(&#private::element_path(&#array_path, #index), #value)?);
+                    ::std::vec::Vec::push(
+                        &mut #out,
+                        #from_table(&#private::element_path(&#array_path, #index), #value)?,
+                    );
                 }
                 #out
             }
@@ -505,7 +541,8 @@ fn table_insert(
     let array_path = generated_local("array_path");
     let index = generated_local("index");
     let insert_nested = quote! {
-        #table.insert(
+        #crate_path::toml::Table::insert(
+            &mut #table,
             ::std::string::String::from(#key),
             #value_type::Table(#to_table(#value, &#private::child_path(#path, #key))?),
         );
@@ -519,13 +556,24 @@ fn table_insert(
         },
         TableContainer::Vec => quote! {
             let #array_path = #private::child_path(#path, #key);
-            let mut #array = ::std::vec::Vec::with_capacity(#value.len());
-            for (#index, #value) in #value.iter().enumerate() {
-                #array.push(#value_type::Table(
-                    #to_table(#value, &#private::element_path(&#array_path, #index))?,
-                ));
+            let mut #array = ::std::vec::Vec::with_capacity(
+                ::std::vec::Vec::len(#value),
+            );
+            for (#index, #value) in ::core::iter::Iterator::enumerate(
+                <[_]>::iter(#value),
+            ) {
+                ::std::vec::Vec::push(
+                    &mut #array,
+                    #value_type::Table(
+                        #to_table(#value, &#private::element_path(&#array_path, #index))?,
+                    ),
+                );
             }
-            #table.insert(::std::string::String::from(#key), #value_type::Array(#array));
+            #crate_path::toml::Table::insert(
+                &mut #table,
+                ::std::string::String::from(#key),
+                #value_type::Array(#array),
+            );
         },
     }
 }
@@ -647,9 +695,13 @@ fn vec_to_value(
     let element = scalar_to_value(scalar, path, key, crate_path, Some(quote! { #index }));
     quote! {
         {
-            let mut #array = ::std::vec::Vec::with_capacity(#value.len());
-            for (#index, #value) in #value.iter().enumerate() {
-                #array.push(#element);
+            let mut #array = ::std::vec::Vec::with_capacity(
+                ::std::vec::Vec::len(#value),
+            );
+            for (#index, #value) in ::core::iter::Iterator::enumerate(
+                <[_]>::iter(#value),
+            ) {
+                ::std::vec::Vec::push(&mut #array, #element);
             }
             #crate_path::toml::Value::Array(#array)
         }
@@ -730,7 +782,7 @@ fn float_from_store(
             quote! {
                 {
                     let #raw = #value;
-                    if #raw.is_finite()
+                    if ::core::primitive::f64::is_finite(#raw)
                         && (#raw < ::core::primitive::f32::MIN as ::core::primitive::f64
                             || #raw > ::core::primitive::f32::MAX as ::core::primitive::f64)
                     {
@@ -763,10 +815,14 @@ fn integer_vec_from_store(
     let v = generated_local("v");
     quote! {
         {
-            let mut #out = ::std::vec::Vec::with_capacity(#value.len());
-            for (#index, #raw) in #value.into_iter().enumerate() {
+            let mut #out = ::std::vec::Vec::with_capacity(
+                ::std::vec::Vec::len(&#value),
+            );
+            for (#index, #raw) in ::core::iter::Iterator::enumerate(
+                ::core::iter::IntoIterator::into_iter(#value),
+            ) {
                 match <#scalar as ::core::convert::TryFrom<::core::primitive::i64>>::try_from(#raw) {
-                    ::core::result::Result::Ok(#v) => #out.push(#v),
+                    ::core::result::Result::Ok(#v) => ::std::vec::Vec::push(&mut #out, #v),
                     ::core::result::Result::Err(_) => {
                         return ::core::result::Result::Err(#err::value_parse_error(
                             #path,
@@ -802,9 +858,13 @@ fn float_vec_from_store(
             let err = quote! { #crate_path::Error };
             quote! {
                 {
-                    let mut #out = ::std::vec::Vec::with_capacity(#value.len());
-                    for (#index, #raw) in #value.into_iter().enumerate() {
-                        if #raw.is_finite()
+                    let mut #out = ::std::vec::Vec::with_capacity(
+                        ::std::vec::Vec::len(&#value),
+                    );
+                    for (#index, #raw) in ::core::iter::Iterator::enumerate(
+                        ::core::iter::IntoIterator::into_iter(#value),
+                    ) {
+                        if ::core::primitive::f64::is_finite(#raw)
                             && (#raw < ::core::primitive::f32::MIN as ::core::primitive::f64
                                 || #raw > ::core::primitive::f32::MAX as ::core::primitive::f64)
                         {
@@ -817,7 +877,10 @@ fn float_vec_from_store(
                                 ),
                             ));
                         }
-                        #out.push(#raw as ::core::primitive::f32);
+                        ::std::vec::Vec::push(
+                            &mut #out,
+                            #raw as ::core::primitive::f32,
+                        );
                     }
                     #out
                 }

@@ -1,8 +1,8 @@
 # conferencier
 
-Conferencier is a minimal, easy-to-use TOML configuration library for Tokio applications. It maps typed Rust structs to TOML sections, nested tables and arrays of tables, and shares each component's configuration and runtime state through an explicit [`SharedScope`](crate::SharedScope) handle.
+Conferencier is a minimal, easy-to-use TOML configuration library for Tokio applications. It maps typed Rust structs to TOML sections, nested tables and arrays of tables, and shares each component's configuration and runtime state through an explicit [`SharedScope`] handle.
 
-The [guide](crate::guide) explains how the store, scopes and tables work together, how to use derive attributes, and how to migrate between releases. The [API reference](crate) documents each public type and method.
+The [guide] explains how the store, scopes and tables work together, how to use derive attributes, and how to migrate between releases. The [API reference](crate) documents each public type and method.
 
 Conferencier does not layer configuration sources, watch files or validate application-specific rules. Saving a scope replaces its section; serializing the store does not preserve comments or formatting. See [saving to files](crate::guide::files) for details.
 

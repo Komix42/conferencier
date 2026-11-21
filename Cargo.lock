@@ -74,7 +74,7 @@ checksum = "2fd1289c04a9ea8cb22300a459a72a385d7c73d3259e2ed7dcb2af674838cfa9"
 
 [[package]]
 name = "conferencier"
-version = "0.1.0-beta.1"
+version = "0.1.0"
 dependencies = [
  "conferencier-derive",
  "tempfile",
@@ -84,14 +84,38 @@ dependencies = [
 
 [[package]]
 name = "conferencier-derive"
-version = "0.1.0-beta.1"
+version = "0.1.0"
 dependencies = [
- "conferencier",
  "proc-macro-crate",
  "proc-macro2",
  "quote",
  "syn 3.0.9",
+]
+
+[[package]]
+name = "derive-fail-tests"
+version = "0.0.0"
+dependencies = [
+ "conferencier",
+ "conferencier-derive",
  "trybuild",
+]
+
+[[package]]
+name = "derive-tests"
+version = "0.0.0"
+dependencies = [
+ "conferencier",
+ "conferencier-derive",
+ "trybuild",
+]
+
+[[package]]
+name = "docs-tests"
+version = "0.0.0"
+dependencies = [
+ "conferencier",
+ "tokio",
 ]
 
 [[package]]
@@ -369,14 +393,6 @@ name = "r-efi"
 version = "5.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
-
-[[package]]
-name = "readme-tests"
-version = "0.0.0"
-dependencies = [
- "conferencier",
- "tokio",
-]
 
 [[package]]
 name = "rustix"

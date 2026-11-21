@@ -6,68 +6,8 @@ Unlike the RFCs and implementation reports in the version folders such as [`deve
 
 Each entry states the problem, a possible direction and where it comes from.
 
-## Planned for 0.1.0-beta.1
-
-Publish the implemented API changes as a candidate for the stable 0.1.0 API. No new configuration features are added.
-
-`0.1.0-beta.1` is the first release covered by the 0.1.x compatibility
-commitment. Under the compatibility policy in RFC-0011, each subsequent 0.1.x
-pre-release and release must remain backward compatible with the immediately
-preceding published 0.1.x version; a necessary breaking change is deferred to
-0.2.0. The exact `=` requirement on `conferencier-derive` makes beta
-dependencies resolve to that precise derive release rather than a later beta.
-
-### Beta.1 release steps
-
-1. ~~**Review and finalize.**~~ Done: the AUDIT-002 fixes are in, and
-   [AUDIT-001](./devel-0.0.x/AUDIT-001_quality_0.0.8.md) and
-   [AUDIT-002](./devel-0.1.x/AUDIT-002_quality_0.1.0-beta.1.md) are closed with
-   a resolution for each finding.
-2. ~~**Verify the final candidate locally.**~~ Done on commit `dce7a23`; later
-   commits change only documents that are not packaged. If the candidate
-   changes, rerun the affected checks.
-   - All local CI equivalents passed on Windows (stable 1.99.1) and Linux
-     (WSL, stable 1.100.0), including Rust 1.85 with locked and fresh
-     resolutions, `cargo audit`, packaged doctests and publish dry-runs. Not
-     tested locally: macOS, and on Windows the fresh 1.85 resolution and the
-     packaged doctests, which CI also runs only on Linux.
-   - `cargo-semver-checks` 0.51.0 against 0.0.8 reported the same breaks with
-     and without default features: renamed key-error constructors and the
-     `path` field, tuple-to-struct `Parse` and `Serialize`, and
-     `#[non_exhaustive]` error variants. All are intentional and covered by the
-     changelog and migration guide. Manual review: derive inputs are unchanged
-     apart from diagnostics, generated code uses absolute paths, and
-     `__private` changed only a parameter name. The checker cannot check the
-     proc-macro crate `conferencier-derive`.
-   - The three consumers from
-     [CONTRIBUTING.md](../CONTRIBUTING.md#01x-compatibility-and-release-checks)
-     built and ran on Rust 1.85 against the packaged archives. The packaged
-     core requires `conferencier-derive = "=0.1.0-beta.1"`, and neither archive
-     contains `docs.rs/conferencier/latest` links.
-3. **Publish beta.1**: date the `[Unreleased]` changelog section as
-   `0.1.0-beta.1`, merge `develop` into `main`, and publish both crates.
-
-### Stable 0.1.0 exit criteria
-
-Publish stable `0.1.0` only when all of the following hold:
-
-- The beta release steps above are complete, including the final checks, exact
-  derive requirement and closure of AUDIT-001 and AUDIT-002.
-- The example applications have been built and tested against the beta API.
-- All CI jobs pass on the release candidate, including cross-platform tests,
-  MSRV checks, packaged doctests and publish dry-runs for both crates. The three
-  packaged-consumer checks in [CONTRIBUTING.md](../CONTRIBUTING.md) also pass on
-  Rust 1.85.
-- The semver CI check against the immediately preceding published 0.1.x tag,
-  including pre-releases, passes.
-- The README development status, changelog and migration guide describe the
-  stable release accurately, and no known breaking change remains for 0.1.x.
-
-The section-name migration guard stays until 0.2.0.
-
 ## Technical debt
 
-- **Semver CI after beta.1.** Before the first release after `0.1.0-beta.1`, add `cargo-semver-checks` to CI, checking `conferencier` with and without default features; the proc-macro crate `conferencier-derive` cannot be checked by it. Compare each candidate against the immediately preceding published 0.1.x tag, including pre-releases, with `--release-type minor`, and advance the baseline after each release. Origin: [RFC-0011](./devel-0.1.x/RFC-0011_api_polish_before_0.1.md).
 - **Temporary section-name migration guard.** Following [RFC-0005](./devel-0.0.x/RFC-0005_api_redesign.md), `ConfigScope` derives in 0.0.5 and later 0.0.x and 0.1.x releases whose implicit section was affected by the old `Confer` prefix rule require an explicit section. Remove the guard in 0.2.0, and warn in its migration notes that a direct upgrade from 0.0.4 bypasses the guard. Origin: RFC-0005 N7.
 
 ## Ideas
@@ -105,6 +45,14 @@ The README's [Project scope](../README.md#project-scope) lists these as intentio
 
 ## Done
 
+<!-- Keep these anchors for links from RFC-0011 and AUDIT-002. -->
+<a name="planned-for-010-beta1"></a>
+<a name="beta1-release-steps"></a>
+<a name="stable-010-exit-criteria"></a>
+
+- **0.1.0-beta.1 release preparation**: completed; ongoing 0.1.x release checks are documented in the [release checklist](../CONTRIBUTING.md#release-checklist), and the compatibility policy is in the [README](../README.md#status-and-compatibility).
+- **Semver CI after beta.1**: added for `0.1.0` ([RFC-0011](./devel-0.1.x/RFC-0011_api_polish_before_0.1.md)).
+- **0.1.0-beta.1 release**: published after review and verification ([release](https://github.com/Komix42/conferencier/releases/tag/v0.1.0-beta.1), [release plan](https://github.com/Komix42/conferencier/blob/v0.1.0-beta.1/docs/BACKLOG.md#beta1-release-steps)).
 - **AUDIT-002 fixes before the API freeze (A1, B1–B3, A2 documentation)**: completed for `0.1.0-beta.1` ([AUDIT-002](./devel-0.1.x/AUDIT-002_quality_0.1.0-beta.1.md)).
 - **RFC-0011 and internal 0.0.8 audit fixes (A1–A8, B1–B5)**: implemented and documented for `0.1.0-beta.1` ([RFC-0011](./devel-0.1.x/RFC-0011_api_polish_before_0.1.md), [AUDIT-001](./devel-0.0.x/AUDIT-001_quality_0.0.8.md)).
 - **Modular agent example application**: completed in 0.0.8 ([`examples/modular-agent`](../examples/modular-agent/README.md)).
