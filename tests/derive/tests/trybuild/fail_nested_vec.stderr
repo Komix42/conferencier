@@ -1,5 +1,0 @@
-error: nested vectors are not supported; for arrays of nested TOML tables, use #[confer(table)] with an element type that implements ConfigTable
- --> tests/trybuild/fail_nested_vec.rs:3:17
-  |
-3 |     values: Vec<Vec<u8>>,
-  |                 ^^^

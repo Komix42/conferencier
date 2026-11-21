@@ -1,5 +1,0 @@
-error: unexpected end of input, expected an expression
- --> tests/trybuild/fail_ignore_expr_syntax.rs:3:23
-  |
-3 |     #[confer(ignore = )]
-  |                       ^

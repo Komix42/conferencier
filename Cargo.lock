@@ -93,7 +93,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "derive-msrv-tests"
+name = "derive-fail-tests"
 version = "0.0.0"
 dependencies = [
  "conferencier",

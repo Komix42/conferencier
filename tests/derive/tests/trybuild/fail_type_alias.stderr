@@ -1,5 +1,0 @@
-error: unsupported field type `Port`; supported types are recognized by their final path segment and type aliases are opaque. Nested table fields require #[confer(table)] and an implementation of ConfigTable
- --> tests/trybuild/fail_type_alias.rs:5:11
-  |
-5 |     port: Port,
-  |           ^^^^

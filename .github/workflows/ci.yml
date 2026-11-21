@@ -73,14 +73,12 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        test: [workspace-all, core-no-defaults, derive]
+        test: [workspace-all, core-no-defaults]
         include:
           - test: workspace-all
             command: cargo test --workspace --all-features --locked
           - test: core-no-defaults
             command: cargo test -p conferencier --no-default-features --locked
-          - test: derive
-            command: cargo test -p conferencier-derive -p derive-tests --locked
     steps:
       - uses: actions/checkout@v4
 
@@ -98,6 +96,14 @@ jobs:
       - name: Test strict key ordering with toml/preserve_order
         if: matrix.test == 'workspace-all'
         run: cargo test -p conferencier --features toml/preserve_order --test scope_integration strict_scope_reports_smallest_unknown_key_with_preserved_order --locked -- --ignored
+
+      # The .stderr snapshots come from the MSRV job; on stable, overwrite mode
+      # only checks that every compile-fail case still fails to compile.
+      - name: Check compile-fail cases still fail on stable
+        if: matrix.test == 'workspace-all' && runner.os == 'Linux'
+        env:
+          TRYBUILD: overwrite
+        run: cargo test -p derive-fail-tests --locked -- --ignored
 
   docs:
     runs-on: ubuntu-latest
@@ -145,8 +151,11 @@ jobs:
       - name: Run core tests
         run: cargo test -p conferencier --all-features --locked
 
-      - name: Run trybuild tests with MSRV snapshots
-        run: cargo test -p derive-msrv-tests --locked -- --ignored
+      - name: Run derive pass cases
+        run: cargo test -p derive-tests --locked
+
+      - name: Run compile-fail cases with MSRV snapshots
+        run: cargo test -p derive-fail-tests --locked -- --ignored
 
       - name: Check fresh MSRV dependency resolution
         if: runner.os == 'Linux'

@@ -1,10 +1,10 @@
 [package]
-name = "derive-msrv-tests"
+name = "derive-fail-tests"
 version = "0.0.0"
 edition.workspace = true
 rust-version.workspace = true
 publish = false
-description = "trybuild tests for conferencier derive macros with MSRV (Rust 1.85) diagnostics"
+description = "trybuild compile-fail tests for conferencier derive macros with MSRV (Rust 1.85) diagnostics"
 
 [dev-dependencies]
 conferencier = { path = "../../conferencier" }
