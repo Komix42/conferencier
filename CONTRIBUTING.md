@@ -48,8 +48,12 @@ resolution uses an isolated lockfile and must not change the workspace
 `Cargo.lock`.
 
 New or upgraded dependencies must keep a fresh resolution buildable on Rust
-1.85; a passing locked build alone is not sufficient. Check the dependency's
-declared MSRV when available and use the fresh-resolution check before merging.
+1.85; a passing locked build alone is not sufficient. Run the fresh-resolution
+check before merging. The minimum version allowed by a new dependency
+requirement or a raised lower bound must itself support Rust 1.85. Check that
+version's declared `rust-version`, or verify its compatibility if none is
+declared; a fresh resolution typically chooses newer versions and does not
+check the minimum.
 
 Before publishing `0.1.0-beta.1`, the intentional transition from 0.0.8 was
 audited with `cargo-semver-checks`, using `--release-type minor` explicitly:
@@ -83,7 +87,10 @@ inputs, generated code and the matching `__private` support.
 their required methods, bounds and documented behavior are frozen throughout
 0.1.x. Do not add methods to either trait, even with a default implementation;
 new capabilities belong in standalone functions or a separate opt-in
-extension trait. Adding a core-trait method is reserved for a breaking release.
+extension trait, or a new trait implemented by the derive macros. Adding a
+core-trait method is reserved for a breaking release. `cargo-semver-checks`
+does not report added methods with default implementations, so this rule also
+requires manual review.
 
 Before every 0.1.x pre-release or release, also build three downstream
 consumers on Rust 1.85 against the actual packaged `.crate` archives for both
@@ -99,8 +106,10 @@ package paths:
    candidate version, import both macros from `conferencier-derive`, and derive
    both traits.
 
-All three builds must succeed. This packaged-consumer check is a release gate,
-not a per-pull-request CI job. Run it locally with
+All three consumers pin `conferencier` to the exact candidate version, so a
+newer registry release cannot supersede the archive patch. All three builds
+must succeed. This packaged-consumer check is a release gate, not a
+per-pull-request CI job. Run it locally with
 `cargo publish --workspace --dry-run --locked`,
 `cargo package -p conferencier -p conferencier-derive --no-verify --locked`,
 then `bash tests/consumers/check.sh`; the latter builds all three consumers
@@ -116,29 +125,38 @@ and confirm they contain no `docs.rs/conferencier/latest` links.
 
 Before each 0.1.x pre-release or release:
 
-- [ ] Keep the workspace package versions and the exact `conferencier-derive`
-      requirement in `conferencier` in sync.
-- [ ] Update `CHANGELOG.md` and the migration guide for the candidate.
+- [ ] Keep the workspace package versions, `Cargo.lock` and the exact
+      `conferencier-derive` requirement in `conferencier` in sync.
+- [ ] Prepare `CHANGELOG.md` and review the documentation for the candidate.
+      Add migration notes to the guide only when migration steps are needed.
 - [ ] Confirm CI passes, including the semver, MSRV, packaged-doctest and
       packaged-consumer checks.
 - [ ] Run the publish dry-run and packaged-consumer commands above.
 - [ ] Verify the direct-use dependencies in `conferencier-derive/README.md`
       are exact pins to the same candidate version.
-- [ ] Record independent beta-test results and example-application test
-      results in the release PR description.
+- [ ] Record packaged-consumer and example-application test results in the
+      release PR description; include independent beta feedback if available.
+
+During publication:
+
+- [ ] Publish `conferencier-derive` before `conferencier`, and wait until the
+      matching derive version is available on crates.io before publishing core.
 
 After publication:
 
+- [ ] Tag the release commit and create the matching GitHub release.
 - [ ] Update `baseline-rev` in `.github/workflows/ci.yml` and the matching
       baseline commands in `docs/LOCAL-CI-FILI.md` to the new tag.
+- [ ] Replace completed backlog items with versioned one-line notes under
+      `Done`, including the 0.1.0 release plan after the stable release.
 
 ## Documentation
 
 - **`README.md`** is a short showcase shared by GitHub and crates.io. Cargo copies it into the root of the `conferencier` package, so its links must be absolute URLs. Its Rust code blocks run as doctests of the unpublished `docs-tests` workspace member in `tests/docs/`.
 - **`tests/`** holds unpublished workspace members for test suites that need to test across crates or use repository files. `derive-tests` runs the derive macro's trybuild pass cases against both library crates and checks with clippy that generated code triggers no pedantic lints in user crates; `derive-fail-tests` runs the derive macro's compile-fail cases with Rust 1.85 diagnostics; `docs-tests` runs the README code blocks and the examples of `conferencier-derive`. Those examples live in `conferencier-derive/doc/` and are included into the macro documentation, because the derive package cannot depend on the core crate for its own doctests.
 - **Documentation examples must compile without warnings.** `conferencier` and `docs-tests` run their doctests with `deny(warnings)`; use hidden `# ` lines for setup and to use items the example only defines. Mark a block `ignore` only for code of an old API version in the migration guide.
-- **`conferencier/guide/`** holds the user guide in Markdown. `overview.md` is the crate-level documentation; the other pages become modules of `conferencier::guide` (see `conferencier/src/guide.rs`) and are listed in `index.md`. A new page needs both. The guide module names are public API; do not remove or rename them during 0.1.x. The guide is part of the package, so its Rust code blocks run as doctests and its intra-doc links are checked by `cargo doc`; link between pages and to API items with intra-doc links, not with file paths.
-- **Migration steps** for every release belong to `conferencier/guide/migration.md`; `CHANGELOG.md` only links to them.
+- **`conferencier/guide/`** holds the user guide in Markdown. `overview.md` is the crate-level documentation; the other pages become modules of `conferencier::guide` (see `conferencier/src/guide.rs`) and are listed in `index.md`. A new page needs both. The guide module names are public API; pages may be added but not removed, renamed or merged during 0.1.x. The guide is part of the package, so its Rust code blocks run as doctests and its intra-doc links are checked by `cargo doc`; link between pages and to API items with intra-doc links, not with file paths.
+- **Migration steps**, when needed, belong to `conferencier/guide/migration.md`; `CHANGELOG.md` only links to them.
 - **`docs/`** contains the [backlog](docs/BACKLOG.md) and the design records (RFCs, implementation reports and audits) grouped by version series, such as `docs/devel-0.0.x/`.
 - **`examples/`** holds runnable example applications, such as [`uptime-monitor`](examples/uptime-monitor/README.md), [`folder-indexer`](examples/folder-indexer/README.md) and [`modular-agent`](examples/modular-agent/README.md). Each is an unpublished workspace member (`publish = false`) documented in its own `README.md`, so its dependencies stay out of the library crates. The workspace commands above build, lint and test it; run it with `cargo run -p <name>`. Short examples of single features belong to `conferencier/examples/` instead.
 

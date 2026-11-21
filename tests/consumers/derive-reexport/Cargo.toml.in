@@ -6,7 +6,7 @@ rust-version = "1.85"
 publish = false
 
 [dependencies]
-conferencier = { version = "@CANDIDATE_VERSION@" }
+conferencier = { version = "=@CANDIDATE_VERSION@" }
 
 [workspace]
 resolver = "3"

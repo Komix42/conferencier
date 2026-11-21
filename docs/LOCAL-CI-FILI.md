@@ -53,9 +53,10 @@ bash tests/consumers/check.sh
 - The publish dry run needs network access and a clean working tree. If it
   reports stale sources of the unpublished derive crate, rerun it with a fresh
   temporary `CARGO_HOME`.
-- The packaged-consumer script requires `jq` and `tar`. It packages both crates,
-  builds temporary copies of the three downstream consumers against the archives
-  on Rust 1.85, and removes those temporary copies afterwards.
+- The packaged-consumer script requires `jq`, `tar` and the archives produced by
+  the preceding `cargo package` command. It builds temporary copies of the
+  three downstream consumers against those archives on Rust 1.85, and removes
+  the temporary copies afterwards.
 - When CI changes, update this list.
 
 ### Fresh MSRV resolution

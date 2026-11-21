@@ -36,6 +36,7 @@ done
 tar -xzf "$target_dir/package/conferencier-$version.crate" -C "$package_dir"
 tar -xzf "$target_dir/package/conferencier-derive-$version.crate" -C "$package_dir"
 
+# Exact fixture requirements prevent a newer registry release from superseding the patch.
 for consumer in derive-reexport manual-no-defaults direct-derive; do
     destination="$consumer_dir/$consumer"
     mkdir -p "$destination"

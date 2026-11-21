@@ -93,6 +93,12 @@ Rust 1.85 is supported throughout 0.1.x. When upgrading from 0.0.x, see the
 The workspace uses Cargo resolver 3, which prefers dependency versions
 compatible with Rust 1.85 when resolving a fresh lockfile.
 
+If your project targets Rust 1.85, declare `rust-version = "1.85"` for its
+packages and use Cargo resolver 3 (the default for an edition 2024 root
+package; virtual workspaces must set it explicitly), or configure
+`resolver.incompatible-rust-versions = "fallback"` in `.cargo/config.toml`.
+Resolution prefers compatible versions but cannot guarantee that one exists.
+
 ## Learn more
 
 - [Guide and API reference](https://docs.rs/conferencier/%5E0.1.0/conferencier/), including [concepts](https://docs.rs/conferencier/%5E0.1.0/conferencier/guide/concepts/index.html), the [derive attributes](https://docs.rs/conferencier/%5E0.1.0/conferencier/guide/derive/index.html), and [migration guides](https://docs.rs/conferencier/%5E0.1.0/conferencier/guide/migration/index.html).
